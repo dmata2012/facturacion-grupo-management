@@ -2552,46 +2552,78 @@ async function procesarXMLsMasivos(files) {
 }
 
 function parseCFDIxml(xmlText, filename) {
+  const errores = [];
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(xmlText, 'text/xml');
-    if (doc.querySelector('parsererror')) return { filename, ok: false, error: 'XML malformado' };
+
+    if (doc.querySelector('parsererror')) {
+      return { filename, ok: false, errores: [{
+        campo: 'Estructura XML',
+        descripcion: 'El archivo tiene errores de sintaxis XML',
+        correccion: 'Verifique que el archivo no esté dañado o incompleto. Descárguelo de nuevo desde el SAT o su sistema de facturación.'
+      }]};
+    }
 
     const comp = doc.querySelector('Comprobante');
-    if (!comp) return { filename, ok: false, error: 'No es un CFDI' };
+    if (!comp) {
+      return { filename, ok: false, errores: [{
+        campo: 'Comprobante',
+        descripcion: 'No contiene el elemento raíz de un CFDI (<cfdi:Comprobante>)',
+        correccion: 'Este archivo XML no es una factura electrónica del SAT. Solo se pueden importar archivos CFDI válidos.'
+      }]};
+    }
 
     const emisor   = doc.querySelector('Emisor');
     const receptor = doc.querySelector('Receptor');
     const tfd      = doc.querySelector('TimbreFiscalDigital');
     const concepto = doc.querySelector('Concepto');
 
+    // Validaciones de campos obligatorios
+    if (!emisor)                         errores.push({ campo: 'Emisor',    descripcion: 'Falta el nodo <Emisor>',                        correccion: 'El CFDI no tiene datos del emisor. Solicite un archivo válido.' });
+    else if (!emisor.getAttribute('Rfc')) errores.push({ campo: 'RFC Emisor', descripcion: 'El Emisor no tiene RFC',                      correccion: 'Abra el XML y verifique que <cfdi:Emisor Rfc="..."> tenga valor.' });
+
+    if (!receptor)                            errores.push({ campo: 'Receptor',    descripcion: 'Falta el nodo <Receptor>',              correccion: 'El CFDI no tiene datos del receptor. Solicite un archivo válido.' });
+    else if (!receptor.getAttribute('Rfc'))   errores.push({ campo: 'RFC Receptor', descripcion: 'El Receptor no tiene RFC',             correccion: 'Abra el XML y verifique que <cfdi:Receptor Rfc="..."> tenga valor.' });
+
+    const fecha = comp.getAttribute('Fecha') || '';
+    if (!fecha)                               errores.push({ campo: 'Fecha',        descripcion: 'El comprobante no tiene fecha de emisión', correccion: 'Verifique el atributo Fecha= en <cfdi:Comprobante>.' });
+
+    const total = parseFloat(comp.getAttribute('Total') || 0);
+    if (!total || isNaN(total))               errores.push({ campo: 'Total',        descripcion: 'El total es cero o no tiene valor',       correccion: 'Verifique el atributo Total= en <cfdi:Comprobante>.' });
+
+    if (!tfd)                                 errores.push({ campo: 'TimbreFiscalDigital', descripcion: 'No tiene sello del SAT (UUID)',   correccion: 'El archivo puede ser un CFDI sin timbrar. Solo importe CFDIs timbrados.' });
+
+    if (errores.length) return { filename, ok: false, errores };
+
     const subtotal = parseFloat(comp.getAttribute('SubTotal') || 0);
-    const total    = parseFloat(comp.getAttribute('Total')    || 0);
     const iva      = parseFloat((total - subtotal).toFixed(2));
     const serie    = comp.getAttribute('Serie') || '';
     const folio    = comp.getAttribute('Folio') || '';
 
     return {
-      filename,
-      ok: true,
-      selected: true,
-      uuid:           tfd?.getAttribute('UUID')  || '',
-      folio:          serie + folio,
-      fecha_emision:  (comp.getAttribute('Fecha') || '').slice(0, 10),
+      filename, ok: true, selected: true, errores: [],
+      uuid:            tfd.getAttribute('UUID') || '',
+      folio:           serie + folio,
+      fecha_emision:   fecha.slice(0, 10),
       subtotal,
-      iva:            Math.max(0, iva),
+      iva:             Math.max(0, iva),
       total,
-      moneda:         comp.getAttribute('Moneda') || 'MXN',
-      tipo:           comp.getAttribute('TipoDeComprobante') || 'I',
-      rfc_emisor:     emisor?.getAttribute('Rfc')    || '',
-      nombre_emisor:  emisor?.getAttribute('Nombre') || '',
-      rfc_receptor:   receptor?.getAttribute('Rfc')    || '',
-      nombre_receptor:receptor?.getAttribute('Nombre') || '',
-      concepto:       concepto?.getAttribute('Descripcion') || '',
+      moneda:          comp.getAttribute('Moneda') || 'MXN',
+      tipo:            comp.getAttribute('TipoDeComprobante') || 'I',
+      rfc_emisor:      emisor.getAttribute('Rfc')    || '',
+      nombre_emisor:   emisor.getAttribute('Nombre') || '',
+      rfc_receptor:    receptor.getAttribute('Rfc')    || '',
+      nombre_receptor: receptor.getAttribute('Nombre') || '',
+      concepto:        concepto?.getAttribute('Descripcion') || '',
       error: null
     };
   } catch(e) {
-    return { filename, ok: false, error: e.message };
+    return { filename, ok: false, errores: [{
+      campo: 'Desconocido',
+      descripcion: e.message,
+      correccion: 'Error inesperado al procesar el archivo. Verifique que sea un XML válido.'
+    }]};
   }
 }
 
@@ -2632,9 +2664,33 @@ function renderXMLPreview() {
   }
 
   if (invalidos.length) {
-    html += `<div class="ibox err" style="margin-top:10px"><strong>Archivos con error:</strong><ul style="margin-top:6px;padding-left:16px">
-      ${invalidos.map(x=>`<li>${x.filename}: ${x.error}</li>`).join('')}
-    </ul></div>`;
+    html += `
+    <div style="margin-top:14px;border:1.5px solid #fecaca;border-radius:12px;overflow:hidden">
+      <div style="background:#fef2f2;padding:10px 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #fecaca">
+        <span style="font-size:16px">❌</span>
+        <strong style="color:#b91c1c;font-size:13px">${invalidos.length} archivo(s) con error — omitidos de la importación</strong>
+        <span style="font-size:11px;color:#b91c1c;margin-left:4px">Corrija los errores indicados y vuelva a cargar</span>
+      </div>
+      <div class="tscroll">
+      <table>
+        <thead><tr>
+          <th style="background:#fff5f5">Archivo</th>
+          <th style="background:#fff5f5">Campo con error</th>
+          <th style="background:#fff5f5">Descripción del error</th>
+          <th style="background:#fff5f5">Cómo corregirlo</th>
+        </tr></thead>
+        <tbody>
+          ${invalidos.map(x => (x.errores||[{campo:'Error',descripcion:x.error||'Desconocido',correccion:'Revise el archivo'}]).map(e=>`
+            <tr>
+              <td style="font-size:11px;color:var(--muted);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${x.filename}">${x.filename}</td>
+              <td><span style="background:#fef2f2;color:#b91c1c;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;border:1px solid #fecaca">${e.campo}</span></td>
+              <td style="font-size:12px;color:#7f1d1d">${e.descripcion}</td>
+              <td style="font-size:12px;color:#374151">${e.correccion}</td>
+            </tr>`).join('')).join('')}
+        </tbody>
+      </table>
+      </div>
+    </div>`;
   }
 
   $('xml-preview-area').innerHTML = html;
