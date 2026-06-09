@@ -1199,8 +1199,9 @@ async function detalleFactura(id) {
 }
 
 function showTab(el, panelId) {
-  el.closest('.card, .modal').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  el.closest('.card, .modal').querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  const container = el.closest('.card, .modal, #content') || el.parentElement.parentElement;
+  container.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  container.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
   el.classList.add('active');
   $(panelId)?.classList.add('active');
 }
