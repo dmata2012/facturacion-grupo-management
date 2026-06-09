@@ -1,0 +1,12 @@
+{
+  "name": "grupo-management-facturacion",
+  "version": "1.0.0",
+  "description": "Sistema Integral de Facturación — Grupo Management",
+  "scripts": {
+    "start": "node backend/server.js",
+    "install-deps": "cd backend && npm install"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
