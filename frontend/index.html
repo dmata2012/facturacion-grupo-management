@@ -862,13 +862,16 @@ async function loadFacturas() {
         <td style="color:var(--success)">${fmt(f.cobrado)}</td>
         <td style="color:${parseFloat(f.saldo)>0?'var(--danger)':'var(--success)'};font-weight:600">${fmt(f.saldo)}</td>
         <td>${badgeEstatus(f.estatus)}</td>
-        <td>${f.desglose_validado?'<span style="color:var(--success);font-size:18px;font-weight:900;line-height:1">✔</span>':'<span style="color:var(--muted)">—</span>'}</td>
+        <td>${f.desglose_validado
+          ? '<span title="Desglose cuadrado — factura bloqueada" style="display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:20px;padding:3px 10px;color:#166534;font-size:12px;font-weight:800">✔ Cuadrada</span>'
+          : '<span style="color:var(--muted)">—</span>'}</td>
         <td style="white-space:nowrap">
-          ${canWrite()?`<button class="btn bo bsm" onclick="editFactura(${f.id})">✏️</button>
-          <button class="btn bg bsm" onclick="openRH(${f.id})">Desg</button>
-          <button class="btn bsuc bsm" onclick="openPago(${f.id})">💲</button>`:''}
-          ${canAdmin()&&f.estatus!=='cancelada'?`<button class="btn bd bsm" onclick="cancelarFactura(${f.id})" title="Cancelar factura">✕</button>`:''}
-          ${canAdmin()?`<button class="btn bd bsm" onclick="eliminarFactura(${f.id})" title="Eliminar factura" style="background:#fff0f0;border-color:#ffd7d7">🗑️</button>`:''}
+          ${canWrite() && !f.desglose_validado ? `<button class="btn bo bsm" onclick="editFactura(${f.id})" title="Editar factura">✏️</button>` : ''}
+          <button class="btn bg bsm" onclick="openRH(${f.id})" title="Ver/editar desglose">Desg</button>
+          <button class="btn bsuc bsm" onclick="openPago(${f.id})" title="Registrar pago">💲</button>
+          ${canAdmin()&&f.estatus!=='cancelada'&&!f.desglose_validado?`<button class="btn bd bsm" onclick="cancelarFactura(${f.id})" title="Cancelar factura">✕</button>`:''}
+          ${canAdmin()&&!f.desglose_validado?`<button class="btn bd bsm" onclick="eliminarFactura(${f.id})" title="Eliminar factura" style="background:#fff0f0;border-color:#ffd7d7">🗑️</button>`:''}
+          ${f.desglose_validado?`<span title="Factura bloqueada — desglose cuadrado" style="color:var(--muted);font-size:11px;font-style:italic">🔒 bloqueada</span>`:''}
         </td>
       </tr>`).join('')}</tbody>
     </table></div>
