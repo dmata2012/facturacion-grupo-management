@@ -275,6 +275,16 @@ router.patch('/:id/cancelar', requireRol('admin'), async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── ELIMINAR ──────────────────────────────────
+router.delete('/:id', requireRol('admin'), async (req, res) => {
+  try {
+    // Eliminar en cascada: desglose y pagos se borran por ON DELETE CASCADE
+    const r = await query(`DELETE FROM fac_facturas WHERE id=$1 RETURNING id`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Factura no encontrada.' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Recalcular estatus automáticamente ─────────
 async function recalcularEstatus(facturaId) {
   const r = await query(`

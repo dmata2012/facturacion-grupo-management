@@ -867,7 +867,8 @@ async function loadFacturas() {
           ${canWrite()?`<button class="btn bo bsm" onclick="editFactura(${f.id})">✏️</button>
           <button class="btn bg bsm" onclick="openRH(${f.id})">Desg</button>
           <button class="btn bsuc bsm" onclick="openPago(${f.id})">💲</button>`:''}
-          ${canAdmin()&&f.estatus!=='cancelada'?`<button class="btn bd bsm" onclick="cancelarFactura(${f.id})">✕</button>`:''}
+          ${canAdmin()&&f.estatus!=='cancelada'?`<button class="btn bd bsm" onclick="cancelarFactura(${f.id})" title="Cancelar factura">✕</button>`:''}
+          ${canAdmin()?`<button class="btn bd bsm" onclick="eliminarFactura(${f.id})" title="Eliminar factura" style="background:#fff0f0;border-color:#ffd7d7">🗑️</button>`:''}
         </td>
       </tr>`).join('')}</tbody>
     </table></div>
@@ -1135,6 +1136,15 @@ async function cancelarFactura(id) {
   try {
     await api(`/facturas/${id}/cancelar`, { method:'PATCH' });
     toast('Factura cancelada.');
+    facturas();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarFactura(id) {
+  if (!await confirm2('¿Eliminar esta factura permanentemente? Esta acción no se puede deshacer.')) return;
+  try {
+    await api(`/facturas/${id}`, { method:'DELETE' });
+    toast('Factura eliminada.');
     facturas();
   } catch(e) { toast(e.message, 'err'); }
 }
