@@ -188,18 +188,36 @@ router.post('/importar-masivo', requireRol('admin', 'capturista'), async (req, r
         if (dup.rows.length) { duplicadas++; continue; }
       }
 
-      // Buscar cliente por RFC emisor
+      // Buscar o crear cliente (empresa emisora)
       let cliente_id = null;
       if (item.rfc_emisor) {
-        const cli = await query(`SELECT id FROM fac_clientes WHERE UPPER(rfc)=UPPER($1) AND activo=TRUE`, [item.rfc_emisor]);
-        if (cli.rows.length) cliente_id = cli.rows[0].id;
+        const cli = await query(`SELECT id FROM fac_clientes WHERE UPPER(rfc)=UPPER($1)`, [item.rfc_emisor]);
+        if (cli.rows.length) {
+          cliente_id = cli.rows[0].id;
+        } else {
+          const nuevo = await query(
+            `INSERT INTO fac_clientes(rfc, razon_social, nombre_comercial, activo)
+             VALUES($1,$2,$3,TRUE) RETURNING id`,
+            [item.rfc_emisor.toUpperCase(), item.nombre_emisor || item.rfc_emisor, item.nombre_emisor || null]
+          );
+          cliente_id = nuevo.rows[0].id;
+        }
       }
 
-      // Buscar empresa receptora por RFC
+      // Buscar o crear empresa receptora
       let empresa_receptora_id = null;
       if (item.rfc_receptor) {
-        const rec = await query(`SELECT id FROM fac_empresas_receptoras WHERE UPPER(rfc)=UPPER($1) AND activo=TRUE`, [item.rfc_receptor]);
-        if (rec.rows.length) empresa_receptora_id = rec.rows[0].id;
+        const rec = await query(`SELECT id FROM fac_empresas_receptoras WHERE UPPER(rfc)=UPPER($1)`, [item.rfc_receptor]);
+        if (rec.rows.length) {
+          empresa_receptora_id = rec.rows[0].id;
+        } else {
+          const nueva = await query(
+            `INSERT INTO fac_empresas_receptoras(rfc, razon_social, nombre_comercial, activo)
+             VALUES($1,$2,$3,TRUE) RETURNING id`,
+            [item.rfc_receptor.toUpperCase(), item.nombre_receptor || item.rfc_receptor, item.nombre_receptor || null]
+          );
+          empresa_receptora_id = nueva.rows[0].id;
+        }
       }
 
       await query(
