@@ -136,6 +136,56 @@ router.get('/ejecutivo', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── REPORTE COMISIONES ────────────────────────
+router.get('/comisiones', async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    const params = [];
+    let whereF = "WHERE f.estatus != 'cancelada'";
+    if (desde) { params.push(desde); whereF += ` AND f.fecha_emision>=$${params.length}`; }
+    if (hasta) { params.push(hasta); whereF += ` AND f.fecha_emision<=$${params.length}`; }
+
+    // Resumen por cliente
+    const resumen = await query(`
+      SELECT
+        c.id, c.rfc, c.razon_social, c.ciudad,
+        c.comision                                                             AS pct_comision,
+        COUNT(DISTINCT f.id)::int                                              AS facturas,
+        COALESCE(SUM(f.total),0)                                              AS facturado,
+        COALESCE(SUM(p.monto),0)                                              AS cobrado,
+        COALESCE(SUM(f.total),0) - COALESCE(SUM(p.monto),0)                  AS saldo,
+        COALESCE(SUM(f.total),0)   * (c.comision / 100.0)                    AS comision_generada,
+        COALESCE(SUM(p.monto),0)   * (c.comision / 100.0)                    AS comision_cobrada
+      FROM fac_clientes c
+      JOIN fac_facturas f ON f.cliente_id = c.id
+      LEFT JOIN fac_pagos p ON p.factura_id = f.id
+      ${whereF}
+      GROUP BY c.id
+      ORDER BY comision_generada DESC
+    `, params);
+
+    // Detalle de facturas por cliente (con comisión por factura)
+    const detalle = await query(`
+      SELECT
+        f.id, f.folio, f.fecha_emision, f.fecha_vencimiento,
+        f.total, f.estatus, f.concepto,
+        c.id AS cliente_id, c.rfc, c.razon_social, c.comision AS pct_comision,
+        COALESCE(SUM(p.monto),0)                           AS cobrado,
+        f.total - COALESCE(SUM(p.monto),0)                 AS saldo,
+        f.total      * (c.comision / 100.0)                AS comision_generada,
+        COALESCE(SUM(p.monto),0) * (c.comision / 100.0)   AS comision_cobrada
+      FROM fac_facturas f
+      JOIN fac_clientes c ON c.id = f.cliente_id
+      LEFT JOIN fac_pagos p ON p.factura_id = f.id
+      ${whereF}
+      GROUP BY f.id, c.id
+      ORDER BY c.razon_social, f.fecha_emision DESC
+    `, params);
+
+    res.json({ resumen: resumen.rows, detalle: detalle.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── ESTADÍSTICAS POR CLIENTE ──────────────────
 router.get('/cliente/:id', async (req, res) => {
   try {

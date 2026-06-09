@@ -1955,6 +1955,7 @@ async function reportes() {
     <div class="tab" onclick="showTab(this,'rep-rh');loadRepRH()">Conceptos de Desglose</div>
     <div class="tab" onclick="showTab(this,'rep-nomina');loadRepNomina()">Nómina</div>
     <div class="tab" onclick="showTab(this,'rep-ejecutivo');loadRepEjecutivo()">Ejecutivo</div>
+    <div class="tab" onclick="showTab(this,'rep-comisiones');loadRepComisiones()">💰 Comisiones</div>
   </div>
   <div class="tab-panel active" id="rep-cobranza">
     <div class="card">
@@ -1981,7 +1982,19 @@ async function reportes() {
     </div>
   </div>
   <div class="tab-panel" id="rep-nomina"><div class="card" id="rnom-body"><p class="empty">Cargando...</p></div></div>
-  <div class="tab-panel" id="rep-ejecutivo"><div class="card" id="rej-body"><p class="empty">Cargando...</p></div></div>`;
+  <div class="tab-panel" id="rep-ejecutivo"><div class="card" id="rej-body"><p class="empty">Cargando...</p></div></div>
+  <div class="tab-panel" id="rep-comisiones">
+    <div class="card">
+      <div class="filters">
+        <label style="font-size:11px;font-weight:700;color:var(--gray-d)">DESDE</label>
+        <input id="rcom-desde" type="date" onchange="loadRepComisiones()">
+        <label style="font-size:11px;font-weight:700;color:var(--gray-d)">HASTA</label>
+        <input id="rcom-hasta" type="date" onchange="loadRepComisiones()">
+        <button class="btn bo bsm" onclick="exportRepComisiones()">⬇ Excel</button>
+      </div>
+      <div id="rcom-body"><p class="empty">Seleccione un rango de fechas.</p></div>
+    </div>
+  </div>`;
   loadRepCobranza();
 }
 
@@ -2077,6 +2090,127 @@ async function loadRepNomina() {
       </tr>`).join('')}</tbody>
     </table></div>`;
   }catch(e){$('rnom-body').innerHTML=`<p class="empty">${e.message}</p>`;}
+}
+
+async function loadRepComisiones() {
+  let url = '/reportes/comisiones?';
+  const d = $('rcom-desde')?.value; if (d) url += `desde=${d}&`;
+  const h = $('rcom-hasta')?.value; if (h) url += `hasta=${h}&`;
+  try {
+    const data = await api(url);
+    window._repComisiones = data;
+    const r = data.resumen || [];
+    const det = data.detalle || [];
+
+    // Totales acumulados
+    const totFac  = r.reduce((a,x)=>a+parseFloat(x.facturado||0),0);
+    const totCob  = r.reduce((a,x)=>a+parseFloat(x.cobrado||0),0);
+    const totSal  = r.reduce((a,x)=>a+parseFloat(x.saldo||0),0);
+    const totCGen = r.reduce((a,x)=>a+parseFloat(x.comision_generada||0),0);
+    const totCCob = r.reduce((a,x)=>a+parseFloat(x.comision_cobrada||0),0);
+
+    if (!r.length) { $('rcom-body').innerHTML=`<p class="empty">Sin datos en el período seleccionado.</p>`; return; }
+
+    $('rcom-body').innerHTML = `
+    <!-- KPIs acumulados -->
+    <div class="kpi-grid" style="margin-bottom:18px">
+      <div class="kpi primary">
+        <div class="kpi-icon" style="background:rgba(155,21,40,.1)">🧾</div>
+        <div class="label">Total Facturado</div>
+        <div class="value" style="font-size:19px">${fmt(totFac)}</div>
+        <div class="sub">${r.reduce((a,x)=>a+parseInt(x.facturas||0),0)} facturas</div>
+      </div>
+      <div class="kpi success">
+        <div class="kpi-icon" style="background:#f0fdf4">💵</div>
+        <div class="label">Total Cobrado</div>
+        <div class="value" style="font-size:19px">${fmt(totCob)}</div>
+      </div>
+      <div class="kpi warning">
+        <div class="kpi-icon" style="background:#fffbeb">⏳</div>
+        <div class="label">Saldo Pendiente</div>
+        <div class="value" style="font-size:19px">${fmt(totSal)}</div>
+      </div>
+      <div class="kpi primary" style="border-top:3px solid #d97706">
+        <div class="kpi-icon" style="background:#fffbeb">💰</div>
+        <div class="label">Comisión Generada</div>
+        <div class="value" style="font-size:19px;color:#d97706">${fmt(totCGen)}</div>
+        <div class="sub">Cobrada: ${fmt(totCCob)}</div>
+      </div>
+    </div>
+
+    <!-- Tabla resumen por cliente -->
+    <div style="font-size:13px;font-weight:700;color:var(--dark);margin-bottom:10px">📋 Resumen por Cliente</div>
+    <div class="tscroll" style="margin-bottom:20px"><table>
+      <thead><tr>
+        <th>RFC</th><th>Razón Social</th><th>% Comisión</th>
+        <th>Facturas</th><th>Facturado</th><th>Cobrado</th><th>Saldo</th>
+        <th style="background:#fffbeb;color:#92400e">Comisión Generada</th>
+        <th style="background:#fffbeb;color:#92400e">Comisión Cobrada</th>
+        <th style="background:#fffbeb;color:#92400e">Comisión Pendiente</th>
+      </tr></thead>
+      <tbody>
+        ${r.map(c=>`<tr>
+          <td style="font-size:11px">${c.rfc}</td>
+          <td style="font-weight:600">${c.razon_social}</td>
+          <td style="text-align:center"><span style="background:#eff6ff;color:#1d4ed8;padding:3px 10px;border-radius:20px;font-weight:700;font-size:12px">${parseFloat(c.pct_comision||0).toFixed(1)}%</span></td>
+          <td style="text-align:center">${c.facturas}</td>
+          <td>${fmt(c.facturado)}</td>
+          <td style="color:var(--success)">${fmt(c.cobrado)}</td>
+          <td style="color:${parseFloat(c.saldo)>0?'var(--danger)':'inherit'};font-weight:600">${fmt(c.saldo)}</td>
+          <td style="font-weight:800;color:#d97706;background:#fffbeb">${fmt(c.comision_generada)}</td>
+          <td style="color:var(--success);background:#fffbeb">${fmt(c.comision_cobrada)}</td>
+          <td style="color:var(--danger);background:#fffbeb">${fmt(parseFloat(c.comision_generada)-parseFloat(c.comision_cobrada))}</td>
+        </tr>`).join('')}
+      </tbody>
+      <tfoot><tr style="background:#f7f8fa;font-weight:800;border-top:2px solid var(--border)">
+        <td colspan="4" style="text-align:right;padding-right:12px">TOTALES:</td>
+        <td>${fmt(totFac)}</td>
+        <td style="color:var(--success)">${fmt(totCob)}</td>
+        <td style="color:var(--danger)">${fmt(totSal)}</td>
+        <td style="color:#d97706;background:#fffbeb">${fmt(totCGen)}</td>
+        <td style="color:var(--success);background:#fffbeb">${fmt(totCCob)}</td>
+        <td style="color:var(--danger);background:#fffbeb">${fmt(totCGen-totCCob)}</td>
+      </tr></tfoot>
+    </table></div>
+
+    <!-- Detalle por factura -->
+    <details style="margin-top:4px">
+      <summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--dark);padding:10px 0;user-select:none">
+        📄 Ver detalle por factura (${det.length} facturas)
+      </summary>
+      <div class="tscroll" style="margin-top:10px"><table>
+        <thead><tr>
+          <th>Cliente</th><th>Folio</th><th>Fecha</th><th>Total Factura</th>
+          <th>Cobrado</th><th>Saldo</th><th>% Com.</th>
+          <th style="background:#fffbeb;color:#92400e">Com. Generada</th>
+          <th style="background:#fffbeb;color:#92400e">Com. Cobrada</th>
+          <th>Estatus</th>
+        </tr></thead>
+        <tbody>${det.map(f=>`<tr>
+          <td style="font-size:11px">${f.razon_social}</td>
+          <td>${f.folio||'#'+f.id}</td>
+          <td>${fmtDate(f.fecha_emision)}</td>
+          <td style="font-weight:600">${fmt(f.total)}</td>
+          <td style="color:var(--success)">${fmt(f.cobrado)}</td>
+          <td style="color:${parseFloat(f.saldo)>0?'var(--danger)':'inherit'}">${fmt(f.saldo)}</td>
+          <td style="text-align:center">${parseFloat(f.pct_comision||0).toFixed(1)}%</td>
+          <td style="font-weight:700;color:#d97706;background:#fffbeb">${fmt(f.comision_generada)}</td>
+          <td style="color:var(--success);background:#fffbeb">${fmt(f.comision_cobrada)}</td>
+          <td>${badgeEstatus(f.estatus)}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </details>`;
+  } catch(e) { $('rcom-body').innerHTML=`<p class="empty">${e.message}</p>`; }
+}
+
+function exportRepComisiones() {
+  const data = window._repComisiones?.resumen;
+  if (!data) return;
+  exportToExcel(data, [
+    ['rfc','RFC'],['razon_social','Razón Social'],['pct_comision','% Comisión'],
+    ['facturas','Facturas'],['facturado','Facturado'],['cobrado','Cobrado'],['saldo','Saldo'],
+    ['comision_generada','Comisión Generada'],['comision_cobrada','Comisión Cobrada']
+  ], 'Comisiones');
 }
 
 async function loadRepEjecutivo() {
