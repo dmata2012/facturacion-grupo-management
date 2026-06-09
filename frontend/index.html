@@ -878,10 +878,6 @@ async function loadFacturas() {
 function openFactura(id = null) {
   $('modal-factura-body').innerHTML = `<h4>${id?'Editar':'Nueva'} Factura</h4>
   <div style="display:flex;gap:12px;margin-bottom:14px">
-    <div class="upload-zone" style="flex:1" id="uz-pdf" onclick="$('inp-pdf').click()">
-      <div>📄 PDF</div><p id="pdf-name">Seleccionar archivo</p>
-      <input type="file" id="inp-pdf" accept=".pdf" style="display:none" onchange="onFile('pdf')">
-    </div>
     <div class="upload-zone" style="flex:1" id="uz-xml" onclick="$('inp-xml').click()">
       <div>🗂 XML (CFDI)</div><p id="xml-name">Seleccionar archivo</p>
       <input type="file" id="inp-xml" accept=".xml" style="display:none" onchange="onFile('xml')">
