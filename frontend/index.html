@@ -446,6 +446,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-factura"><div class="modal" id="modal-factura-body"></div></div>
 <div class="overlay" id="modal-pago"><div class="modal modal-sm" id="modal-pago-body"></div></div>
 <div class="overlay" id="modal-rh"><div class="modal" id="modal-rh-body"></div></div>
+<div class="overlay" id="modal-import-xml"><div class="modal" style="width:min(980px,96vw)" id="modal-import-xml-body"></div></div>
 <div class="overlay" id="modal-empleado"><div class="modal modal-sm" id="modal-empleado-body"></div></div>
 <div class="overlay" id="modal-quincena"><div class="modal" id="modal-quincena-body"></div></div>
 <div class="overlay" id="modal-usuario"><div class="modal modal-sm" id="modal-usuario-body"></div></div>
@@ -819,7 +820,7 @@ async function facturas(resetPage = true) {
       <div class="page-title">Facturas</div>
       <div class="page-sub">Gestión y seguimiento de comprobantes fiscales</div>
     </div>
-    ${canWrite() ? `<button class="btn bs" onclick="openFactura()">+ Nueva factura</button>` : ''}
+    ${canWrite() ? `<div style="display:flex;gap:8px"><button class="btn bo" onclick="openImportarXML()">📥 Importar XMLs</button><button class="btn bs" onclick="openFactura()">+ Nueva factura</button></div>` : ''}
   </div>
   <div class="card">
     <div class="filters">
@@ -2498,6 +2499,180 @@ async function desactivarConcepto(id, activo) {
     toast(`Concepto ${accion === 'desactivar' ? 'desactivado' : 'reactivado'}.`);
     loadCatalogo();
   } catch(e) { toast(e.message, 'err'); }
+}
+
+// ══ IMPORTACIÓN MASIVA XML ══════════════════════════════════════
+let _xmlParsed = [];
+
+function openImportarXML() {
+  _xmlParsed = [];
+  $('modal-import-xml-body').innerHTML = `
+    <h4>📥 Importación Masiva de Facturas XML (CFDI)</h4>
+    <div class="ibox info" style="margin-bottom:14px">
+      Seleccione varios archivos XML o una carpeta completa. El sistema detectará automáticamente los datos de cada CFDI y los registrará como facturas.
+    </div>
+    <div style="display:flex;gap:12px;margin-bottom:16px">
+      <div class="upload-zone" style="flex:1;cursor:pointer;padding:20px" onclick="$('inp-xml-multi').click()">
+        <div style="font-size:32px">📄</div>
+        <div style="font-weight:700;font-size:13px;margin-top:8px">Seleccionar archivos</div>
+        <p>Uno o varios archivos .xml</p>
+        <input type="file" id="inp-xml-multi" accept=".xml" multiple style="display:none"
+               onchange="procesarXMLsMasivos(this.files)">
+      </div>
+      <div class="upload-zone" style="flex:1;cursor:pointer;padding:20px" onclick="$('inp-xml-folder').click()">
+        <div style="font-size:32px">📁</div>
+        <div style="font-weight:700;font-size:13px;margin-top:8px">Seleccionar carpeta</div>
+        <p>Todos los XMLs de una carpeta</p>
+        <input type="file" id="inp-xml-folder" accept=".xml" multiple webkitdirectory style="display:none"
+               onchange="procesarXMLsMasivos(this.files)">
+      </div>
+    </div>
+    <div id="xml-preview-area"></div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-import-xml')">Cancelar</button>
+      <button class="btn bs" id="btn-importar-xml" style="display:none" onclick="ejecutarImportMasivo()">📥 Importar seleccionados</button>
+    </div>`;
+  $('modal-import-xml').classList.add('open');
+}
+
+async function procesarXMLsMasivos(files) {
+  _xmlParsed = [];
+  const arr = Array.from(files).filter(f => f.name.toLowerCase().endsWith('.xml'));
+  if (!arr.length) { toast('No se encontraron archivos .xml', 'warn'); return; }
+  $('xml-preview-area').innerHTML = `<p class="empty">⏳ Procesando ${arr.length} archivos...</p>`;
+  for (const file of arr) {
+    try {
+      const text = await file.text();
+      _xmlParsed.push(parseCFDIxml(text, file.name));
+    } catch(e) {
+      _xmlParsed.push({ filename: file.name, ok: false, error: e.message });
+    }
+  }
+  renderXMLPreview();
+}
+
+function parseCFDIxml(xmlText, filename) {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xmlText, 'text/xml');
+    if (doc.querySelector('parsererror')) return { filename, ok: false, error: 'XML malformado' };
+
+    const comp = doc.querySelector('Comprobante');
+    if (!comp) return { filename, ok: false, error: 'No es un CFDI' };
+
+    const emisor   = doc.querySelector('Emisor');
+    const receptor = doc.querySelector('Receptor');
+    const tfd      = doc.querySelector('TimbreFiscalDigital');
+    const concepto = doc.querySelector('Concepto');
+
+    const subtotal = parseFloat(comp.getAttribute('SubTotal') || 0);
+    const total    = parseFloat(comp.getAttribute('Total')    || 0);
+    const iva      = parseFloat((total - subtotal).toFixed(2));
+    const serie    = comp.getAttribute('Serie') || '';
+    const folio    = comp.getAttribute('Folio') || '';
+
+    return {
+      filename,
+      ok: true,
+      selected: true,
+      uuid:           tfd?.getAttribute('UUID')  || '',
+      folio:          serie + folio,
+      fecha_emision:  (comp.getAttribute('Fecha') || '').slice(0, 10),
+      subtotal,
+      iva:            Math.max(0, iva),
+      total,
+      moneda:         comp.getAttribute('Moneda') || 'MXN',
+      tipo:           comp.getAttribute('TipoDeComprobante') || 'I',
+      rfc_emisor:     emisor?.getAttribute('Rfc')    || '',
+      nombre_emisor:  emisor?.getAttribute('Nombre') || '',
+      rfc_receptor:   receptor?.getAttribute('Rfc')    || '',
+      nombre_receptor:receptor?.getAttribute('Nombre') || '',
+      concepto:       concepto?.getAttribute('Descripcion') || '',
+      error: null
+    };
+  } catch(e) {
+    return { filename, ok: false, error: e.message };
+  }
+}
+
+function renderXMLPreview() {
+  const validos  = _xmlParsed.filter(x => x.ok);
+  const invalidos= _xmlParsed.filter(x => !x.ok);
+  let html = `<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+    <span class="badge" style="background:#f0fdf4;color:#166534;border:1px solid #bbf7d0">✅ ${validos.length} válidos</span>
+    ${invalidos.length ? `<span class="badge" style="background:#fef2f2;color:#b91c1c;border:1px solid #fecaca">❌ ${invalidos.length} con error</span>` : ''}
+    <span style="font-size:12px;color:var(--muted)">Total: ${fmt(validos.reduce((a,x)=>a+x.total,0))}</span>
+    <button class="btn bo bsm" onclick="toggleChkTodosXML(true)">✔ Todos</button>
+    <button class="btn bo bsm" onclick="toggleChkTodosXML(false)">✗ Ninguno</button>
+  </div>`;
+
+  if (validos.length) {
+    html += `<div class="tscroll"><table>
+      <thead><tr>
+        <th style="width:32px"></th>
+        <th>Archivo</th><th>Folio</th><th>Fecha</th>
+        <th>RFC Emisor</th><th>RFC Receptor</th>
+        <th>Subtotal</th><th>IVA</th><th>Total</th><th>Moneda</th>
+      </tr></thead><tbody>`;
+    validos.forEach((x, i) => {
+      html += `<tr>
+        <td><input type="checkbox" class="chk-xml" data-idx="${i}" checked></td>
+        <td style="font-size:11px;color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${x.filename}">${x.filename}</td>
+        <td>${x.folio || '—'}</td>
+        <td>${x.fecha_emision || '—'}</td>
+        <td style="font-size:11px">${x.rfc_emisor}</td>
+        <td style="font-size:11px">${x.rfc_receptor}</td>
+        <td>${fmt(x.subtotal)}</td>
+        <td>${fmt(x.iva)}</td>
+        <td style="font-weight:700">${fmt(x.total)}</td>
+        <td>${x.moneda}</td>
+      </tr>`;
+    });
+    html += `</tbody></table></div>`;
+  }
+
+  if (invalidos.length) {
+    html += `<div class="ibox err" style="margin-top:10px"><strong>Archivos con error:</strong><ul style="margin-top:6px;padding-left:16px">
+      ${invalidos.map(x=>`<li>${x.filename}: ${x.error}</li>`).join('')}
+    </ul></div>`;
+  }
+
+  $('xml-preview-area').innerHTML = html;
+  if (validos.length) $('btn-importar-xml').style.display = '';
+}
+
+function toggleChkTodosXML(val) {
+  document.querySelectorAll('.chk-xml').forEach(c => c.checked = val);
+}
+
+async function ejecutarImportMasivo() {
+  const validos = _xmlParsed.filter(x => x.ok);
+  const seleccionados = [];
+  document.querySelectorAll('.chk-xml:checked').forEach(chk => {
+    seleccionados.push(validos[parseInt(chk.dataset.idx)]);
+  });
+  if (!seleccionados.length) { toast('Seleccione al menos un XML', 'warn'); return; }
+
+  const btn = $('btn-importar-xml');
+  btn.disabled = true;
+  btn.textContent = '⏳ Importando...';
+
+  try {
+    const r = await api('/facturas/importar-masivo', {
+      method: 'POST',
+      body: JSON.stringify({ facturas: seleccionados })
+    });
+    closeModal('modal-import-xml');
+    let msg = `✅ ${r.creadas} factura(s) importada(s)`;
+    if (r.duplicadas) msg += `, ${r.duplicadas} duplicado(s) omitido(s)`;
+    if (r.errores?.length) msg += `, ${r.errores.length} con error`;
+    toast(msg, r.creadas > 0 ? 'ok' : 'warn');
+    await loadFacturas();
+  } catch(e) {
+    toast(e.message, 'err');
+    btn.disabled = false;
+    btn.textContent = '📥 Importar seleccionados';
+  }
 }
 </script>
 </body>

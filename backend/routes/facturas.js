@@ -171,6 +171,63 @@ router.put('/:id/desglose', requireRol('admin', 'capturista'), async (req, res) 
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── IMPORTAR MASIVO XML ───────────────────────
+router.post('/importar-masivo', requireRol('admin', 'capturista'), async (req, res) => {
+  const { facturas: items } = req.body;
+  if (!Array.isArray(items) || !items.length)
+    return res.status(400).json({ error: 'No hay facturas para importar.' });
+
+  let creadas = 0, duplicadas = 0;
+  const errores = [];
+
+  for (const item of items) {
+    try {
+      // Evitar duplicados por UUID
+      if (item.uuid) {
+        const dup = await query(`SELECT id FROM fac_facturas WHERE uuid_cfdi=$1`, [item.uuid]);
+        if (dup.rows.length) { duplicadas++; continue; }
+      }
+
+      // Buscar cliente por RFC emisor
+      let cliente_id = null;
+      if (item.rfc_emisor) {
+        const cli = await query(`SELECT id FROM fac_clientes WHERE UPPER(rfc)=UPPER($1) AND activo=TRUE`, [item.rfc_emisor]);
+        if (cli.rows.length) cliente_id = cli.rows[0].id;
+      }
+
+      // Buscar empresa receptora por RFC
+      let empresa_receptora_id = null;
+      if (item.rfc_receptor) {
+        const rec = await query(`SELECT id FROM fac_empresas_receptoras WHERE UPPER(rfc)=UPPER($1) AND activo=TRUE`, [item.rfc_receptor]);
+        if (rec.rows.length) empresa_receptora_id = rec.rows[0].id;
+      }
+
+      await query(
+        `INSERT INTO fac_facturas(cliente_id,empresa_receptora_id,folio,uuid_cfdi,tipo_comprobante,
+          fecha_emision,subtotal,iva,total,moneda,concepto,rfc_detectado,creado_por)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [cliente_id, empresa_receptora_id,
+         item.folio   || null,
+         item.uuid    || null,
+         item.tipo    || 'I',
+         item.fecha_emision,
+         parseFloat(item.subtotal) || 0,
+         parseFloat(item.iva)      || 0,
+         parseFloat(item.total)    || 0,
+         item.moneda  || 'MXN',
+         item.concepto|| null,
+         item.rfc_emisor || null,
+         req.usuario.id]
+      );
+      creadas++;
+    } catch(e) {
+      errores.push({ file: item.filename, error: e.message });
+    }
+  }
+
+  res.json({ creadas, duplicadas, errores });
+});
+
 // ── CANCELAR ──────────────────────────────────
 router.patch('/:id/cancelar', requireRol('admin'), async (req, res) => {
   try {
