@@ -8,7 +8,7 @@ router.get('/', async (req, res) => {
   try {
     const { año = new Date().getFullYear() } = req.query;
 
-    const [kpi, porEstatus, mensual, top5, cobranza, nomina, rh, rhMensual, rhCliente, rhKpi] = await Promise.all([
+    const [kpi, porEstatus, mensual, top5, cobranza, nomina, rh] = await Promise.all([
       // KPIs generales del año
       query(`
         SELECT
@@ -87,48 +87,42 @@ router.get('/', async (req, res) => {
         WHERE EXTRACT(YEAR FROM f.fecha_emision)=$1 AND f.estatus != 'cancelada'
         GROUP BY d.concepto ORDER BY total DESC LIMIT 10
       `, [año]),
-
-      // Desglose mensual por concepto (top 5 conceptos)
-      query(`
-        SELECT EXTRACT(MONTH FROM f.fecha_emision)::int AS mes,
-               d.concepto,
-               COALESCE(SUM(d.monto),0) AS total
-        FROM fac_desglose_rh d
-        JOIN fac_facturas f ON f.id=d.factura_id
-        WHERE EXTRACT(YEAR FROM f.fecha_emision)=$1 AND f.estatus != 'cancelada'
-          AND d.concepto IN (
-            SELECT concepto FROM fac_desglose_rh d2
-            JOIN fac_facturas f2 ON f2.id=d2.factura_id
-            WHERE EXTRACT(YEAR FROM f2.fecha_emision)=$1 AND f2.estatus != 'cancelada'
-            GROUP BY concepto ORDER BY SUM(monto) DESC LIMIT 5
-          )
-        GROUP BY mes, d.concepto ORDER BY mes
-      `, [año]),
-
-      // Desglose por cliente (top 8)
-      query(`
-        SELECT c.razon_social, COALESCE(SUM(d.monto),0) AS total_desglose,
-               COUNT(DISTINCT f.id)::int AS facturas_con_desglose
-        FROM fac_desglose_rh d
-        JOIN fac_facturas f ON f.id=d.factura_id
-        JOIN fac_clientes c ON c.id=f.cliente_id
-        WHERE EXTRACT(YEAR FROM f.fecha_emision)=$1 AND f.estatus != 'cancelada'
-        GROUP BY c.id ORDER BY total_desglose DESC LIMIT 8
-      `, [año]),
-
-      // KPIs de desglose
-      query(`
-        SELECT
-          COUNT(DISTINCT f.id) FILTER (WHERE f.desglose_validado=TRUE)::int  AS cuadradas,
-          COUNT(DISTINCT f.id) FILTER (WHERE f.desglose_validado=FALSE AND f.estatus!='cancelada')::int AS pendientes,
-          COALESCE(SUM(d.monto),0) AS total_desglose,
-          COUNT(DISTINCT d.id)::int AS total_partidas,
-          COUNT(DISTINCT f.id)::int AS facturas_con_desglose
-        FROM fac_facturas f
-        LEFT JOIN fac_desglose_rh d ON d.factura_id=f.id
-        WHERE EXTRACT(YEAR FROM f.fecha_emision)=$1
-      `, [año]),
     ]);
+
+    // Consultas extra de desglose (separadas para no romper el Promise.all)
+    let rhMensual = { rows: [] }, rhCliente = { rows: [] }, rhKpi = { rows: [{}] };
+    try {
+      [rhMensual, rhCliente, rhKpi] = await Promise.all([
+        query(`
+          SELECT EXTRACT(MONTH FROM f.fecha_emision)::int AS mes,
+                 d.concepto, COALESCE(SUM(d.monto),0) AS total
+          FROM fac_desglose_rh d
+          JOIN fac_facturas f ON f.id=d.factura_id
+          WHERE EXTRACT(YEAR FROM f.fecha_emision)=$1 AND f.estatus != 'cancelada'
+          GROUP BY mes, d.concepto ORDER BY mes
+        `, [año]),
+        query(`
+          SELECT c.razon_social, COALESCE(SUM(d.monto),0) AS total_desglose,
+                 COUNT(DISTINCT f.id)::int AS facturas_con_desglose
+          FROM fac_desglose_rh d
+          JOIN fac_facturas f ON f.id=d.factura_id
+          JOIN fac_clientes c ON c.id=f.cliente_id
+          WHERE EXTRACT(YEAR FROM f.fecha_emision)=$1 AND f.estatus != 'cancelada'
+          GROUP BY c.id, c.razon_social ORDER BY total_desglose DESC LIMIT 8
+        `, [año]),
+        query(`
+          SELECT
+            COUNT(DISTINCT f.id) FILTER (WHERE f.desglose_validado=TRUE)::int AS cuadradas,
+            COUNT(DISTINCT f.id) FILTER (WHERE f.desglose_validado=FALSE AND f.estatus!='cancelada')::int AS pendientes,
+            COALESCE(SUM(d.monto),0) AS total_desglose,
+            COUNT(d.id)::int AS total_partidas,
+            COUNT(DISTINCT d.factura_id)::int AS facturas_con_desglose
+          FROM fac_facturas f
+          LEFT JOIN fac_desglose_rh d ON d.factura_id=f.id
+          WHERE EXTRACT(YEAR FROM f.fecha_emision)=$1
+        `, [año]),
+      ]);
+    } catch(e2) { console.warn('Desglose stats warning:', e2.message); }
 
     res.json({
       kpi: kpi.rows[0],
@@ -140,7 +134,7 @@ router.get('/', async (req, res) => {
       rh_conceptos: rh.rows,
       rh_mensual: rhMensual.rows,
       rh_clientes: rhCliente.rows,
-      rh_kpi: rhKpi.rows[0],
+      rh_kpi: rhKpi.rows[0] || {},
     });
   } catch (e) {
     console.error(e);
