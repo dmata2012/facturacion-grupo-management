@@ -180,6 +180,10 @@ router.post('/importar-masivo', requireRol('admin', 'capturista'), async (req, r
   let creadas = 0, duplicadas = 0;
   const errores = [];
 
+  // Función para limpiar texto del XML (quita caracteres problemáticos)
+  const limpiar = s => (s || '').toString().trim().substring(0, 200) || null;
+  const limpiarRFC = s => (s || '').toString().trim().toUpperCase().substring(0, 13);
+
   for (const item of items) {
     try {
       // Evitar duplicados por UUID
@@ -188,35 +192,50 @@ router.post('/importar-masivo', requireRol('admin', 'capturista'), async (req, r
         if (dup.rows.length) { duplicadas++; continue; }
       }
 
+      const rfcEmisor   = limpiarRFC(item.rfc_emisor);
+      const rfcReceptor = limpiarRFC(item.rfc_receptor);
+
       // Buscar o crear cliente (empresa emisora)
       let cliente_id = null;
-      if (item.rfc_emisor) {
-        const cli = await query(`SELECT id FROM fac_clientes WHERE UPPER(rfc)=UPPER($1)`, [item.rfc_emisor]);
-        if (cli.rows.length) {
-          cliente_id = cli.rows[0].id;
-        } else {
-          const nuevo = await query(
-            `INSERT INTO fac_clientes(rfc, razon_social, nombre_comercial, activo)
-             VALUES($1,$2,$3,TRUE) RETURNING id`,
-            [item.rfc_emisor.toUpperCase(), item.nombre_emisor || item.rfc_emisor, item.nombre_emisor || null]
-          );
-          cliente_id = nuevo.rows[0].id;
+      if (rfcEmisor) {
+        try {
+          const cli = await query(`SELECT id FROM fac_clientes WHERE rfc=$1`, [rfcEmisor]);
+          if (cli.rows.length) {
+            cliente_id = cli.rows[0].id;
+          } else {
+            const razon = limpiar(item.nombre_emisor) || rfcEmisor;
+            const nuevo = await query(
+              `INSERT INTO fac_clientes(rfc, razon_social, nombre_comercial, activo, comision)
+               VALUES($1,$2,$3,TRUE,0) RETURNING id`,
+              [rfcEmisor, razon, razon]
+            );
+            cliente_id = nuevo.rows[0].id;
+            console.log(`✅ Cliente creado: ${rfcEmisor} — ${razon}`);
+          }
+        } catch(e2) {
+          console.error(`⚠️ Error creando cliente ${rfcEmisor}:`, e2.message);
         }
       }
 
       // Buscar o crear empresa receptora
       let empresa_receptora_id = null;
-      if (item.rfc_receptor) {
-        const rec = await query(`SELECT id FROM fac_empresas_receptoras WHERE UPPER(rfc)=UPPER($1)`, [item.rfc_receptor]);
-        if (rec.rows.length) {
-          empresa_receptora_id = rec.rows[0].id;
-        } else {
-          const nueva = await query(
-            `INSERT INTO fac_empresas_receptoras(rfc, razon_social, nombre_comercial, activo)
-             VALUES($1,$2,$3,TRUE) RETURNING id`,
-            [item.rfc_receptor.toUpperCase(), item.nombre_receptor || item.rfc_receptor, item.nombre_receptor || null]
-          );
-          empresa_receptora_id = nueva.rows[0].id;
+      if (rfcReceptor) {
+        try {
+          const rec = await query(`SELECT id FROM fac_empresas_receptoras WHERE rfc=$1`, [rfcReceptor]);
+          if (rec.rows.length) {
+            empresa_receptora_id = rec.rows[0].id;
+          } else {
+            const razon = limpiar(item.nombre_receptor) || rfcReceptor;
+            const nueva = await query(
+              `INSERT INTO fac_empresas_receptoras(rfc, razon_social, nombre_comercial, activo)
+               VALUES($1,$2,$3,TRUE) RETURNING id`,
+              [rfcReceptor, razon, razon]
+            );
+            empresa_receptora_id = nueva.rows[0].id;
+            console.log(`✅ Receptora creada: ${rfcReceptor} — ${razon}`);
+          }
+        } catch(e2) {
+          console.error(`⚠️ Error creando receptora ${rfcReceptor}:`, e2.message);
         }
       }
 
@@ -224,8 +243,9 @@ router.post('/importar-masivo', requireRol('admin', 'capturista'), async (req, r
         `INSERT INTO fac_facturas(cliente_id,empresa_receptora_id,folio,uuid_cfdi,tipo_comprobante,
           fecha_emision,subtotal,iva,total,moneda,concepto,rfc_detectado,creado_por)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [cliente_id, empresa_receptora_id,
-         item.folio   || null,
+        [cliente_id    || null,
+         empresa_receptora_id || null,
+         limpiar(item.folio) || null,
          item.uuid    || null,
          item.tipo    || 'I',
          item.fecha_emision,
@@ -233,12 +253,13 @@ router.post('/importar-masivo', requireRol('admin', 'capturista'), async (req, r
          parseFloat(item.iva)      || 0,
          parseFloat(item.total)    || 0,
          item.moneda  || 'MXN',
-         item.concepto|| null,
-         item.rfc_emisor || null,
+         limpiar(item.concepto) || null,
+         rfcEmisor    || null,
          req.usuario.id]
       );
       creadas++;
     } catch(e) {
+      console.error(`❌ Error importando ${item.filename}:`, e.message);
       errores.push({ file: item.filename, error: e.message });
     }
   }
