@@ -2107,47 +2107,156 @@ async function loadRepEjecutivo() {
 
 // ══ ESTADÍSTICAS ════════════════════════════
 async function estadisticas() {
-  const año=new Date().getFullYear();
-  $('content').innerHTML=`<div class="page-title">Estadísticas ${año}</div><div id="est-body"><p class="empty">Cargando...</p></div>`;
+  const año = new Date().getFullYear();
+  $('content').innerHTML = `
+    <div class="page-header">
+      <div class="page-header-left">
+        <div class="page-title">Estadísticas</div>
+        <div class="page-sub">Análisis de facturación y desglose</div>
+      </div>
+      <select id="est-año" onchange="estadisticas()" style="border:1.5px solid var(--border);border-radius:var(--rsm);padding:8px 12px;font-size:13px">
+        ${[año,año-1,año-2].map(a=>`<option value="${a}" ${a==año?'selected':''}>${a}</option>`).join('')}
+      </select>
+    </div>
+    <div id="est-body"><p class="empty">Cargando...</p></div>`;
   try {
-    const d=await api(`/dashboard?año=${año}`);
-    const mensual=d.mensual;
-    $('est-body').innerHTML=`
+    const añoSel = $('est-año')?.value || año;
+    const d = await api(`/dashboard?año=${añoSel}`);
+    const kpi = d.rh_kpi || {};
+    const colores = ['#9B1528','#C41E3A','#1d4ed8','#166534','#d97706','#7c3aed','#0891b2','#be185d','#4d7c0f','#b45309'];
+
+    $('est-body').innerHTML = `
+    <!-- KPIs Desglose -->
+    <div class="kpi-grid" style="margin-bottom:20px">
+      <div class="kpi primary">
+        <div class="kpi-icon" style="background:rgba(155,21,40,.1)">📊</div>
+        <div class="label">Total Desglose ${añoSel}</div>
+        <div class="value" style="font-size:20px">${fmt(kpi.total_desglose||0)}</div>
+        <div class="sub">${kpi.total_partidas||0} partidas registradas</div>
+      </div>
+      <div class="kpi success">
+        <div class="kpi-icon" style="background:#f0fdf4">✔</div>
+        <div class="label">Facturas Cuadradas</div>
+        <div class="value">${kpi.cuadradas||0}</div>
+        <div class="sub">Desglose validado</div>
+      </div>
+      <div class="kpi warning">
+        <div class="kpi-icon" style="background:#fffbeb">⏳</div>
+        <div class="label">Pendientes de Cuadrar</div>
+        <div class="value">${kpi.pendientes||0}</div>
+        <div class="sub">Sin desglose validado</div>
+      </div>
+      <div class="kpi primary">
+        <div class="kpi-icon" style="background:rgba(155,21,40,.1)">🏢</div>
+        <div class="label">Facturas con Desglose</div>
+        <div class="value">${kpi.facturas_con_desglose||0}</div>
+        <div class="sub">Tienen al menos 1 partida</div>
+      </div>
+    </div>
+
+    <!-- Gráficas fila 1 -->
     <div class="chart-grid">
-      <div class="chart-box"><h4>Facturado vs Cobrado mensual</h4><canvas id="est-mensual"></canvas></div>
-      <div class="chart-box"><h4>Distribución por estatus</h4><canvas id="est-estatus"></canvas></div>
+      <div class="chart-box"><h4>📈 Facturado vs Cobrado mensual</h4><canvas id="est-mensual"></canvas></div>
+      <div class="chart-box"><h4>🥧 Distribución por estatus</h4><canvas id="est-estatus"></canvas></div>
+    </div>
+
+    <!-- Gráficas fila 2 — DESGLOSE -->
+    <div style="margin:6px 0 10px;font-size:15px;font-weight:800;color:var(--dark);letter-spacing:-.2px">
+      📊 Análisis de Desglose
     </div>
     <div class="chart-grid">
-      <div class="chart-box"><h4>Top 5 clientes (facturación)</h4><canvas id="est-top5"></canvas></div>
-      <div class="chart-box"><h4>Conceptos de Desglose</h4><canvas id="est-rh"></canvas></div>
+      <div class="chart-box"><h4>🔵 Monto por Concepto de Desglose</h4><canvas id="est-rh-bar"></canvas></div>
+      <div class="chart-box"><h4>🍩 Distribución Desglose por Concepto</h4><canvas id="est-rh-dona"></canvas></div>
+    </div>
+    <div class="chart-grid">
+      <div class="chart-box" style="grid-column:1/-1"><h4>📅 Evolución Mensual del Desglose (Top 5 Conceptos)</h4><canvas id="est-rh-mensual" style="max-height:280px"></canvas></div>
+    </div>
+    <div class="chart-grid">
+      <div class="chart-box"><h4>🏢 Top Clientes por Desglose</h4><canvas id="est-rh-cli"></canvas></div>
+      <div class="chart-box"><h4>🏅 Top 5 Clientes por Facturación</h4><canvas id="est-top5"></canvas></div>
+    </div>
+
+    <!-- Tabla resumen desglose -->
+    <div class="card">
+      <div class="card-title">📋 Resumen por Concepto de Desglose</div>
+      <div class="tscroll"><table>
+        <thead><tr><th>#</th><th>Concepto</th><th>Total</th><th>Veces usado</th><th>% del total</th></tr></thead>
+        <tbody>
+          ${(d.rh_conceptos||[]).map((r,i)=>{
+            const pct = kpi.total_desglose>0 ? ((parseFloat(r.total)/parseFloat(kpi.total_desglose))*100).toFixed(1) : 0;
+            return `<tr>
+              <td><span style="background:${colores[i%colores.length]};color:#fff;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${i+1}</span></td>
+              <td style="font-weight:600">${r.concepto}</td>
+              <td style="font-weight:700;color:var(--red)">${fmt(r.total)}</td>
+              <td>${r.veces||0} veces</td>
+              <td>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div style="flex:1;height:8px;background:#f3f4f6;border-radius:99px;overflow:hidden">
+                    <div style="width:${pct}%;height:100%;background:${colores[i%colores.length]};border-radius:99px"></div>
+                  </div>
+                  <span style="font-size:12px;font-weight:700;min-width:36px">${pct}%</span>
+                </div>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table></div>
     </div>`;
 
-    const labs=meses.slice(1);
-    const fac=new Array(12).fill(0),cob=new Array(12).fill(0);
-    mensual.forEach(m=>{fac[m.mes-1]=parseFloat(m.facturado);cob[m.mes-1]=parseFloat(m.cobrado);});
-    makeChart('est-mensual',$('est-mensual').getContext('2d'),{
-      type:'line',data:{labels:labs,datasets:[
+    // Facturado vs Cobrado mensual
+    const labs = meses.slice(1);
+    const fac = new Array(12).fill(0), cob = new Array(12).fill(0);
+    d.mensual.forEach(m=>{ fac[m.mes-1]=parseFloat(m.facturado); cob[m.mes-1]=parseFloat(m.cobrado); });
+    makeChart('est-mensual', $('est-mensual').getContext('2d'), {
+      type:'line', data:{labels:labs, datasets:[
         {label:'Facturado',data:fac,borderColor:'#9B1528',backgroundColor:'rgba(155,21,40,.1)',tension:.3,fill:true},
-        {label:'Cobrado',data:cob,borderColor:'#2d7a4f',backgroundColor:'rgba(45,122,79,.1)',tension:.3,fill:true}
-      ]},options:{responsive:true,plugins:{legend:{position:'bottom'}}}
+        {label:'Cobrado',  data:cob,borderColor:'#2d7a4f',backgroundColor:'rgba(45,122,79,.1)',tension:.3,fill:true}
+      ]}, options:{responsive:true,plugins:{legend:{position:'bottom'}}}
     });
 
-    const est=d.por_estatus;
-    makeChart('est-estatus',$('est-estatus').getContext('2d'),{
-      type:'pie',data:{labels:est.map(e=>e.estatus),datasets:[{data:est.map(e=>parseFloat(e.monto)),backgroundColor:['#9B1528','#1d4ed8','#166534','#b91c1c','#6b7280']}]},
+    // Por estatus
+    makeChart('est-estatus', $('est-estatus').getContext('2d'), {
+      type:'pie', data:{labels:d.por_estatus.map(e=>e.estatus),datasets:[{data:d.por_estatus.map(e=>parseFloat(e.monto)),backgroundColor:colores}]},
       options:{responsive:true,plugins:{legend:{position:'right'}}}
     });
 
-    makeChart('est-top5',$('est-top5').getContext('2d'),{
-      type:'bar',data:{labels:d.top5_clientes.map(c=>c.razon_social.substring(0,18)),datasets:[{label:'Facturado',data:d.top5_clientes.map(c=>parseFloat(c.facturado)),backgroundColor:'rgba(155,21,40,.8)'}]},
+    // Desglose por concepto - barras horizontales
+    makeChart('est-rh-bar', $('est-rh-bar').getContext('2d'), {
+      type:'bar', data:{labels:d.rh_conceptos.map(r=>r.concepto),datasets:[{label:'Monto',data:d.rh_conceptos.map(r=>parseFloat(r.total)),backgroundColor:colores}]},
       options:{responsive:true,indexAxis:'y',plugins:{legend:{display:false}}}
     });
 
-    makeChart('est-rh',$('est-rh').getContext('2d'),{
-      type:'doughnut',data:{labels:d.rh_conceptos.map(r=>r.concepto),datasets:[{data:d.rh_conceptos.map(r=>parseFloat(r.total)),backgroundColor:['#9B1528','#C41E3A','#dc2626','#ef4444','#f87171','#fca5a5','#fecaca','#fee2e2']}]},
+    // Desglose dona
+    makeChart('est-rh-dona', $('est-rh-dona').getContext('2d'), {
+      type:'doughnut', data:{labels:d.rh_conceptos.map(r=>r.concepto),datasets:[{data:d.rh_conceptos.map(r=>parseFloat(r.total)),backgroundColor:colores}]},
       options:{responsive:true,plugins:{legend:{position:'right'}}}
     });
-  }catch(e){$('est-body').innerHTML=`<p class="empty">${e.message}</p>`;}
+
+    // Evolución mensual desglose (barras apiladas)
+    const conceptosUnicos = [...new Set((d.rh_mensual||[]).map(x=>x.concepto))];
+    const datasetsRHMensual = conceptosUnicos.map((con,i)=>{
+      const data = new Array(12).fill(0);
+      (d.rh_mensual||[]).filter(x=>x.concepto===con).forEach(x=>{ data[x.mes-1]=parseFloat(x.total); });
+      return {label:con, data, backgroundColor:colores[i%colores.length], stack:'s'};
+    });
+    makeChart('est-rh-mensual', $('est-rh-mensual').getContext('2d'), {
+      type:'bar', data:{labels:labs, datasets:datasetsRHMensual},
+      options:{responsive:true,plugins:{legend:{position:'bottom'}},scales:{x:{stacked:true},y:{stacked:true}}}
+    });
+
+    // Desglose por cliente
+    makeChart('est-rh-cli', $('est-rh-cli').getContext('2d'), {
+      type:'bar', data:{labels:(d.rh_clientes||[]).map(c=>c.razon_social.substring(0,20)),datasets:[{label:'Total Desglose',data:(d.rh_clientes||[]).map(c=>parseFloat(c.total_desglose)),backgroundColor:'rgba(155,21,40,.8)'}]},
+      options:{responsive:true,indexAxis:'y',plugins:{legend:{display:false}}}
+    });
+
+    // Top 5 clientes facturación
+    makeChart('est-top5', $('est-top5').getContext('2d'), {
+      type:'bar', data:{labels:d.top5_clientes.map(c=>c.razon_social.substring(0,18)),datasets:[{label:'Facturado',data:d.top5_clientes.map(c=>parseFloat(c.facturado)),backgroundColor:'rgba(29,78,216,.8)'}]},
+      options:{responsive:true,indexAxis:'y',plugins:{legend:{display:false}}}
+    });
+
+  } catch(e) { $('est-body').innerHTML=`<p class="empty">${e.message}</p>`; }
 }
 
 // ══ USUARIOS ════════════════════════════════
