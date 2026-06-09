@@ -195,47 +195,47 @@ router.post('/importar-masivo', requireRol('admin', 'capturista'), async (req, r
       const rfcEmisor   = limpiarRFC(item.rfc_emisor);
       const rfcReceptor = limpiarRFC(item.rfc_receptor);
 
-      // Buscar o crear cliente (empresa emisora)
+      // RFC Receptor del XML = CLIENTE en el sistema (quien recibe y paga la factura)
       let cliente_id = null;
-      if (rfcEmisor) {
+      if (rfcReceptor) {
         try {
-          const cli = await query(`SELECT id FROM fac_clientes WHERE rfc=$1`, [rfcEmisor]);
+          const cli = await query(`SELECT id FROM fac_clientes WHERE rfc=$1`, [rfcReceptor]);
           if (cli.rows.length) {
             cliente_id = cli.rows[0].id;
           } else {
-            const razon = limpiar(item.nombre_emisor) || rfcEmisor;
+            const razon = limpiar(item.nombre_receptor) || rfcReceptor;
             const nuevo = await query(
               `INSERT INTO fac_clientes(rfc, razon_social, nombre_comercial, activo, comision)
                VALUES($1,$2,$3,TRUE,0) RETURNING id`,
-              [rfcEmisor, razon, razon]
+              [rfcReceptor, razon, razon]
             );
             cliente_id = nuevo.rows[0].id;
-            console.log(`✅ Cliente creado: ${rfcEmisor} — ${razon}`);
+            console.log(`✅ Cliente creado (receptor): ${rfcReceptor} — ${razon}`);
           }
         } catch(e2) {
-          console.error(`⚠️ Error creando cliente ${rfcEmisor}:`, e2.message);
+          console.error(`⚠️ Error creando cliente ${rfcReceptor}:`, e2.message);
         }
       }
 
-      // Buscar o crear empresa receptora
+      // RFC Emisor del XML = EMPRESA RECEPTORA en el sistema (quien emite la factura)
       let empresa_receptora_id = null;
-      if (rfcReceptor) {
+      if (rfcEmisor) {
         try {
-          const rec = await query(`SELECT id FROM fac_empresas_receptoras WHERE rfc=$1`, [rfcReceptor]);
+          const rec = await query(`SELECT id FROM fac_empresas_receptoras WHERE rfc=$1`, [rfcEmisor]);
           if (rec.rows.length) {
             empresa_receptora_id = rec.rows[0].id;
           } else {
-            const razon = limpiar(item.nombre_receptor) || rfcReceptor;
+            const razon = limpiar(item.nombre_emisor) || rfcEmisor;
             const nueva = await query(
               `INSERT INTO fac_empresas_receptoras(rfc, razon_social, nombre_comercial, activo)
                VALUES($1,$2,$3,TRUE) RETURNING id`,
-              [rfcReceptor, razon, razon]
+              [rfcEmisor, razon, razon]
             );
             empresa_receptora_id = nueva.rows[0].id;
-            console.log(`✅ Receptora creada: ${rfcReceptor} — ${razon}`);
+            console.log(`✅ Empresa receptora creada (emisor): ${rfcEmisor} — ${razon}`);
           }
         } catch(e2) {
-          console.error(`⚠️ Error creando receptora ${rfcReceptor}:`, e2.message);
+          console.error(`⚠️ Error creando empresa receptora ${rfcEmisor}:`, e2.message);
         }
       }
 
@@ -254,7 +254,7 @@ router.post('/importar-masivo', requireRol('admin', 'capturista'), async (req, r
          parseFloat(item.total)    || 0,
          item.moneda  || 'MXN',
          limpiar(item.concepto) || null,
-         rfcEmisor    || null,
+         rfcReceptor  || null,
          req.usuario.id]
       );
       creadas++;
