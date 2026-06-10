@@ -1009,18 +1009,34 @@ async function facturas(resetPage = true) {
   </div>
   <div class="card">
     <div class="filters">
-      <input id="f-buscar" placeholder="🔍 Folio, cliente, concepto..." style="width:220px" oninput="facturas(true)">
-      <select id="f-estatus" onchange="facturas(true)">
+      <input id="f-buscar" placeholder="🔍 Folio, cliente, concepto..." style="width:220px" oninput="filtrarFacturas()">
+      <select id="f-estatus" onchange="filtrarFacturas()">
         <option value="">Todos los estatus</option>
         <option>pendiente</option><option>parcial</option><option>pagada</option><option>vencida</option><option>cancelada</option>
       </select>
-      <input id="f-desde" type="date" onchange="facturas(true)">
-      <input id="f-hasta" type="date" onchange="facturas(true)">
+      <input id="f-desde" type="date" onchange="filtrarFacturas()">
+      <input id="f-hasta" type="date" onchange="filtrarFacturas()">
+      <button class="btn bo bsm" onclick="limpiarFiltrosFac()" title="Limpiar filtros">✕ Limpiar</button>
       <button class="btn bo bsm" onclick="exportarFacturas()">⬇ Excel</button>
     </div>
     <div id="fac-table"><p class="empty">Cargando...</p></div>
   </div>`;
   await loadFacturas();
+}
+
+let _facBuscarTO = null;
+function filtrarFacturas() {
+  _facPage = 1;
+  clearTimeout(_facBuscarTO);
+  _facBuscarTO = setTimeout(loadFacturas, 250);
+}
+function limpiarFiltrosFac() {
+  $('f-buscar').value  = '';
+  $('f-estatus').value = '';
+  $('f-desde').value   = '';
+  $('f-hasta').value   = '';
+  _facPage = 1;
+  loadFacturas();
 }
 
 async function loadFacturas() {
