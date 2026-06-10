@@ -470,7 +470,7 @@ function api(url, opts = {}) {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}`, ...opts.headers },
     ...opts
   }).then(async r => {
-    if (r.status === 401 || r.status === 403) { logout(); throw new Error('Sesión expirada.'); }
+    if (r.status === 401) { logout(); throw new Error('Sesión expirada.'); }
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || 'Error en la solicitud.');
     return data;
