@@ -1512,7 +1512,22 @@ async function savePago(facturaId) {
 // ══ COBRANZA ═════════════════════════════════
 async function cobranza() {
   $('content').innerHTML = `
-  <div class="page-title">Cobranza y Saldos</div>
+  <div class="page-header">
+    <div class="page-header-left">
+      <div class="page-title">Cobranza y Saldos</div>
+      <div class="page-sub">Control de cuentas por cobrar</div>
+    </div>
+  </div>
+  <div id="cb-kpis" style="margin-bottom:18px">
+    <div class="kpi-grid">
+      ${['','','','','',''].map(()=>`
+        <div class="kpi" style="opacity:.4;pointer-events:none">
+          <div class="kpi-icon" style="background:#f3f4f6"></div>
+          <div class="label" style="background:#f3f4f6;height:10px;border-radius:4px;width:80%;margin-bottom:10px"></div>
+          <div class="value" style="background:#f3f4f6;height:26px;border-radius:4px;width:60%"></div>
+        </div>`).join('')}
+    </div>
+  </div>
   <div class="card">
     <div class="filters">
       <select id="cb-estatus" onchange="loadCobranza()">
@@ -1527,7 +1542,62 @@ async function cobranza() {
     </div>
     <div id="cb-table"><p class="empty">Cargando...</p></div>
   </div>`;
-  await loadCobranza();
+  await Promise.all([loadCobranzaKPIs(), loadCobranza()]);
+}
+
+async function loadCobranzaKPIs() {
+  try {
+    const k = await api('/pagos/kpi');
+    const mes = new Date().toLocaleString('es-MX', { month: 'long', year: 'numeric' });
+    $('cb-kpis').innerHTML = `
+    <div class="kpi-grid">
+
+      <div class="kpi success">
+        <div class="kpi-icon">💵</div>
+        <div class="label">Cobrado del Mes</div>
+        <div class="value">${fmt(k.cobrado_mes)}</div>
+        <div class="sub">${mes}</div>
+      </div>
+
+      <div class="kpi primary">
+        <div class="kpi-icon">📋</div>
+        <div class="label">Total por Cobrar</div>
+        <div class="value">${fmt(k.por_cobrar)}</div>
+        <div class="sub">${k.facturas_activas} factura${k.facturas_activas !== 1 ? 's' : ''} activa${k.facturas_activas !== 1 ? 's' : ''}</div>
+      </div>
+
+      <div class="kpi warning">
+        <div class="kpi-icon">⏰</div>
+        <div class="label">Facturas por Vencer</div>
+        <div class="value">${k.por_vencer}</div>
+        <div class="sub">Próximos 15 días</div>
+      </div>
+
+      <div class="kpi danger">
+        <div class="kpi-icon">🚨</div>
+        <div class="label">Facturas Vencidas +15d</div>
+        <div class="value">${k.vencidas_15}</div>
+        <div class="sub">Más de 15 días vencidas</div>
+      </div>
+
+      <div class="kpi danger">
+        <div class="kpi-icon">💸</div>
+        <div class="label">Monto Vencido +15d</div>
+        <div class="value" style="font-size:18px">${fmt(k.monto_vencido_15)}</div>
+        <div class="sub">Requiere gestión inmediata</div>
+      </div>
+
+      <div class="kpi danger">
+        <div class="kpi-icon">👤</div>
+        <div class="label">Clientes Morosos</div>
+        <div class="value">${k.clientes_morosos}</div>
+        <div class="sub">Con facturas vencidas</div>
+      </div>
+
+    </div>`;
+  } catch(e) {
+    $('cb-kpis').innerHTML = `<div class="ibox warn" style="margin-bottom:14px">No se pudieron cargar los indicadores.</div>`;
+  }
 }
 
 async function loadCobranza() {

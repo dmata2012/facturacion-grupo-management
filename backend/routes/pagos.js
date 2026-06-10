@@ -34,6 +34,82 @@ router.get('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/pagos/kpi — indicadores de cobranza
+router.get('/kpi', async (req, res) => {
+  try {
+    const [cobradoMes, porCobrar, porVencer, vencidas15, morosos] = await Promise.all([
+
+      // Cobrado en el mes actual
+      query(`
+        SELECT COALESCE(SUM(monto), 0) AS total
+        FROM fac_pagos
+        WHERE DATE_TRUNC('month', fecha_pago) = DATE_TRUNC('month', CURRENT_DATE)
+      `),
+
+      // Total saldo por cobrar + conteo de facturas
+      query(`
+        SELECT
+          COALESCE(SUM(f.total - COALESCE(sub_p.cobrado,0)), 0) AS total,
+          COUNT(DISTINCT f.id)::int                              AS facturas
+        FROM fac_facturas f
+        LEFT JOIN (
+          SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
+        ) sub_p ON sub_p.factura_id = f.id
+        WHERE f.estatus NOT IN ('cancelada','pagada')
+          AND f.total - COALESCE(sub_p.cobrado,0) > 0
+      `),
+
+      // Facturas que vencen en los próximos 15 días (con saldo)
+      query(`
+        SELECT COUNT(DISTINCT f.id)::int AS facturas
+        FROM fac_facturas f
+        LEFT JOIN (
+          SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
+        ) sub_p ON sub_p.factura_id = f.id
+        WHERE f.estatus NOT IN ('cancelada','pagada')
+          AND f.fecha_vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '15 days'
+          AND f.total - COALESCE(sub_p.cobrado,0) > 0
+      `),
+
+      // Facturas con más de 15 días vencidas (conteo + monto)
+      query(`
+        SELECT
+          COUNT(DISTINCT f.id)::int                              AS facturas,
+          COALESCE(SUM(f.total - COALESCE(sub_p.cobrado,0)), 0) AS monto
+        FROM fac_facturas f
+        LEFT JOIN (
+          SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
+        ) sub_p ON sub_p.factura_id = f.id
+        WHERE f.estatus NOT IN ('cancelada','pagada')
+          AND f.fecha_vencimiento < CURRENT_DATE - INTERVAL '15 days'
+          AND f.total - COALESCE(sub_p.cobrado,0) > 0
+      `),
+
+      // Clientes morosos (con al menos una factura vencida)
+      query(`
+        SELECT COUNT(DISTINCT f.cliente_id)::int AS clientes
+        FROM fac_facturas f
+        LEFT JOIN (
+          SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
+        ) sub_p ON sub_p.factura_id = f.id
+        WHERE f.estatus NOT IN ('cancelada','pagada')
+          AND f.fecha_vencimiento < CURRENT_DATE
+          AND f.total - COALESCE(sub_p.cobrado,0) > 0
+      `),
+    ]);
+
+    res.json({
+      cobrado_mes       : parseFloat(cobradoMes.rows[0].total)   || 0,
+      por_cobrar        : parseFloat(porCobrar.rows[0].total)    || 0,
+      facturas_activas  : porCobrar.rows[0].facturas             || 0,
+      por_vencer        : porVencer.rows[0].facturas             || 0,
+      vencidas_15       : vencidas15.rows[0].facturas            || 0,
+      monto_vencido_15  : parseFloat(vencidas15.rows[0].monto)   || 0,
+      clientes_morosos  : morosos.rows[0].clientes               || 0,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/pagos/factura/:factura_id
 router.get('/factura/:factura_id', async (req, res) => {
   try {
