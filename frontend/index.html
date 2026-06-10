@@ -538,6 +538,10 @@ function makeChart(key, ctx, cfg) {
 
 function canWrite() { return ME && ['admin','capturista'].includes(ME.rol); }
 function canAdmin() { return ME && ME.rol === 'admin'; }
+function isCapturista() { return ME && ME.rol === 'capturista'; }
+
+// Páginas permitidas para capturista
+const PAGES_CAPTURISTA = ['facturas'];
 
 function badgeEstatus(e) {
   const map = {pendiente:'b-pendiente',parcial:'b-parcial',pagada:'b-pagada',vencida:'b-vencida',cancelada:'b-cancelada',borrador:'b-borrador',cerrada:'b-cerrada'};
@@ -594,10 +598,25 @@ function initApp() {
     $('nav-usuarios').style.display = 'flex';
     $('nav-sec-admin').style.display = 'block';
   }
+  // Capturista: ocultar todo el menú excepto Facturas y aterrizar ahí
+  if (isCapturista()) {
+    document.querySelectorAll('nav a').forEach(a => {
+      const pg = a.id?.replace('nav-','');
+      if (!PAGES_CAPTURISTA.includes(pg)) a.style.display = 'none';
+    });
+    document.querySelectorAll('nav .nav-section').forEach(s => s.style.display = 'none');
+    nav('facturas');
+    return;
+  }
   nav('dashboard');
 }
 
 function nav(page) {
+  // Bloqueo de acceso para capturista
+  if (isCapturista() && !PAGES_CAPTURISTA.includes(page)) {
+    toast('No tienes acceso a esta sección.', 'err');
+    return;
+  }
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
   const el = $('nav-' + page);
   if (el) el.classList.add('active');

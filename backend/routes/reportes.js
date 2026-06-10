@@ -1,8 +1,10 @@
 const router = require('express').Router();
 const { query } = require('../config/db');
-const { verificarToken } = require('../middleware/auth');
+const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
+// Reportes solo para admin (no capturista)
+router.use(requireRol('admin'));
 
 // ── REPORTE COBRANZA ──────────────────────────
 router.get('/cobranza', async (req, res) => {
