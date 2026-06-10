@@ -34,6 +34,23 @@ router.get('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/pagos/cobrado-mes — pagos recibidos en el mes actual
+router.get('/cobrado-mes', async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT p.id, p.fecha_pago, p.monto, p.forma_pago, p.referencia,
+        f.id AS factura_id, f.folio, f.total AS total_factura,
+        c.razon_social, c.rfc
+      FROM fac_pagos p
+      JOIN fac_facturas f ON f.id = p.factura_id
+      JOIN fac_clientes c ON c.id = f.cliente_id
+      WHERE DATE_TRUNC('month', p.fecha_pago) = DATE_TRUNC('month', CURRENT_DATE)
+      ORDER BY p.fecha_pago DESC
+    `);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/pagos/kpi — indicadores de cobranza
 router.get('/kpi', async (req, res) => {
   try {

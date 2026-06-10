@@ -1566,42 +1566,42 @@ async function loadCobranzaKPIs() {
     $('cb-kpis').innerHTML = `
     <div class="kpi-grid">
 
-      <div class="kpi success">
+      <div class="kpi success" id="kpi-cobmes" onclick="filtrarCobranza('cobrado_mes')" style="cursor:pointer" title="Ver pagos del mes">
         <div class="kpi-icon">💵</div>
         <div class="label">Cobrado del Mes</div>
         <div class="value">${fmt(k.cobrado_mes)}</div>
         <div class="sub">${mes}</div>
       </div>
 
-      <div class="kpi primary">
+      <div class="kpi primary" id="kpi-porcobrar" onclick="filtrarCobranza('por_cobrar')" style="cursor:pointer" title="Ver todas las facturas con saldo">
         <div class="kpi-icon">📋</div>
         <div class="label">Total por Cobrar</div>
         <div class="value">${fmt(k.por_cobrar)}</div>
         <div class="sub">${k.facturas_activas} factura${k.facturas_activas !== 1 ? 's' : ''} activa${k.facturas_activas !== 1 ? 's' : ''}</div>
       </div>
 
-      <div class="kpi warning">
+      <div class="kpi warning" id="kpi-porvencer" onclick="filtrarCobranza('por_vencer')" style="cursor:pointer" title="Ver facturas por vencer">
         <div class="kpi-icon">⏰</div>
         <div class="label">Facturas por Vencer</div>
         <div class="value">${k.por_vencer}</div>
         <div class="sub">Próximos 15 días</div>
       </div>
 
-      <div class="kpi danger">
+      <div class="kpi danger" id="kpi-vencidas15" onclick="filtrarCobranza('vencidas_15')" style="cursor:pointer" title="Ver facturas vencidas +15 días">
         <div class="kpi-icon">🚨</div>
         <div class="label">Facturas Vencidas +15d</div>
         <div class="value">${k.vencidas_15}</div>
         <div class="sub">Más de 15 días vencidas</div>
       </div>
 
-      <div class="kpi danger">
+      <div class="kpi danger" id="kpi-montovencido" onclick="filtrarCobranza('vencidas_15')" style="cursor:pointer" title="Ver facturas con monto vencido">
         <div class="kpi-icon">💸</div>
         <div class="label">Monto Vencido +15d</div>
         <div class="value" style="font-size:18px">${fmt(k.monto_vencido_15)}</div>
         <div class="sub">Requiere gestión inmediata</div>
       </div>
 
-      <div class="kpi danger">
+      <div class="kpi danger" id="kpi-morosos" onclick="filtrarCobranza('morosos')" style="cursor:pointer" title="Ver clientes morosos">
         <div class="kpi-icon">👤</div>
         <div class="label">Clientes Morosos</div>
         <div class="value">${k.clientes_morosos}</div>
@@ -1621,31 +1621,120 @@ async function loadCobranza() {
   const hasta = $('cb-hasta')?.value;   if (hasta) url += `hasta=${hasta}&`;
   try {
     const d = await api(url);
-    let totalSaldo = d.reduce((a,r)=>a+parseFloat(r.saldo),0);
-    $('cb-table').innerHTML = d.length ? `
-    <div class="ibox ${totalSaldo>0?'warn':'ok'}" style="margin-bottom:10px">
-      Total por cobrar: <strong>${fmt(totalSaldo)}</strong> en ${d.length} facturas
+    window._cbData = d;
+    _activarKpi(null);
+    renderCobranzaTable(d);
+  } catch(e) { $('cb-table').innerHTML = `<p class="empty">${e.message}</p>`; }
+}
+
+function renderCobranzaTable(d, titulo = null) {
+  const totalSaldo = d.reduce((a,r) => a + parseFloat(r.saldo), 0);
+  $('cb-table').innerHTML = d.length ? `
+    ${titulo ? `<div class="ibox info" style="margin-bottom:8px;font-size:12px">📌 ${titulo}</div>` : ''}
+    <div class="ibox ${totalSaldo > 0 ? 'warn' : 'ok'}" style="margin-bottom:10px">
+      Total por cobrar: <strong>${fmt(totalSaldo)}</strong> en ${d.length} factura${d.length !== 1 ? 's' : ''}
     </div>
     <div class="tscroll"><table>
       <thead><tr><th>Folio</th><th>Cliente</th><th>RFC</th><th>Emisión</th><th>Vencimiento</th><th>Total</th><th>Cobrado</th><th>Saldo</th><th>Estatus</th><th>Días vencido</th><th></th></tr></thead>
-      <tbody>${d.map(r=>{
-        const diasV = r.fecha_vencimiento && new Date(r.fecha_vencimiento)<new Date()
-          ? Math.floor((new Date()-new Date(r.fecha_vencimiento))/(86400000)) : 0;
+      <tbody>${d.map(r => {
+        const diasV = r.fecha_vencimiento && new Date(r.fecha_vencimiento) < new Date()
+          ? Math.floor((new Date() - new Date(r.fecha_vencimiento)) / 86400000) : 0;
         return `<tr>
           <td><a href="#" onclick="detalleFactura(${r.id})" style="color:var(--red)">${r.folio||'#'+r.id}</a></td>
           <td>${r.razon_social||'—'}</td><td>${r.rfc||'—'}</td>
           <td>${fmtDate(r.fecha_emision)}</td>
-          <td>${r.fecha_vencimiento?fmtDate(r.fecha_vencimiento):'—'}</td>
+          <td>${r.fecha_vencimiento ? fmtDate(r.fecha_vencimiento) : '—'}</td>
           <td>${fmt(r.total)}</td>
           <td style="color:var(--success)">${fmt(r.cobrado)}</td>
           <td style="color:var(--danger);font-weight:700">${fmt(r.saldo)}</td>
           <td>${badgeEstatus(r.estatus)}</td>
-          <td style="color:${diasV>30?'var(--danger)':diasV>0?'var(--warning)':'var(--muted)'}">${diasV>0?diasV+'d':'—'}</td>
-          <td>${canWrite()?`<button class="btn bsuc bsm" onclick="openPago(${r.id})">💲 Pagar</button>`:''}
+          <td style="color:${diasV>30?'var(--danger)':diasV>0?'var(--warning)':'var(--muted)'}">${diasV > 0 ? diasV+'d' : '—'}</td>
+          <td>${canWrite() ? `<button class="btn bsuc bsm" onclick="openPago(${r.id})">💲 Pagar</button>` : ''}</td>
         </tr>`;
       }).join('')}</tbody>
-    </table></div>` : `<p class="empty">Sin saldos pendientes 🎉</p>`;
-  } catch(e) { $('cb-table').innerHTML = `<p class="empty">${e.message}</p>`; }
+    </table></div>` : `<p class="empty">Sin resultados para este filtro.</p>`;
+}
+
+function _activarKpi(id) {
+  document.querySelectorAll('#cb-kpis .kpi').forEach(el => {
+    el.style.outline      = el.id === id ? '2px solid var(--red)' : '';
+    el.style.outlineOffset = el.id === id ? '2px' : '';
+  });
+}
+
+async function filtrarCobranza(filtro) {
+  const idMap = {
+    cobrado_mes: 'kpi-cobmes', por_cobrar: 'kpi-porcobrar',
+    por_vencer: 'kpi-porvencer', vencidas_15: 'kpi-vencidas15', morosos: 'kpi-morosos'
+  };
+  _activarKpi(idMap[filtro] || null);
+
+  if (filtro === 'cobrado_mes') { await mostrarCobradoMes(); return; }
+
+  if (!window._cbData) await loadCobranza();
+  const todo = window._cbData || [];
+  const hoy  = new Date(); hoy.setHours(0,0,0,0);
+  let data, titulo;
+
+  if (filtro === 'por_cobrar') {
+    data = todo;
+    titulo = `Todas las facturas con saldo pendiente (${todo.length})`;
+  } else if (filtro === 'por_vencer') {
+    const en15 = new Date(hoy); en15.setDate(en15.getDate() + 15);
+    data = todo.filter(r => {
+      if (!r.fecha_vencimiento) return false;
+      const v = new Date(r.fecha_vencimiento); v.setHours(0,0,0,0);
+      return v >= hoy && v <= en15;
+    });
+    titulo = `Facturas que vencen en los próximos 15 días (${data.length})`;
+  } else if (filtro === 'vencidas_15') {
+    const hace15 = new Date(hoy); hace15.setDate(hace15.getDate() - 15);
+    data = todo.filter(r => {
+      if (!r.fecha_vencimiento) return false;
+      const v = new Date(r.fecha_vencimiento); v.setHours(0,0,0,0);
+      return v < hace15;
+    });
+    titulo = `Facturas vencidas hace más de 15 días (${data.length})`;
+  } else if (filtro === 'morosos') {
+    data = todo.filter(r => {
+      if (!r.fecha_vencimiento) return false;
+      const v = new Date(r.fecha_vencimiento); v.setHours(0,0,0,0);
+      return v < hoy;
+    });
+    titulo = `Clientes morosos — facturas vencidas (${data.length})`;
+  } else {
+    data = todo; titulo = null;
+  }
+
+  renderCobranzaTable(data, titulo);
+}
+
+async function mostrarCobradoMes() {
+  $('cb-table').innerHTML = '<p class="empty">Cargando pagos del mes…</p>';
+  try {
+    const d   = await api('/pagos/cobrado-mes');
+    const tot = d.reduce((a, r) => a + parseFloat(r.monto), 0);
+    const mes = new Date().toLocaleString('es-MX', { month: 'long', year: 'numeric' });
+    $('cb-table').innerHTML = d.length ? `
+      <div class="ibox ok" style="margin-bottom:10px">
+        Cobrado en <strong>${mes}</strong>: <strong>${fmt(tot)}</strong> — ${d.length} pago${d.length !== 1 ? 's' : ''}
+      </div>
+      <div class="tscroll"><table>
+        <thead><tr><th>Fecha pago</th><th>Cliente</th><th>RFC</th><th>Folio</th><th>Total factura</th><th>Monto cobrado</th><th>Forma de pago</th><th>Referencia</th></tr></thead>
+        <tbody>${d.map(p => `<tr>
+          <td>${fmtDate(p.fecha_pago)}</td>
+          <td>${p.razon_social||'—'}</td>
+          <td>${p.rfc||'—'}</td>
+          <td><a href="#" onclick="detalleFactura(${p.factura_id})" style="color:var(--red)">${p.folio||'#'+p.factura_id}</a></td>
+          <td>${fmt(p.total_factura)}</td>
+          <td style="color:var(--success);font-weight:700">${fmt(p.monto)}</td>
+          <td>${p.forma_pago||'—'}</td>
+          <td>${p.referencia||'—'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>` : `<p class="empty">Sin pagos registrados en ${mes}.</p>`;
+  } catch(e) {
+    $('cb-table').innerHTML = `<p class="empty">Error: ${e.message}</p>`;
+  }
 }
 
 // ══ CLIENTES ═════════════════════════════════
