@@ -634,6 +634,8 @@ async function dashboard() {
 
   try {
     const d = await api(`/dashboard?año=${año}`);
+    window._dashAño  = año;
+    window._dashData = d;
     const k = d.kpi;
     const cobradoPct = k.facturado > 0 ? Math.round((k.cobrado/k.facturado)*100) : 0;
     const vencidoPct = k.facturado > 0 ? Math.round((k.vencido/k.facturado)*100) : 0;
@@ -655,39 +657,39 @@ async function dashboard() {
 
     <!-- KPIs PRINCIPALES -->
     <div class="kpi-grid">
-      <div class="kpi primary">
+      <div class="kpi primary" id="dkpi-facturado" onclick="cargarDetalleDash('facturado')" style="cursor:pointer" title="Ver detalle por cliente">
         <div class="kpi-icon">🧾</div>
         <div class="label">Total Facturado ${año}</div>
         <div class="value">${fmt(k.facturado)}</div>
         <div class="sub">${k.total_facturas} facturas emitidas</div>
       </div>
-      <div class="kpi success">
+      <div class="kpi success" id="dkpi-cobrado" onclick="cargarDetalleDash('cobrado')" style="cursor:pointer" title="Ver cobranza por cliente">
         <div class="kpi-icon">✅</div>
         <div class="label">Total Cobrado</div>
         <div class="value">${fmt(k.cobrado)}</div>
         <div class="sub"><span class="trend-up">↑ ${cobradoPct}%</span> de lo facturado</div>
         <div class="progress-bar" style="margin-top:10px"><div class="progress-fill" style="width:${cobradoPct}%;background:linear-gradient(90deg,#16a34a,#4ade80)"></div></div>
       </div>
-      <div class="kpi warning">
+      <div class="kpi warning" id="dkpi-porcobrar" onclick="cargarDetalleDash('por_cobrar')" style="cursor:pointer" title="Ver facturas pendientes">
         <div class="kpi-icon">⏳</div>
         <div class="label">Por Cobrar</div>
         <div class="value">${fmt(k.por_cobrar)}</div>
         <div class="sub">Saldo pendiente de clientes</div>
       </div>
-      <div class="kpi danger">
+      <div class="kpi danger" id="dkpi-vencido" onclick="cargarDetalleDash('vencido')" style="cursor:pointer" title="Ver cartera vencida">
         <div class="kpi-icon">⚠️</div>
         <div class="label">Cartera Vencida</div>
         <div class="value">${fmt(k.vencido)}</div>
         <div class="sub"><span class="trend-dn">↑ ${vencidoPct}%</span> del total facturado</div>
         <div class="progress-bar" style="margin-top:10px"><div class="progress-fill" style="width:${vencidoPct}%;background:linear-gradient(90deg,#dc2626,#f87171)"></div></div>
       </div>
-      <div class="kpi">
+      <div class="kpi" id="dkpi-clientes" onclick="cargarDetalleDash('clientes')" style="cursor:pointer" title="Ver clientes activos">
         <div class="kpi-icon">🏢</div>
         <div class="label">Clientes Activos</div>
         <div class="value">${k.clientes_activos}</div>
         <div class="sub">Con facturas en el año</div>
       </div>
-      <div class="kpi">
+      <div class="kpi" id="dkpi-nomina" onclick="cargarDetalleDash('nomina')" style="cursor:pointer" title="Ver detalle de nómina">
         <div class="kpi-icon">👥</div>
         <div class="label">Nómina ${año}</div>
         <div class="value">${fmt(d.nomina?.total_nomina||0)}</div>
@@ -738,7 +740,10 @@ async function dashboard() {
           <div style="font-size:12px;margin-top:4px">Sin facturas vencidas pendientes</div>
         </div>`}
       </div>
-    </div>`;
+    </div>
+
+    <!-- DETALLE KPI (se llena al hacer clic en un indicador) -->
+    <div id="dash-detail" style="display:none;margin-top:16px"></div>`;
 
     // ── GRÁFICA MENSUAL (barras modernas) ──
     const labels = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -808,6 +813,167 @@ async function dashboard() {
     });
 
   } catch(e) { $('dash-body').innerHTML = `<div class="empty">${e.message}</div>`; }
+}
+
+async function cargarDetalleDash(tipo) {
+  const año = window._dashAño || new Date().getFullYear();
+  // Resaltar card activo
+  document.querySelectorAll('#dash-body .kpi').forEach(el => {
+    el.style.outline = ''; el.style.outlineOffset = '';
+  });
+  const ids = { facturado:'dkpi-facturado', cobrado:'dkpi-cobrado', por_cobrar:'dkpi-porcobrar',
+                vencido:'dkpi-vencido', clientes:'dkpi-clientes', nomina:'dkpi-nomina' };
+  const activo = $(ids[tipo]);
+  if (activo) { activo.style.outline = '2px solid var(--red)'; activo.style.outlineOffset = '2px'; }
+
+  const det = $('dash-detail');
+  det.style.display = 'block';
+  det.innerHTML = `
+    <div class="card" style="margin-top:0">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <div class="card-title" id="dd-title" style="margin:0">Cargando…</div>
+        <button class="btn bo bsm" style="margin-left:auto"
+          onclick="$('dash-detail').style.display='none';document.querySelectorAll('#dash-body .kpi').forEach(e=>{e.style.outline='';e.style.outlineOffset=''})">
+          ✕ Cerrar
+        </button>
+      </div>
+      <div id="dd-body"><p class="empty">Cargando…</p></div>
+    </div>`;
+  det.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  try {
+    if (tipo === 'facturado' || tipo === 'clientes') {
+      $('dd-title').textContent = tipo === 'facturado'
+        ? `Facturación por cliente — ${año}`
+        : `Clientes activos — ${año}`;
+      const data = await api(`/reportes/clientes?año=${año}`);
+      const rows = tipo === 'clientes' ? data.filter(c => parseInt(c.facturas) > 0) : data;
+      const total = rows.reduce((a,c) => a + parseFloat(c.facturado), 0);
+      $('dd-body').innerHTML = rows.length ? `
+        <div class="ibox info" style="margin-bottom:10px">
+          <strong>${rows.length} clientes</strong> · Total facturado: <strong>${fmt(total)}</strong>
+        </div>
+        <div class="tscroll"><table>
+          <thead><tr><th>Cliente</th><th>RFC</th><th>Facturas</th><th>Facturado</th><th>Cobrado</th><th>Saldo</th><th>Última factura</th></tr></thead>
+          <tbody>${rows.map(c => `<tr>
+            <td>${c.razon_social}</td><td>${c.rfc}</td>
+            <td style="text-align:center">${c.facturas}</td>
+            <td>${fmt(c.facturado)}</td>
+            <td style="color:var(--success)">${fmt(c.cobrado)}</td>
+            <td style="color:${parseFloat(c.saldo)>0?'var(--danger)':'var(--muted)'};font-weight:600">${fmt(c.saldo)}</td>
+            <td>${c.ultima_factura ? fmtDate(c.ultima_factura) : '—'}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>` : `<p class="empty">Sin datos para ${año}.</p>`;
+
+    } else if (tipo === 'cobrado') {
+      $('dd-title').textContent = `Cobranza por cliente — ${año}`;
+      const data = await api(`/reportes/clientes?año=${año}`);
+      const rows = data.filter(c => parseFloat(c.cobrado) > 0)
+                       .sort((a,b) => parseFloat(b.cobrado) - parseFloat(a.cobrado));
+      const total = rows.reduce((a,c) => a + parseFloat(c.cobrado), 0);
+      $('dd-body').innerHTML = rows.length ? `
+        <div class="ibox ok" style="margin-bottom:10px">
+          Total cobrado en ${año}: <strong>${fmt(total)}</strong> de ${rows.length} clientes
+        </div>
+        <div class="tscroll"><table>
+          <thead><tr><th>Cliente</th><th>RFC</th><th>Cobrado</th><th>Facturado</th><th>% cobrado</th><th>Saldo pendiente</th></tr></thead>
+          <tbody>${rows.map(c => {
+            const pct = parseFloat(c.facturado) > 0
+              ? Math.round((parseFloat(c.cobrado)/parseFloat(c.facturado))*100) : 0;
+            return `<tr>
+              <td>${c.razon_social}</td><td>${c.rfc}</td>
+              <td style="color:var(--success);font-weight:700">${fmt(c.cobrado)}</td>
+              <td>${fmt(c.facturado)}</td>
+              <td><div style="display:flex;align-items:center;gap:6px">
+                <div style="flex:1;background:#e5e7eb;border-radius:4px;height:6px">
+                  <div style="background:var(--success);height:6px;border-radius:4px;width:${pct}%"></div>
+                </div>
+                <span style="font-size:11px;min-width:30px">${pct}%</span>
+              </div></td>
+              <td style="color:${parseFloat(c.saldo)>0?'var(--danger)':'var(--muted)'}">${fmt(c.saldo)}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>` : `<p class="empty">Sin cobros registrados en ${año}.</p>`;
+
+    } else if (tipo === 'por_cobrar') {
+      $('dd-title').textContent = 'Facturas pendientes de cobro';
+      const data = await api('/pagos');
+      const totalSaldo = data.reduce((a,r) => a + parseFloat(r.saldo), 0);
+      $('dd-body').innerHTML = data.length ? `
+        <div class="ibox warn" style="margin-bottom:10px">
+          Total por cobrar: <strong>${fmt(totalSaldo)}</strong> · ${data.length} facturas
+        </div>
+        <div class="tscroll"><table>
+          <thead><tr><th>Folio</th><th>Cliente</th><th>Vencimiento</th><th>Total</th><th>Cobrado</th><th>Saldo</th><th>Estatus</th><th></th></tr></thead>
+          <tbody>${data.map(r => {
+            const diasV = r.fecha_vencimiento && new Date(r.fecha_vencimiento) < new Date()
+              ? Math.floor((new Date()-new Date(r.fecha_vencimiento))/86400000) : 0;
+            return `<tr>
+              <td><a href="#" onclick="detalleFactura(${r.id})" style="color:var(--red)">${r.folio||'#'+r.id}</a></td>
+              <td>${r.razon_social||'—'}</td>
+              <td>${r.fecha_vencimiento ? fmtDate(r.fecha_vencimiento) : '—'}</td>
+              <td>${fmt(r.total)}</td>
+              <td style="color:var(--success)">${fmt(r.cobrado)}</td>
+              <td style="color:var(--danger);font-weight:700">${fmt(r.saldo)}</td>
+              <td>${badgeEstatus(r.estatus)}</td>
+              <td>${canWrite()?`<button class="btn bsuc bsm" onclick="openPago(${r.id})">💲 Pagar</button>`:''}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>` : `<p class="empty">Sin saldos pendientes 🎉</p>`;
+
+    } else if (tipo === 'vencido') {
+      $('dd-title').textContent = 'Cartera vencida — facturas con saldo vencido';
+      const todo = await api('/pagos');
+      const hoy = new Date(); hoy.setHours(0,0,0,0);
+      const data = todo.filter(r => {
+        if (!r.fecha_vencimiento) return false;
+        const v = new Date(r.fecha_vencimiento); v.setHours(0,0,0,0);
+        return v < hoy;
+      }).sort((a,b) => new Date(a.fecha_vencimiento)-new Date(b.fecha_vencimiento));
+      const totalV = data.reduce((a,r) => a + parseFloat(r.saldo), 0);
+      $('dd-body').innerHTML = data.length ? `
+        <div class="ibox warn" style="margin-bottom:10px">
+          Cartera vencida: <strong>${fmt(totalV)}</strong> · ${data.length} factura${data.length!==1?'s':''}
+        </div>
+        <div class="tscroll"><table>
+          <thead><tr><th>Folio</th><th>Cliente</th><th>Venció</th><th>Días vencido</th><th>Saldo</th><th>Estatus</th><th></th></tr></thead>
+          <tbody>${data.map(r => {
+            const d = Math.floor((new Date()-new Date(r.fecha_vencimiento))/86400000);
+            return `<tr>
+              <td><a href="#" onclick="detalleFactura(${r.id})" style="color:var(--red)">${r.folio||'#'+r.id}</a></td>
+              <td>${r.razon_social||'—'}</td>
+              <td style="color:var(--danger)">${fmtDate(r.fecha_vencimiento)}</td>
+              <td style="color:${d>30?'var(--danger)':'var(--warning)'};font-weight:700">${d}d</td>
+              <td style="color:var(--danger);font-weight:800">${fmt(r.saldo)}</td>
+              <td>${badgeEstatus(r.estatus)}</td>
+              <td>${canWrite()?`<button class="btn bsuc bsm" onclick="openPago(${r.id})">💲 Pagar</button>`:''}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>` : `<p class="empty">Sin cartera vencida 🎉</p>`;
+
+    } else if (tipo === 'nomina') {
+      $('dd-title').textContent = `Nómina ${año} — quincenas`;
+      const data = await api(`/reportes/nomina?año=${año}`);
+      const totalNeto = data.quincenas.reduce((a,q) => a + parseFloat(q.total_neto), 0);
+      $('dd-body').innerHTML = data.quincenas.length ? `
+        <div class="ibox info" style="margin-bottom:10px">
+          Total nómina ${año}: <strong>${fmt(totalNeto)}</strong> · ${data.quincenas.length} quincenas
+        </div>
+        <div class="tscroll"><table>
+          <thead><tr><th>Quincena</th><th>Inicio</th><th>Fin</th><th>Percepciones</th><th>Deducciones</th><th>Neto</th><th>Estatus</th></tr></thead>
+          <tbody>${data.quincenas.map(q => `<tr>
+            <td style="font-weight:700">Q${q.quincena}</td>
+            <td>${fmtDate(q.fecha_inicio)}</td><td>${fmtDate(q.fecha_fin)}</td>
+            <td>${fmt(q.total_percepciones)}</td>
+            <td style="color:var(--danger)">${fmt(q.total_deducciones)}</td>
+            <td style="color:var(--success);font-weight:700">${fmt(q.total_neto)}</td>
+            <td>${badgeEstatus(q.estatus)}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>` : `<p class="empty">Sin quincenas en ${año}.</p>`;
+    }
+  } catch(e) {
+    if ($('dd-body')) $('dd-body').innerHTML = `<p class="empty">Error: ${e.message}</p>`;
+  }
 }
 
 // ══ FACTURAS ══════════════════════════════════
