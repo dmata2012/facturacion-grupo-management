@@ -428,7 +428,7 @@ canvas{max-height:230px}
       <a href="#" onclick="nav('reportes')"  id="nav-reportes"><span class="ni">📋</span> Reportes</a>
       <a href="#" onclick="nav('estadisticas')" id="nav-estadisticas"><span class="ni">📈</span> Estadísticas</a>
       <div class="nav-section">Configuración</div>
-      <a href="#" onclick="nav('receptoras')" id="nav-receptoras"><span class="ni">🏛</span> Empresas Receptoras</a>
+      <a href="#" onclick="nav('receptoras')" id="nav-receptoras"><span class="ni">🏛</span> Empresas Emisoras</a>
       <a href="#" onclick="nav('catalogo')"   id="nav-catalogo"><span class="ni">📂</span> Conceptos de Desglose</a>
       <div class="nav-section" id="nav-sec-admin" style="display:none">Admin</div>
       <a href="#" onclick="nav('usuarios')"  id="nav-usuarios" style="display:none"><span class="ni">🔒</span> Usuarios</a>
@@ -894,8 +894,8 @@ async function openFactura(id = null) {
     <div class="fi"><label>Cliente (Emisor)</label>
       <select id="fc-cliente"><option value="">— Sin cliente —</option></select>
     </div>
-    <div class="fi"><label>Empresa Receptora</label>
-      <select id="fc-receptora"><option value="">— Sin empresa receptora —</option></select>
+    <div class="fi"><label>Empresa Emisora</label>
+      <select id="fc-receptora"><option value="">— Sin empresa emisora —</option></select>
     </div>
     <div class="fi"><label>Tipo de comprobante</label>
       <select id="fc-tipo">
@@ -945,7 +945,7 @@ async function loadReceptorasSelect(selId) {
     const d = await api('/receptoras?activo=true');
     const sel = $(selId);
     const cur = sel.value;
-    sel.innerHTML = '<option value="">— Sin empresa receptora —</option>';
+    sel.innerHTML = '<option value="">— Sin empresa emisora —</option>';
     d.forEach(r => { sel.innerHTML += `<option value="${r.id}">${r.razon_social} (${r.rfc})</option>`; });
     if (cur) sel.value = cur;
   } catch {}
@@ -1097,7 +1097,7 @@ async function detectarReceptora(rfc) {
       // Actualizar el cuadro informativo añadiendo indicador de match
       const span = document.createElement('span');
       span.style.cssText = 'color:var(--success);font-weight:600;margin-left:8px';
-      span.textContent = '✅ Empresa receptora encontrada';
+      span.textContent = '✅ Empresa emisora encontrada';
       if (box && !box.querySelector('.rec-match')) {
         span.className = 'rec-match';
         box.appendChild(span);
@@ -3051,7 +3051,7 @@ function exportRepEjecutivo() { toast('Usa la impresión del navegador para expo
 async function receptoras() {
   $('content').innerHTML = `
   <div class="ch">
-    <div class="page-title" style="margin:0">Empresas Receptoras</div>
+    <div class="page-title" style="margin:0">Empresas Emisoras</div>
     ${canWrite() ? `<button class="btn bs" onclick="openReceptora()">+ Nueva empresa</button>` : ''}
   </div>
   <div class="card">
@@ -3096,14 +3096,14 @@ async function loadReceptoras() {
           ${canAdmin() ? `<button class="btn bd bsm" onclick="desactivarReceptora(${r.id})">✕</button>` : ''}
         </td>
       </tr>`).join('')}</tbody>
-    </table></div>` : `<p class="empty">No hay empresas receptoras registradas.</p>`;
+    </table></div>` : `<p class="empty">No hay empresas emisoras registradas.</p>`;
   } catch(e) { $('er-table').innerHTML = `<p class="empty">${e.message}</p>`; }
 }
 
 function openReceptora(id = null) {
   // Reutilizamos modal-cliente
   $('modal-cliente-body').innerHTML = `
-  <h4>${id ? 'Editar' : 'Nueva'} Empresa Receptora</h4>
+  <h4>${id ? 'Editar' : 'Nueva'} Empresa Emisora</h4>
   <div class="fg">
     <div class="fi"><label>RFC *</label>
       <input id="er-rfc" placeholder="XAXX010101000" style="text-transform:uppercase">
@@ -3190,7 +3190,7 @@ async function saveReceptora(id) {
 }
 
 async function desactivarReceptora(id) {
-  if (!await confirm2('¿Desactivar esta empresa receptora?')) return;
+  if (!await confirm2('¿Desactivar esta empresa emisora?')) return;
   try {
     await api(`/receptoras/${id}`, { method: 'DELETE' });
     toast('Empresa desactivada.');
@@ -3203,7 +3203,7 @@ function exportarReceptoras() {
     ['rfc','RFC'], ['razon_social','Razón Social'], ['nombre_comercial','Nombre Comercial'],
     ['regimen_fiscal','Régimen Fiscal'], ['codigo_postal','CP'], ['ciudad','Ciudad'],
     ['contacto','Contacto'], ['email','Email'], ['telefono','Teléfono']
-  ], 'Empresas_Receptoras'));
+  ], 'Empresas_Emisoras'));
 }
 
 // ══ CATÁLOGO DE CONCEPTOS DE DESGLOSE ═══════
