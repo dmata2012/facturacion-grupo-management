@@ -145,41 +145,47 @@ router.get('/comisiones', async (req, res) => {
     if (desde) { params.push(desde); whereF += ` AND f.fecha_emision>=$${params.length}`; }
     if (hasta) { params.push(hasta); whereF += ` AND f.fecha_emision<=$${params.length}`; }
 
-    // Resumen por cliente
-    const resumen = await query(`
-      SELECT
-        c.id, c.rfc, c.razon_social, c.ciudad,
-        c.comision                                                             AS pct_comision,
-        COUNT(DISTINCT f.id)::int                                              AS facturas,
-        COALESCE(SUM(f.total),0)                                              AS facturado,
-        COALESCE(SUM(p.monto),0)                                              AS cobrado,
-        COALESCE(SUM(f.total),0) - COALESCE(SUM(p.monto),0)                  AS saldo,
-        COALESCE(SUM(f.total),0)   * (c.comision / 100.0)                    AS comision_generada,
-        COALESCE(SUM(p.monto),0)   * (c.comision / 100.0)                    AS comision_cobrada
-      FROM fac_clientes c
-      JOIN fac_facturas f ON f.cliente_id = c.id
-      LEFT JOIN fac_pagos p ON p.factura_id = f.id
-      ${whereF}
-      GROUP BY c.id
-      ORDER BY comision_generada DESC
-    `, params);
-
-    // Detalle de facturas por cliente (con comisión por factura)
+    // Detalle: una fila por factura con el monto de comisión del desglose
     const detalle = await query(`
       SELECT
-        f.id, f.folio, f.fecha_emision, f.fecha_vencimiento,
-        f.total, f.estatus, f.concepto,
-        c.id AS cliente_id, c.rfc, c.razon_social, c.comision AS pct_comision,
-        COALESCE(SUM(p.monto),0)                           AS cobrado,
-        f.total - COALESCE(SUM(p.monto),0)                 AS saldo,
-        f.total      * (c.comision / 100.0)                AS comision_generada,
-        COALESCE(SUM(p.monto),0) * (c.comision / 100.0)   AS comision_cobrada
+        f.id, f.folio, f.fecha_emision, f.estatus,
+        f.total AS total_factura,
+        c.rfc, c.razon_social,
+        COALESCE(SUM(p.monto),0)                                   AS cobrado,
+        f.total - COALESCE(SUM(p.monto),0)                         AS saldo,
+        COALESCE(SUM(d.monto) FILTER (
+          WHERE UPPER(d.concepto) ILIKE '%COMISION%'
+        ),0)                                                        AS comision_desglose,
+        CASE WHEN f.estatus = 'pagada' THEN
+          COALESCE(SUM(d.monto) FILTER (WHERE UPPER(d.concepto) ILIKE '%COMISION%'),0)
+        ELSE 0 END                                                  AS comision_cobrada
       FROM fac_facturas f
       JOIN fac_clientes c ON c.id = f.cliente_id
       LEFT JOIN fac_pagos p ON p.factura_id = f.id
+      LEFT JOIN fac_desglose_rh d ON d.factura_id = f.id
       ${whereF}
-      GROUP BY f.id, c.id
+      GROUP BY f.id, c.rfc, c.razon_social
+      HAVING COALESCE(SUM(d.monto) FILTER (WHERE UPPER(d.concepto) ILIKE '%COMISION%'),0) > 0
       ORDER BY c.razon_social, f.fecha_emision DESC
+    `, params);
+
+    // Resumen acumulado por cliente
+    const resumen = await query(`
+      SELECT
+        c.rfc, c.razon_social,
+        COUNT(DISTINCT f.id)::int                                          AS facturas,
+        COALESCE(SUM(f.total),0)                                          AS facturado,
+        COALESCE(SUM(p.monto),0)                                          AS cobrado,
+        COALESCE(SUM(d.monto) FILTER (WHERE UPPER(d.concepto) ILIKE '%COMISION%'),0) AS total_comision,
+        COALESCE(SUM(d.monto) FILTER (WHERE UPPER(d.concepto) ILIKE '%COMISION%' AND f.estatus='pagada'),0) AS comision_cobrada
+      FROM fac_facturas f
+      JOIN fac_clientes c ON c.id = f.cliente_id
+      LEFT JOIN fac_pagos p ON p.factura_id = f.id
+      LEFT JOIN fac_desglose_rh d ON d.factura_id = f.id
+      ${whereF}
+      GROUP BY c.rfc, c.razon_social
+      HAVING COALESCE(SUM(d.monto) FILTER (WHERE UPPER(d.concepto) ILIKE '%COMISION%'),0) > 0
+      ORDER BY total_comision DESC
     `, params);
 
     res.json({ resumen: resumen.rows, detalle: detalle.rows });
