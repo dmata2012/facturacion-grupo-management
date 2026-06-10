@@ -1523,14 +1523,20 @@ function renderRH() {
   <!-- FILAS -->
   <div id="rh-tbody">${filas}</div>
 
-  <!-- TOTAL -->
-  <div class="desg-total-bar" id="rh-total-bar" style="margin-top:10px;padding:10px 16px">
+  <!-- TOTAL DESGLOSE: Subtotal | IVA | Total -->
+  <div class="desg-total-bar" id="rh-total-bar" style="margin-top:10px;padding:12px 16px">
     <div>
       <div class="dtb-label" style="font-size:10px">TOTAL DESGLOSE</div>
       <div class="dtb-diff" id="rh-diff-msg" style="font-size:11px"></div>
     </div>
-    <div style="text-align:right">
-      <div class="dtb-val" id="rh-suma-val" style="font-size:20px">$0.00</div>
+    <div style="display:grid;grid-template-columns:auto auto;gap:2px 14px;align-items:end;justify-content:end;text-align:right">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Subtotal</div>
+      <div id="rh-sub-val" style="font-size:13px;font-weight:700;color:var(--dark);min-width:90px">$0.00</div>
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">IVA <span style="opacity:.6">16%</span></div>
+      <div id="rh-iva-val" style="font-size:13px;font-weight:700;color:var(--dark);min-width:90px">$0.00</div>
+      <div style="font-size:11px;font-weight:800;color:var(--dark);text-transform:uppercase;letter-spacing:.5px;border-top:1px solid rgba(0,0,0,.1);padding-top:3px">Total</div>
+      <div id="rh-suma-val" style="font-size:20px;font-weight:900;color:var(--dark);border-top:1px solid rgba(0,0,0,.1);padding-top:3px">$0.00</div>
+      <div></div>
       <div id="rh-valid-badge" style="font-size:11px;margin-top:1px"></div>
     </div>
   </div>
@@ -1599,18 +1605,25 @@ function rhEliminarFila(i) {
 }
 
 function rhRecalcTotal() {
-  const suma  = _rhFilas.reduce((a, f) => a + (parseFloat(f.monto) || 0), 0);
-  const diff  = parseFloat(_rhTotal) - suma;
-  const valid = Math.abs(diff) < 0.01;
+  // Subtotal = suma de montos de conceptos del desglose
+  const subtotal = _rhFilas.reduce((a, f) => a + (parseFloat(f.monto) || 0), 0);
+  const iva      = Math.round(subtotal * 0.16 * 100) / 100;
+  const total    = Math.round((subtotal + iva) * 100) / 100;
+  const diff     = parseFloat(_rhTotal) - total;
+  const valid    = Math.abs(diff) < 0.01;
 
+  const subEl   = $('rh-sub-val');
+  const ivaEl   = $('rh-iva-val');
   const sumaEl  = $('rh-suma-val');
   const badgeEl = $('rh-valid-badge');
   const diffMsg = $('rh-diff-msg');
   const bar     = $('rh-total-bar');
 
+  if (subEl)  subEl.textContent  = fmt(subtotal);
+  if (ivaEl)  ivaEl.textContent  = fmt(iva);
   if (sumaEl) {
-    sumaEl.textContent = fmt(suma);
-    sumaEl.style.color = valid ? '#16a34a' : suma > _rhTotal ? '#dc2626' : 'var(--dark)';
+    sumaEl.textContent = fmt(total);
+    sumaEl.style.color = valid ? '#16a34a' : total > _rhTotal ? '#dc2626' : 'var(--dark)';
   }
   if (bar) {
     bar.className = `desg-total-bar${valid ? '' : ' err'}`;
@@ -1621,7 +1634,7 @@ function rhRecalcTotal() {
       : '<span style="color:#dc2626;font-weight:600">⚠ Pendiente</span>';
   }
   if (diffMsg) {
-    if (!valid && suma > 0) {
+    if (!valid && total > 0) {
       diffMsg.style.color = diff > 0 ? '#d97706' : '#dc2626';
       diffMsg.innerHTML = diff > 0
         ? `Falta: <strong>${fmt(diff)}</strong>`
@@ -1650,14 +1663,16 @@ async function saveRH() {
   const partidas = _rhFilas.filter(f => f.concepto_id && parseFloat(f.monto) > 0);
   if (!partidas.length) return toast('Agrega al menos un concepto con monto.', 'warn');
 
-  // Validar que la suma sea igual al total de la factura
-  const suma = partidas.reduce((a, f) => a + parseFloat(f.monto), 0);
-  const diff = Math.abs(suma - _rhTotal);
+  // Validar que (subtotal + IVA 16%) sea igual al total de la factura
+  const subtotal = partidas.reduce((a, f) => a + parseFloat(f.monto), 0);
+  const iva      = Math.round(subtotal * 0.16 * 100) / 100;
+  const total    = Math.round((subtotal + iva) * 100) / 100;
+  const diff     = Math.abs(total - _rhTotal);
   if (diff >= 0.01) {
-    const falta = _rhTotal - suma;
+    const falta = _rhTotal - total;
     return toast(
       falta > 0
-        ? `El desglose está incompleto. Falta distribuir ${fmt(falta)}.`
+        ? `El desglose está incompleto. Falta distribuir ${fmt(falta)} en el Total (Subtotal + IVA).`
         : `El desglose excede el total de la factura por ${fmt(Math.abs(falta))}.`,
       'err'
     );
