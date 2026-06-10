@@ -54,7 +54,7 @@ router.get('/', async (req, res) => {
       LEFT JOIN fac_desglose_rh d ON d.factura_id = f.id
       ${where}
       GROUP BY f.id, c.razon_social, c.rfc
-      ORDER BY f.fecha_emision DESC
+      ORDER BY f.desglose_validado DESC NULLS LAST, f.fecha_emision DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `, params);
 
