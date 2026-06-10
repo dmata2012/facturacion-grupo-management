@@ -54,28 +54,64 @@ router.get('/clientes', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── REPORTE CONCEPTOS RH ──────────────────────
+// ── REPORTE CONCEPTOS RH / DESGLOSE ──────────
 router.get('/rh', async (req, res) => {
   try {
     const { desde, hasta, cliente_id } = req.query;
-    const params = []; let where = 'WHERE f.estatus != \'cancelada\'';
-    if (desde)      { params.push(desde);      where += ` AND f.fecha_emision>=$${params.length}`; }
-    if (hasta)      { params.push(hasta);      where += ` AND f.fecha_emision<=$${params.length}`; }
-    if (cliente_id) { params.push(cliente_id); where += ` AND f.cliente_id=$${params.length}`; }
+    const params = [];
+    let whereF = "WHERE f.estatus != 'cancelada'";
+    if (desde)      { params.push(desde);      whereF += ` AND f.fecha_emision>=$${params.length}`; }
+    if (hasta)      { params.push(hasta);      whereF += ` AND f.fecha_emision<=$${params.length}`; }
+    if (cliente_id) { params.push(cliente_id); whereF += ` AND f.cliente_id=$${params.length}`; }
 
-    const r = await query(`
-      SELECT d.concepto,
-        COUNT(d.id)::int           AS ocurrencias,
-        COALESCE(SUM(d.monto),0)   AS total,
-        COALESCE(AVG(d.monto),0)   AS promedio,
-        COALESCE(MIN(d.monto),0)   AS minimo,
-        COALESCE(MAX(d.monto),0)   AS maximo
-      FROM fac_desglose_rh d
-      JOIN fac_facturas f ON f.id=d.factura_id
-      ${where}
-      GROUP BY d.concepto ORDER BY total DESC
-    `, params);
-    res.json(r.rows);
+    const [resumen, detalle, kpiR] = await Promise.all([
+      // Resumen agrupado por concepto
+      query(`
+        SELECT d.concepto,
+          COUNT(DISTINCT f.id)::int  AS facturas,
+          COUNT(d.id)::int           AS ocurrencias,
+          COALESCE(SUM(d.monto),0)   AS total,
+          COALESCE(AVG(d.monto),0)   AS promedio,
+          COALESCE(MIN(d.monto),0)   AS minimo,
+          COALESCE(MAX(d.monto),0)   AS maximo
+        FROM fac_desglose_rh d
+        JOIN fac_facturas f ON f.id=d.factura_id
+        ${whereF}
+        GROUP BY d.concepto ORDER BY total DESC
+      `, params),
+
+      // Detalle: una fila por partida de desglose con datos de la factura
+      query(`
+        SELECT f.id, f.folio, f.fecha_emision, f.estatus,
+               f.total AS total_factura, f.desglose_validado,
+               c.razon_social, c.rfc,
+               d.concepto, d.monto, d.notas
+        FROM fac_desglose_rh d
+        JOIN fac_facturas f ON f.id = d.factura_id
+        JOIN fac_clientes c ON c.id = f.cliente_id
+        ${whereF}
+        ORDER BY f.fecha_emision DESC, f.id, d.id
+      `, params),
+
+      // KPIs del período
+      query(`
+        SELECT
+          COALESCE(SUM(d.monto), 0)                                        AS total_desglose,
+          COUNT(DISTINCT d.factura_id)::int                                AS facturas_con_desglose,
+          COUNT(DISTINCT f.id) FILTER (WHERE f.desglose_validado = TRUE)::int  AS cuadradas,
+          COUNT(DISTINCT f.id) FILTER (WHERE f.desglose_validado = FALSE AND f.estatus != 'cancelada')::int AS pendientes,
+          COUNT(DISTINCT f.cliente_id)::int                                AS clientes
+        FROM fac_facturas f
+        LEFT JOIN fac_desglose_rh d ON d.factura_id = f.id
+        ${whereF}
+      `, params),
+    ]);
+
+    res.json({
+      resumen : resumen.rows,
+      detalle : detalle.rows,
+      kpi     : kpiR.rows[0] || {},
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

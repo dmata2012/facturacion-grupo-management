@@ -1956,7 +1956,7 @@ async function reportes() {
   <div class="tabs">
     <div class="tab active" onclick="showTab(this,'rep-cobranza')">Cobranza</div>
     <div class="tab" onclick="showTab(this,'rep-clientes');loadRepClientes()">Clientes</div>
-    <div class="tab" onclick="showTab(this,'rep-rh');loadRepRH()">Conceptos de Desglose</div>
+    <div class="tab" onclick="showTab(this,'rep-rh');loadRepRH()">🗂 Desglose Facturas</div>
     <div class="tab" onclick="showTab(this,'rep-nomina');loadRepNomina()">Nómina</div>
     <div class="tab" onclick="showTab(this,'rep-ejecutivo');loadRepEjecutivo()">Ejecutivo</div>
     <div class="tab" onclick="showTab(this,'rep-comisiones');loadRepComisiones()">💰 Comisiones</div>
@@ -1979,10 +1979,15 @@ async function reportes() {
   <div class="tab-panel" id="rep-rh">
     <div class="card">
       <div class="filters">
-        <input id="rrh-desde" type="date" onchange="loadRepRH()">
-        <input id="rrh-hasta" type="date" onchange="loadRepRH()">
+        <label style="font-size:11px;font-weight:700;color:var(--gray-d)">DESDE</label>
+        <input id="rrh-desde" type="date">
+        <label style="font-size:11px;font-weight:700;color:var(--gray-d)">HASTA</label>
+        <input id="rrh-hasta" type="date">
+        <select id="rrh-cliente" style="min-width:180px"><option value="">Todos los clientes</option></select>
+        <button class="btn bs bsm" onclick="loadRepRH()">🔍 Consultar</button>
+        <button class="btn bo bsm" onclick="exportRepDesglose()">⬇ Excel</button>
       </div>
-      <div id="rrh-body"><p class="empty">Cargando...</p></div>
+      <div id="rrh-body"><p class="empty">Seleccione filtros y presione Consultar.</p></div>
     </div>
   </div>
   <div class="tab-panel" id="rep-nomina"><div class="card" id="rnom-body"><p class="empty">Cargando...</p></div></div>
@@ -2047,23 +2052,250 @@ async function loadRepClientes() {
   }catch(e){$('rcl-body').innerHTML=`<p class="empty">${e.message}</p>`;}
 }
 
+let _rrhClientesLoaded = false;
+
 async function loadRepRH() {
-  let url='/reportes/rh?';
-  const d=$('rrh-desde')?.value; if(d) url+=`desde=${d}&`;
-  const h=$('rrh-hasta')?.value; if(h) url+=`hasta=${h}&`;
+  // Poblar clientes dropdown la primera vez
+  if (!_rrhClientesLoaded) {
+    try {
+      const cl = await api('/clientes?limit=500');
+      const sel = $('rrh-cliente');
+      if (sel) {
+        const lista = cl.data || cl;
+        sel.innerHTML = '<option value="">Todos los clientes</option>' +
+          lista.map(c => `<option value="${c.id}">${c.razon_social}</option>`).join('');
+        _rrhClientesLoaded = true;
+      }
+    } catch(_) {}
+  }
+
+  let url = '/reportes/rh?';
+  const d  = $('rrh-desde')?.value;    if (d)  url += `desde=${d}&`;
+  const h  = $('rrh-hasta')?.value;    if (h)  url += `hasta=${h}&`;
+  const cl = $('rrh-cliente')?.value;  if (cl) url += `cliente_id=${cl}&`;
+
+  $('rrh-body').innerHTML = '<p class="empty">Cargando...</p>';
   try {
-    const data=await api(url);
-    window._repRH=data;
-    $('rrh-body').innerHTML=data.length?`
+    const data = await api(url);
+    window._repRH = data;
+    const { resumen = [], detalle = [], kpi = {} } = data;
+
+    if (!detalle.length) {
+      $('rrh-body').innerHTML = `<p class="empty">Sin desglose registrado en el período.</p>`;
+      return;
+    }
+
+    const COLS = ['#9B1528','#1d4ed8','#166534','#d97706','#7c3aed','#0891b2','#be185d','#4d7c0f','#b45309','#0f766e'];
+    const totDes = resumen.reduce((a, r) => a + parseFloat(r.total || 0), 0);
+
+    // ── Pivot: un objeto por factura ──────────────────────────────
+    const conceptosUnicos = resumen.map(r => r.concepto);   // ordenados por total
+    const byFac = {};
+    detalle.forEach(row => {
+      if (!byFac[row.id]) byFac[row.id] = {
+        id: row.id, folio: row.folio, fecha: row.fecha_emision,
+        estatus: row.estatus, total: parseFloat(row.total_factura),
+        cliente: row.razon_social, rfc: row.rfc,
+        validado: row.desglose_validado, conc: {}
+      };
+      byFac[row.id].conc[row.concepto] = parseFloat(row.monto || 0);
+    });
+    const facturasPiv = Object.values(byFac);
+
+    // ── % facturas cuadradas ──────────────────────────────────────
+    const pctCuadradas = kpi.facturas_con_desglose > 0
+      ? Math.round((kpi.cuadradas / kpi.facturas_con_desglose) * 100) : 0;
+
+    $('rrh-body').innerHTML = `
+    <!-- KPIs -->
+    <div class="kpi-grid" style="margin-bottom:18px">
+      <div class="kpi primary">
+        <div class="kpi-icon" style="background:rgba(155,21,40,.1)">📊</div>
+        <div class="label">Total Desglose</div>
+        <div class="value" style="font-size:20px">${fmt(kpi.total_desglose||0)}</div>
+        <div class="sub">${kpi.facturas_con_desglose||0} facturas</div>
+      </div>
+      <div class="kpi success">
+        <div class="kpi-icon" style="background:#f0fdf4">✔</div>
+        <div class="label">Cuadradas</div>
+        <div class="value">${kpi.cuadradas||0}</div>
+        <div class="sub" style="display:flex;align-items:center;gap:6px">
+          <div style="flex:1;height:5px;background:#d1fae5;border-radius:99px;overflow:hidden">
+            <div style="width:${pctCuadradas}%;height:100%;background:#16a34a;border-radius:99px"></div>
+          </div>
+          <span>${pctCuadradas}%</span>
+        </div>
+      </div>
+      <div class="kpi warning">
+        <div class="kpi-icon" style="background:#fffbeb">⏳</div>
+        <div class="label">Sin Cuadrar</div>
+        <div class="value">${kpi.pendientes||0}</div>
+        <div class="sub">Requieren desglose</div>
+      </div>
+      <div class="kpi primary">
+        <div class="kpi-icon" style="background:rgba(155,21,40,.1)">🏢</div>
+        <div class="label">Clientes</div>
+        <div class="value">${kpi.clientes||0}</div>
+        <div class="sub">Con desglose</div>
+      </div>
+    </div>
+
+    <!-- Gráfica dona + Tabla resumen lado a lado -->
+    <div style="display:grid;grid-template-columns:300px 1fr;gap:16px;margin-bottom:22px;align-items:start">
+      <div class="card" style="padding:14px;margin:0">
+        <div style="font-size:12px;font-weight:700;margin-bottom:10px">🍩 Distribución por Concepto</div>
+        <canvas id="rrh-dona" style="max-height:200px"></canvas>
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--dark)">📋 Resumen por Concepto</div>
+        <div class="tscroll"><table>
+          <thead><tr>
+            <th>#</th><th>Concepto</th><th>Facturas</th>
+            <th>Total</th><th>Promedio</th><th>Mín</th><th>Máx</th><th>% del Total</th>
+          </tr></thead>
+          <tbody>${resumen.map((r, i) => {
+            const pct = totDes > 0 ? ((parseFloat(r.total)/totDes)*100).toFixed(1) : 0;
+            return `<tr>
+              <td><span style="background:${COLS[i%COLS.length]};color:#fff;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700">${i+1}</span></td>
+              <td style="font-weight:700">${r.concepto}</td>
+              <td style="text-align:center">${r.facturas}</td>
+              <td style="font-weight:800;color:var(--red)">${fmt(r.total)}</td>
+              <td>${fmt(r.promedio)}</td>
+              <td style="color:var(--muted);font-size:11px">${fmt(r.minimo)}</td>
+              <td style="color:var(--muted);font-size:11px">${fmt(r.maximo)}</td>
+              <td>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <div style="width:70px;height:6px;background:#f3f4f6;border-radius:99px;overflow:hidden">
+                    <div style="width:${pct}%;height:100%;background:${COLS[i%COLS.length]};border-radius:99px"></div>
+                  </div>
+                  <span style="font-size:11px;font-weight:700;min-width:32px">${pct}%</span>
+                </div>
+              </td>
+            </tr>`;
+          }).join('')}
+          </tbody>
+          <tfoot><tr style="background:#f7f8fa;font-weight:800;border-top:2px solid var(--border)">
+            <td colspan="3" style="text-align:right;padding-right:12px">TOTAL GENERAL:</td>
+            <td style="color:var(--red)">${fmt(totDes)}</td>
+            <td colspan="4"></td>
+          </tr></tfoot>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- Tabla pivote por factura -->
+    <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--dark)">
+      📄 Detalle por Factura
+      <span style="font-size:11px;font-weight:400;color:var(--muted);margin-left:8px">(${facturasPiv.length} facturas)</span>
+    </div>
     <div class="tscroll"><table>
-      <thead><tr><th>Concepto</th><th>Ocurrencias</th><th>Total</th><th>Promedio</th><th>Mínimo</th><th>Máximo</th></tr></thead>
-      <tbody>${data.map(r=>`<tr>
-        <td style="font-weight:600">${r.concepto}</td><td>${r.ocurrencias}</td>
-        <td style="font-weight:700">${fmt(r.total)}</td>
-        <td>${fmt(r.promedio)}</td><td>${fmt(r.minimo)}</td><td>${fmt(r.maximo)}</td>
-      </tr>`).join('')}</tbody>
-    </table></div>`:`<p class="empty">Sin datos.</p>`;
-  }catch(e){$('rrh-body').innerHTML=`<p class="empty">${e.message}</p>`;}
+      <thead>
+        <tr>
+          <th>Cliente</th><th>RFC</th><th>Folio</th><th>Fecha</th><th>Total Fac.</th>
+          ${conceptosUnicos.map((c,i) => `<th style="background:#f0f4ff;color:${COLS[i%COLS.length]};white-space:nowrap;font-size:11px">${c}</th>`).join('')}
+          <th style="background:#f0fdf4;color:#166534">Total Desglose</th>
+          <th title="¿Desglose cuadrado?">✓</th>
+          <th>Estatus</th>
+        </tr>
+      </thead>
+      <tbody>${facturasPiv.map(f => {
+        const totalDes = conceptosUnicos.reduce((a, c) => a + (f.conc[c] || 0), 0);
+        const cuadra   = Math.abs(totalDes - f.total) < 0.01;
+        return `<tr style="${f.validado ? 'background:#fafffe' : ''}">
+          <td style="font-size:11px;font-weight:600;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.cliente}</td>
+          <td style="font-size:10px;font-family:monospace">${f.rfc}</td>
+          <td style="font-size:11px">${f.folio||'#'+f.id}</td>
+          <td style="font-size:11px;white-space:nowrap">${fmtDate(f.fecha)}</td>
+          <td style="font-weight:700;white-space:nowrap">${fmt(f.total)}</td>
+          ${conceptosUnicos.map(c => f.conc[c]
+            ? `<td style="text-align:right;font-weight:700;color:#1d4ed8;white-space:nowrap">${fmt(f.conc[c])}</td>`
+            : `<td style="text-align:center;color:#cbd5e1;font-size:10px">—</td>`
+          ).join('')}
+          <td style="font-weight:800;white-space:nowrap;color:${cuadra ? '#16a34a' : '#dc2626'}">${fmt(totalDes)}</td>
+          <td style="text-align:center;font-size:13px">${f.validado
+            ? '<span title="Cuadrado" style="color:#16a34a">✔</span>'
+            : '<span title="Sin cuadrar" style="color:#f59e0b">⏳</span>'}</td>
+          <td>${badgeEstatus(f.estatus)}</td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="background:#f7f8fa;font-weight:800;border-top:2px solid var(--border)">
+          <td colspan="5" style="text-align:right;padding-right:12px;font-size:12px">TOTALES:</td>
+          ${conceptosUnicos.map(c => {
+            const tot = facturasPiv.reduce((a, f) => a + (f.conc[c] || 0), 0);
+            return `<td style="text-align:right;font-weight:800;color:#1d4ed8;white-space:nowrap">${tot > 0 ? fmt(tot) : '—'}</td>`;
+          }).join('')}
+          <td style="color:#16a34a;font-weight:800">${fmt(totDes)}</td>
+          <td colspan="2"></td>
+        </tr>
+      </tfoot>
+    </table></div>`;
+
+    // Gráfica dona
+    makeChart('rrh-dona', $('rrh-dona').getContext('2d'), {
+      type: 'doughnut',
+      data: {
+        labels: resumen.map(r => r.concepto),
+        datasets: [{ data: resumen.map(r => parseFloat(r.total)), backgroundColor: COLS }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12 } } }
+      }
+    });
+
+  } catch(e) { $('rrh-body').innerHTML = `<p class="empty">${e.message}</p>`; }
+}
+
+function exportRepDesglose() {
+  const data = window._repRH;
+  if (!data || !data.detalle?.length) return toast('Sin datos para exportar.', 'warn');
+
+  const wb = XLSX.utils.book_new();
+  const { resumen = [], detalle = [], kpi = {} } = data;
+  const conceptosUnicos = resumen.map(r => r.concepto);
+
+  // ── Hoja 1: Resumen por Concepto ─────────────────────────────
+  const sh1 = [['Concepto','Facturas','Total','Promedio','Mínimo','Máximo']];
+  resumen.forEach(r => sh1.push([r.concepto, +r.facturas, +r.total, +r.promedio, +r.minimo, +r.maximo]));
+  sh1.push([]);
+  sh1.push(['TOTAL DESGLOSE', '', +kpi.total_desglose || 0]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sh1), 'Resumen Conceptos');
+
+  // ── Hoja 2: Detalle pivotado por factura ──────────────────────
+  const byFac = {};
+  detalle.forEach(row => {
+    if (!byFac[row.id]) byFac[row.id] = {
+      id: row.id, folio: row.folio,
+      fecha: row.fecha_emision ? row.fecha_emision.slice(0,10) : '',
+      estatus: row.estatus, total: +row.total_factura,
+      cliente: row.razon_social, rfc: row.rfc,
+      validado: row.desglose_validado, conc: {}
+    };
+    byFac[row.id].conc[row.concepto] = +row.monto || 0;
+  });
+  const factPiv = Object.values(byFac);
+
+  const headers2 = ['Cliente','RFC','Folio','Fecha','Total Factura',
+    ...conceptosUnicos, 'Total Desglose', 'Cuadrada', 'Estatus'];
+  const sh2 = [headers2];
+  factPiv.forEach(f => {
+    const totD = conceptosUnicos.reduce((a, c) => a + (f.conc[c] || 0), 0);
+    sh2.push([
+      f.cliente, f.rfc, f.folio || '#'+f.id, f.fecha, f.total,
+      ...conceptosUnicos.map(c => f.conc[c] || 0),
+      totD, f.validado ? 'Sí' : 'No', f.estatus
+    ]);
+  });
+  // Fila de totales
+  const totRow = ['', '', '', '', factPiv.reduce((a, f) => a + f.total, 0),
+    ...conceptosUnicos.map(c => factPiv.reduce((a, f) => a + (f.conc[c]||0), 0)),
+    factPiv.reduce((a, f) => a + conceptosUnicos.reduce((s, c) => s + (f.conc[c]||0), 0), 0), '', ''];
+  sh2.push(totRow);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sh2), 'Detalle por Factura');
+
+  XLSX.writeFile(wb, `Desglose_Facturas_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 async function loadRepNomina() {
@@ -2253,32 +2485,49 @@ async function estadisticas() {
 
     $('est-body').innerHTML = `
     <!-- KPIs Desglose -->
-    <div class="kpi-grid" style="margin-bottom:20px">
-      <div class="kpi primary">
-        <div class="kpi-icon" style="background:rgba(155,21,40,.1)">📊</div>
-        <div class="label">Total Desglose ${añoSel}</div>
-        <div class="value" style="font-size:20px">${fmt(kpi.total_desglose||0)}</div>
-        <div class="sub">${kpi.total_partidas||0} partidas registradas</div>
-      </div>
-      <div class="kpi success">
-        <div class="kpi-icon" style="background:#f0fdf4">✔</div>
-        <div class="label">Facturas Cuadradas</div>
-        <div class="value">${kpi.cuadradas||0}</div>
-        <div class="sub">Desglose validado</div>
-      </div>
-      <div class="kpi warning">
-        <div class="kpi-icon" style="background:#fffbeb">⏳</div>
-        <div class="label">Pendientes de Cuadrar</div>
-        <div class="value">${kpi.pendientes||0}</div>
-        <div class="sub">Sin desglose validado</div>
-      </div>
-      <div class="kpi primary">
-        <div class="kpi-icon" style="background:rgba(155,21,40,.1)">🏢</div>
-        <div class="label">Facturas con Desglose</div>
-        <div class="value">${kpi.facturas_con_desglose||0}</div>
-        <div class="sub">Tienen al menos 1 partida</div>
-      </div>
-    </div>
+    ${(()=>{
+      const pctCuad = kpi.facturas_con_desglose>0
+        ? Math.round((kpi.cuadradas/kpi.facturas_con_desglose)*100) : 0;
+      const alertPend = kpi.pendientes>0
+        ? `<div class="ibox warn" style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <span>⚠️ <strong>${kpi.pendientes}</strong> factura${kpi.pendientes>1?'s':''} sin cuadrar — el desglose no coincide con el total.</span>
+            <button class="btn bd bsm" onclick="nav('facturas')">Ver Facturas →</button>
+          </div>` : '';
+      return alertPend + `
+      <div class="kpi-grid" style="margin-bottom:20px">
+        <div class="kpi primary">
+          <div class="kpi-icon" style="background:rgba(155,21,40,.1)">📊</div>
+          <div class="label">Total Desglose ${añoSel}</div>
+          <div class="value" style="font-size:20px">${fmt(kpi.total_desglose||0)}</div>
+          <div class="sub">${kpi.total_partidas||0} partidas registradas</div>
+        </div>
+        <div class="kpi success">
+          <div class="kpi-icon" style="background:#f0fdf4">✔</div>
+          <div class="label">Facturas Cuadradas</div>
+          <div class="value">${kpi.cuadradas||0} <span style="font-size:13px;font-weight:600;color:#16a34a">/${kpi.facturas_con_desglose||0}</span></div>
+          <div class="sub" style="margin-top:5px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <div style="flex:1;height:6px;background:#d1fae5;border-radius:99px;overflow:hidden">
+                <div style="width:${pctCuad}%;height:100%;background:#16a34a;border-radius:99px;transition:width .4s"></div>
+              </div>
+              <span style="font-size:11px;font-weight:700;min-width:28px">${pctCuad}%</span>
+            </div>
+          </div>
+        </div>
+        <div class="kpi warning">
+          <div class="kpi-icon" style="background:#fffbeb">⏳</div>
+          <div class="label">Pendientes de Cuadrar</div>
+          <div class="value">${kpi.pendientes||0}</div>
+          <div class="sub">Sin desglose validado</div>
+        </div>
+        <div class="kpi primary">
+          <div class="kpi-icon" style="background:rgba(155,21,40,.1)">🗂</div>
+          <div class="label">Facturas con Desglose</div>
+          <div class="value">${kpi.facturas_con_desglose||0}</div>
+          <div class="sub">Al menos 1 partida</div>
+        </div>
+      </div>`;
+    })()}
 
     <!-- Gráficas fila 1 -->
     <div class="chart-grid">
