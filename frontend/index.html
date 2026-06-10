@@ -880,7 +880,7 @@ async function loadFacturas() {
   } catch(e) { $('fac-table').innerHTML = `<p class="empty">${e.message}</p>`; }
 }
 
-function openFactura(id = null) {
+async function openFactura(id = null) {
   $('modal-factura-body').innerHTML = `<h4>${id?'Editar':'Nueva'} Factura</h4>
   <div style="display:flex;gap:12px;margin-bottom:14px">
     <div class="upload-zone" style="flex:1" id="uz-xml" onclick="$('inp-xml').click()">
@@ -922,11 +922,11 @@ function openFactura(id = null) {
     <button class="btn bo" onclick="closeModal('modal-factura')">Cancelar</button>
     <button class="btn bs" onclick="saveFactura(${id||null})">Guardar</button>
   </div>`;
-  loadClientesSelect('fc-cliente');
-  loadReceptorasSelect('fc-receptora');
-  if (id) loadFacturaEdit(id);
   $('fc-fecha').value = new Date().toISOString().slice(0,10);
   openModal('modal-factura');
+  // Esperar que los selects se llenen antes de asignar valores al editar
+  await Promise.all([loadClientesSelect('fc-cliente'), loadReceptorasSelect('fc-receptora')]);
+  if (id) loadFacturaEdit(id);
 }
 
 async function loadClientesSelect(selId) {
