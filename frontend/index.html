@@ -1216,6 +1216,8 @@ const RH_MAX = 5;
 let _rhCatalogo  = [];
 let _rhFacturaId = null;
 let _rhTotal     = 0;
+let _rhSubtotal  = 0;
+let _rhIva       = 0;
 let _rhFolio     = '';
 let _rhRFC       = '';
 let _rhCliente   = '';
@@ -1232,7 +1234,9 @@ async function openRH(facturaId) {
     ]);
     _rhCatalogo  = cat;
     _rhFacturaId = facturaId;
-    _rhTotal     = parseFloat(f.total);
+    _rhTotal     = parseFloat(f.total)    || 0;
+    _rhSubtotal  = parseFloat(f.subtotal) || 0;
+    _rhIva       = parseFloat(f.iva)      || 0;
     _rhFolio     = f.folio || ('#' + facturaId);
     _rhRFC       = f.rfc        || '';
     _rhCliente   = f.razon_social || '';
@@ -1300,14 +1304,24 @@ function renderRH() {
       <div class="dh-label">Cliente</div>
       <div class="dh-val" style="font-size:13px">${_rhCliente||'—'}</div>
     </div>
-    <div style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid rgba(255,255,255,.18)">
-      <div>
-        <div class="dh-label">Total Factura</div>
-        <div class="dh-val big" style="font-size:18px">${fmt(_rhTotal)}</div>
-      </div>
-      <div style="text-align:right">
-        <div class="dh-label">Conceptos</div>
-        <div style="font-size:18px;font-weight:900">${_rhFilas.length}<span style="font-size:11px;font-weight:400;opacity:.65"> / ${RH_MAX}</span></div>
+    <div style="grid-column:1/-1;padding-top:8px;border-top:1px solid rgba(255,255,255,.18)">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px 12px;align-items:end">
+        <div>
+          <div class="dh-label">Subtotal</div>
+          <div class="dh-val" style="font-size:14px;opacity:.9">${fmt(_rhSubtotal)}</div>
+        </div>
+        <div>
+          <div class="dh-label">IVA</div>
+          <div class="dh-val" style="font-size:14px;opacity:.9">${fmt(_rhIva)}</div>
+        </div>
+        <div>
+          <div class="dh-label">Total</div>
+          <div class="dh-val big" style="font-size:20px">${fmt(_rhTotal)}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="dh-label">Conceptos</div>
+          <div style="font-size:18px;font-weight:900">${_rhFilas.length}<span style="font-size:11px;font-weight:400;opacity:.65"> / ${RH_MAX}</span></div>
+        </div>
       </div>
     </div>
   </div>
