@@ -35,10 +35,19 @@ router.post('/', requireRol('admin'), async (req, res) => {
 // PUT /api/conceptos/:id
 router.put('/:id', requireRol('admin'), async (req, res) => {
   try {
+    // Actualización parcial: solo campo activo
+    const keys = Object.keys(req.body);
+    if (keys.length === 1 && keys[0] === 'activo') {
+      await query(`UPDATE fac_conceptos_rh SET activo=$1 WHERE id=$2`, [req.body.activo, req.params.id]);
+      return res.json({ ok: true });
+    }
+    // Actualización completa
     const { clave, nombre, descripcion, activo, orden } = req.body;
+    if (!clave || !nombre) return res.status(400).json({ error: 'Clave y nombre requeridos.' });
     await query(
       `UPDATE fac_conceptos_rh SET clave=$1,nombre=$2,descripcion=$3,activo=$4,orden=$5 WHERE id=$6`,
-      [clave.toUpperCase().trim(), nombre.trim(), descripcion || null, activo, parseInt(orden) || 0, req.params.id]
+      [clave.toUpperCase().trim(), nombre.trim(), descripcion || null,
+       activo !== false, parseInt(orden) || 0, req.params.id]
     );
     res.json({ ok: true });
   } catch (e) {
@@ -47,11 +56,26 @@ router.put('/:id', requireRol('admin'), async (req, res) => {
   }
 });
 
-// DELETE /api/conceptos/:id  — desactiva
+// DELETE /api/conceptos/:id  — eliminar permanentemente del catálogo
 router.delete('/:id', requireRol('admin'), async (req, res) => {
   try {
-    await query(`UPDATE fac_conceptos_rh SET activo=FALSE WHERE id=$1`, [req.params.id]);
-    res.json({ ok: true });
+    // Verificar si tiene registros en desgloses
+    const uso = await query(
+      `SELECT COUNT(*)::int AS total FROM fac_desglose_rh WHERE concepto_id=$1`,
+      [req.params.id]
+    );
+    const enUso = uso.rows[0]?.total || 0;
+
+    // Desligar FK en desgloses (el texto del concepto se preserva)
+    if (enUso > 0) {
+      await query(`UPDATE fac_desglose_rh SET concepto_id=NULL WHERE concepto_id=$1`, [req.params.id]);
+    }
+
+    // Eliminar del catálogo
+    const r = await query(`DELETE FROM fac_conceptos_rh WHERE id=$1 RETURNING id,nombre`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Concepto no encontrado.' });
+
+    res.json({ ok: true, nombre: r.rows[0].nombre, desgloses_afectados: enUso });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

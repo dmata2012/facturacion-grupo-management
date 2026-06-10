@@ -2909,7 +2909,7 @@ async function catalogo() {
     ${canAdmin() ? `<button class="btn bs" onclick="openConcepto()">+ Nuevo concepto</button>` : ''}
   </div>
   <div class="ibox info" style="margin-bottom:14px">
-    Estos conceptos se usan al capturar el desglose de cada factura. Solo el administrador puede agregar o modificarlos.
+    Estos conceptos se usan al capturar el desglose de cada factura. Solo el administrador puede agregar, modificar o eliminarlos.
   </div>
   <div class="card" id="cat-table"><p class="empty">Cargando...</p></div>`;
   await loadCatalogo();
@@ -2920,26 +2920,38 @@ async function loadCatalogo() {
     const d = await api('/conceptos?todos=1');
     $('cat-table').innerHTML = d.length ? `
     <div class="tscroll"><table>
-      <thead><tr><th>Orden</th><th>Clave</th><th>Nombre</th><th>Descripción</th><th>Activo</th><th>Acciones</th></tr></thead>
-      <tbody>${d.map(c => `<tr>
-        <td style="color:var(--muted)">${c.orden}</td>
-        <td><code style="background:#f3f4f6;padding:2px 7px;border-radius:4px;font-size:11px">${c.clave}</code></td>
+      <thead><tr>
+        <th>Orden</th><th>Clave</th><th>Nombre</th><th>Descripción</th><th>Activo</th>
+        ${canAdmin() ? '<th style="min-width:160px">Acciones</th>' : ''}
+      </tr></thead>
+      <tbody>${d.map(c => `<tr style="${!c.activo?'opacity:.6':''}">
+        <td style="color:var(--muted);text-align:center">${c.orden}</td>
+        <td><code style="background:#f3f4f6;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">${c.clave}</code></td>
         <td style="font-weight:600">${c.nombre}</td>
-        <td style="color:var(--muted)">${c.descripcion || '—'}</td>
-        <td>${c.activo ? '<span class="badge b-pagada">Activo</span>' : '<span class="badge b-cancelada">Inactivo</span>'}</td>
-        <td style="white-space:nowrap">
-          ${canAdmin() ? `
-            <button class="btn bo bsm" onclick="openConcepto(${c.id})">✏️</button>
-            <button class="btn bd bsm" onclick="desactivarConcepto(${c.id},${c.activo})">${c.activo ? '✕' : '↺'}</button>
-          ` : ''}
+        <td style="color:var(--muted);font-size:12px">${c.descripcion || '—'}</td>
+        <td>${c.activo
+          ? '<span class="badge b-pagada">Activo</span>'
+          : '<span class="badge b-cancelada">Inactivo</span>'}
         </td>
+        ${canAdmin() ? `<td style="white-space:nowrap;display:flex;gap:6px;align-items:center">
+          <button class="btn bo bsm" onclick="openConcepto(${c.id})" title="Editar">✏️ Editar</button>
+          <button class="btn bo bsm" onclick="toggleConcepto(${c.id},${c.activo})"
+            title="${c.activo?'Desactivar':'Activar'}"
+            style="color:${c.activo?'var(--warning)':'var(--success)'}">
+            ${c.activo ? '🔴 Desactivar' : '🟢 Activar'}
+          </button>
+          <button class="btn bd bsm" onclick="eliminarConcepto(${c.id},'${c.nombre.replace(/'/g,"\\'")}',${c.activo})"
+            title="Eliminar permanentemente"
+            style="background:#fff0f0;border-color:#ffd7d7;color:#dc2626">
+            🗑️ Eliminar
+          </button>
+        </td>` : ''}
       </tr>`).join('')}</tbody>
     </table></div>` : `<p class="empty">Sin conceptos registrados.</p>`;
   } catch(e) { $('cat-table').innerHTML = `<p class="empty">${e.message}</p>`; }
 }
 
 function openConcepto(id = null) {
-  // Reutilizamos modal-empleado que es modal-sm
   $('modal-empleado-body').innerHTML = `
   <h4>${id ? 'Editar' : 'Nuevo'} Concepto de Desglose</h4>
   <div class="fi" style="margin-bottom:10px">
@@ -2984,16 +2996,34 @@ async function saveConcepto(id) {
   } catch(e) { toast(e.message, 'err'); }
 }
 
-async function desactivarConcepto(id, activo) {
-  const accion = activo ? 'desactivar' : 'reactivar';
-  if (!await confirm2(`¿${accion} este concepto?`)) return;
+// Activar / Desactivar concepto (sin eliminar)
+async function toggleConcepto(id, activo) {
+  const accion = activo ? 'desactivar' : 'activar';
+  if (!await confirm2(`¿${accion.charAt(0).toUpperCase()+accion.slice(1)} este concepto?`)) return;
   try {
-    if (activo) {
-      await api(`/conceptos/${id}`, { method: 'DELETE' });
-    } else {
-      await api(`/conceptos/${id}`, { method: 'PUT', body: JSON.stringify({ activo: true }) });
-    }
-    toast(`Concepto ${accion === 'desactivar' ? 'desactivado' : 'reactivado'}.`);
+    await api(`/conceptos/${id}`, { method: 'PUT', body: JSON.stringify({ activo: !activo }) });
+    toast(`Concepto ${activo ? 'desactivado' : 'activado'}.`);
+    loadCatalogo();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+// Eliminar permanentemente del catálogo
+async function eliminarConcepto(id, nombre, activo) {
+  // Doble confirmación si está activo
+  if (activo) {
+    const ok = await confirm2(
+      `⚠️ "${nombre}" está ACTIVO.\n\nSi lo elimina, desaparecerá del catálogo permanentemente.\nLos desgloses existentes que usen este concepto conservarán su texto, solo se perderá el vínculo al catálogo.\n\n¿Eliminar permanentemente?`
+    );
+    if (!ok) return;
+  } else {
+    if (!await confirm2(`¿Eliminar permanentemente el concepto "${nombre}"?\nEsta acción no se puede deshacer.`)) return;
+  }
+  try {
+    const r = await api(`/conceptos/${id}`, { method: 'DELETE' });
+    let msg = `Concepto "${r.nombre || nombre}" eliminado.`;
+    if (r.desgloses_afectados > 0)
+      msg += ` (${r.desgloses_afectados} desglose${r.desgloses_afectados>1?'s':''} afectado${r.desgloses_afectados>1?'s':''}, solo se eliminó el vínculo al catálogo)`;
+    toast(msg);
     loadCatalogo();
   } catch(e) { toast(e.message, 'err'); }
 }
