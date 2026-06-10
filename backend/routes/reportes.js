@@ -137,54 +137,91 @@ router.get('/ejecutivo', async (req, res) => {
 });
 
 // ── REPORTE COMISIONES ────────────────────────
+// Muestra el monto del concepto "Comisiones" del desglose por factura/cliente
 router.get('/comisiones', async (req, res) => {
   try {
     const { desde, hasta } = req.query;
     const params = [];
-    let whereF = "WHERE f.estatus != 'cancelada'";
-    if (desde) { params.push(desde); whereF += ` AND f.fecha_emision>=$${params.length}`; }
-    if (hasta) { params.push(hasta); whereF += ` AND f.fecha_emision<=$${params.length}`; }
+    let filtroFecha = '';
+    if (desde) { params.push(desde); filtroFecha += ` AND f.fecha_emision>=$${params.length}`; }
+    if (hasta) { params.push(hasta); filtroFecha += ` AND f.fecha_emision<=$${params.length}`; }
 
-    // Detalle: una fila por factura con el monto de comisión del desglose
+    // ── Detalle: una fila por factura, sin cartesian product ──
     const detalle = await query(`
       SELECT
-        f.id, f.folio, f.fecha_emision, f.estatus,
-        f.total AS total_factura,
-        c.rfc, c.razon_social,
-        COALESCE(SUM(p.monto),0)                                   AS cobrado,
-        f.total - COALESCE(SUM(p.monto),0)                         AS saldo,
-        COALESCE(SUM(d.monto) FILTER (
-          WHERE UPPER(d.concepto) ILIKE '%COMISION%'
-        ),0)                                                        AS comision_desglose,
-        CASE WHEN f.estatus = 'pagada' THEN
-          COALESCE(SUM(d.monto) FILTER (WHERE UPPER(d.concepto) ILIKE '%COMISION%'),0)
-        ELSE 0 END                                                  AS comision_cobrada
+        f.id,
+        f.folio,
+        f.fecha_emision,
+        f.estatus,
+        f.total                                                  AS total_factura,
+        c.rfc,
+        c.razon_social,
+        COALESCE(sub_p.cobrado, 0)                               AS cobrado,
+        f.total - COALESCE(sub_p.cobrado, 0)                     AS saldo,
+        COALESCE(sub_d.comision, 0)                              AS comision_desglose,
+        CASE
+          WHEN f.estatus = 'pagada'
+            THEN COALESCE(sub_d.comision, 0)
+          WHEN f.estatus = 'parcial' AND NULLIF(f.total,0) IS NOT NULL
+            THEN ROUND(
+              (COALESCE(sub_p.cobrado,0) / f.total)
+              * COALESCE(sub_d.comision,0), 2)
+          ELSE 0
+        END                                                      AS comision_cobrada
       FROM fac_facturas f
-      JOIN fac_clientes c ON c.id = f.cliente_id
-      LEFT JOIN fac_pagos p ON p.factura_id = f.id
-      LEFT JOIN fac_desglose_rh d ON d.factura_id = f.id
-      ${whereF}
-      GROUP BY f.id, c.rfc, c.razon_social
-      HAVING COALESCE(SUM(d.monto) FILTER (WHERE UPPER(d.concepto) ILIKE '%COMISION%'),0) > 0
+      JOIN  fac_clientes c ON c.id = f.cliente_id
+      LEFT JOIN (
+        SELECT factura_id, SUM(monto) AS cobrado
+        FROM   fac_pagos
+        GROUP  BY factura_id
+      ) sub_p ON sub_p.factura_id = f.id
+      INNER JOIN (
+        SELECT factura_id, SUM(monto) AS comision
+        FROM   fac_desglose_rh
+        WHERE  concepto ILIKE '%comisi%'
+        GROUP  BY factura_id
+        HAVING SUM(monto) > 0
+      ) sub_d ON sub_d.factura_id = f.id
+      WHERE f.estatus != 'cancelada'
+      ${filtroFecha}
       ORDER BY c.razon_social, f.fecha_emision DESC
     `, params);
 
-    // Resumen acumulado por cliente
+    // ── Resumen acumulado por cliente ──
     const resumen = await query(`
       SELECT
-        c.rfc, c.razon_social,
-        COUNT(DISTINCT f.id)::int                                          AS facturas,
-        COALESCE(SUM(f.total),0)                                          AS facturado,
-        COALESCE(SUM(p.monto),0)                                          AS cobrado,
-        COALESCE(SUM(d.monto) FILTER (WHERE UPPER(d.concepto) ILIKE '%COMISION%'),0) AS total_comision,
-        COALESCE(SUM(d.monto) FILTER (WHERE UPPER(d.concepto) ILIKE '%COMISION%' AND f.estatus='pagada'),0) AS comision_cobrada
+        c.rfc,
+        c.razon_social,
+        COUNT(DISTINCT f.id)::int                         AS facturas,
+        COALESCE(SUM(f.total), 0)                         AS facturado,
+        COALESCE(SUM(sub_p.cobrado), 0)                   AS cobrado,
+        COALESCE(SUM(sub_d.comision), 0)                  AS total_comision,
+        COALESCE(SUM(
+          CASE
+            WHEN f.estatus = 'pagada'
+              THEN sub_d.comision
+            WHEN f.estatus = 'parcial' AND NULLIF(f.total,0) IS NOT NULL
+              THEN ROUND((COALESCE(sub_p.cobrado,0)/f.total)*sub_d.comision, 2)
+            ELSE 0
+          END
+        ), 0)                                             AS comision_cobrada
       FROM fac_facturas f
-      JOIN fac_clientes c ON c.id = f.cliente_id
-      LEFT JOIN fac_pagos p ON p.factura_id = f.id
-      LEFT JOIN fac_desglose_rh d ON d.factura_id = f.id
-      ${whereF}
+      JOIN  fac_clientes c ON c.id = f.cliente_id
+      LEFT JOIN (
+        SELECT factura_id, SUM(monto) AS cobrado
+        FROM   fac_pagos
+        GROUP  BY factura_id
+      ) sub_p ON sub_p.factura_id = f.id
+      INNER JOIN (
+        SELECT factura_id, SUM(monto) AS comision
+        FROM   fac_desglose_rh
+        WHERE  concepto ILIKE '%comisi%'
+        GROUP  BY factura_id
+        HAVING SUM(monto) > 0
+      ) sub_d ON sub_d.factura_id = f.id
+      WHERE f.estatus != 'cancelada'
+      ${filtroFecha}
       GROUP BY c.rfc, c.razon_social
-      HAVING COALESCE(SUM(d.monto) FILTER (WHERE UPPER(d.concepto) ILIKE '%COMISION%'),0) > 0
       ORDER BY total_comision DESC
     `, params);
 
