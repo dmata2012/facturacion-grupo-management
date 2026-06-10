@@ -265,6 +265,86 @@ router.get('/comisiones', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── ANÁLISIS POR CONCEPTO DE DESGLOSE ────────
+router.get('/concepto', async (req, res) => {
+  try {
+    const { concepto } = req.query;
+    if (!concepto) return res.status(400).json({ error: 'Parámetro concepto requerido.' });
+    const param = `%${concepto}%`;
+
+    const [mensual, topClientes, historico, kpiRes] = await Promise.all([
+
+      // Evolución mensual (últimos 24 meses)
+      query(`
+        SELECT
+          TO_CHAR(DATE_TRUNC('month', f.fecha_emision), 'YYYY-MM') AS periodo,
+          EXTRACT(MONTH FROM f.fecha_emision)::int                  AS mes,
+          EXTRACT(YEAR  FROM f.fecha_emision)::int                  AS año,
+          COUNT(DISTINCT f.id)::int                                 AS facturas,
+          COALESCE(SUM(d.monto), 0)                                 AS total
+        FROM fac_desglose_rh d
+        JOIN fac_facturas f ON f.id = d.factura_id
+        WHERE d.concepto ILIKE $1
+          AND f.estatus != 'cancelada'
+          AND f.fecha_emision >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '23 months'
+        GROUP BY periodo, mes, año
+        ORDER BY periodo
+      `, [param]),
+
+      // Top 10 clientes por monto acumulado
+      query(`
+        SELECT
+          c.razon_social,
+          c.rfc,
+          COUNT(DISTINCT f.id)::int  AS facturas,
+          COALESCE(SUM(d.monto), 0) AS total
+        FROM fac_desglose_rh d
+        JOIN fac_facturas f ON f.id = d.factura_id
+        JOIN fac_clientes c ON c.id = f.cliente_id
+        WHERE d.concepto ILIKE $1
+          AND f.estatus != 'cancelada'
+        GROUP BY c.id, c.razon_social, c.rfc
+        ORDER BY total DESC
+        LIMIT 10
+      `, [param]),
+
+      // Crecimiento histórico anual
+      query(`
+        SELECT
+          EXTRACT(YEAR FROM f.fecha_emision)::int AS año,
+          COALESCE(SUM(d.monto), 0)               AS total,
+          COUNT(DISTINCT f.id)::int               AS facturas
+        FROM fac_desglose_rh d
+        JOIN fac_facturas f ON f.id = d.factura_id
+        WHERE d.concepto ILIKE $1
+          AND f.estatus != 'cancelada'
+        GROUP BY año
+        ORDER BY año
+      `, [param]),
+
+      // KPI: participación, ocurrencias, clientes
+      query(`
+        SELECT
+          COALESCE(SUM(d.monto), 0)                                                        AS concepto_total,
+          COUNT(DISTINCT d.id)::int                                                         AS ocurrencias,
+          COUNT(DISTINCT f.cliente_id)::int                                                 AS clientes,
+          (SELECT COALESCE(SUM(f2.total),0) FROM fac_facturas f2 WHERE f2.estatus != 'cancelada') AS total_facturado
+        FROM fac_desglose_rh d
+        JOIN fac_facturas f ON f.id = d.factura_id
+        WHERE d.concepto ILIKE $1
+          AND f.estatus != 'cancelada'
+      `, [param]),
+    ]);
+
+    res.json({
+      mensual     : mensual.rows,
+      top_clientes: topClientes.rows,
+      historico   : historico.rows,
+      kpi         : kpiRes.rows[0] || {},
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── ESTADÍSTICAS POR CLIENTE ──────────────────
 router.get('/cliente/:id', async (req, res) => {
   try {

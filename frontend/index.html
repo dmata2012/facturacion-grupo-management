@@ -2082,6 +2082,7 @@ async function reportes() {
     <div class="tab" onclick="showTab(this,'rep-nomina');loadRepNomina()">Nómina</div>
     <div class="tab" onclick="showTab(this,'rep-ejecutivo');loadRepEjecutivo()">Ejecutivo</div>
     <div class="tab" onclick="showTab(this,'rep-comisiones');loadRepComisiones()">💰 Comisiones</div>
+    <div class="tab" onclick="showTab(this,'rep-concepto');initRepConcepto()">📊 Por Concepto</div>
   </div>
   <div class="tab-panel active" id="rep-cobranza">
     <div class="card">
@@ -2124,6 +2125,17 @@ async function reportes() {
         <button class="btn bo bsm" onclick="exportRepComisiones()">⬇ Excel</button>
       </div>
       <div id="rcom-body"><p class="empty">Seleccione un rango de fechas.</p></div>
+    </div>
+  </div>
+  <div class="tab-panel" id="rep-concepto">
+    <div class="card">
+      <div class="filters">
+        <label style="font-size:11px;font-weight:700;color:var(--gray-d)">CONCEPTO</label>
+        <select id="rconc-select" style="min-width:220px" onchange="loadRepConcepto()">
+          <option value="">-- Seleccionar concepto --</option>
+        </select>
+      </div>
+      <div id="rconc-body"><p class="empty">Seleccione un concepto para ver su análisis.</p></div>
     </div>
   </div>`;
   loadRepCobranza();
@@ -2557,6 +2569,177 @@ function exportRepComisiones() {
     ['comision_desglose','Comisión Desglose'],['comision_cobrada','Comisión Cobrada'],
     ['estatus','Estatus']
   ], 'Comisiones');
+}
+
+// ── ANÁLISIS POR CONCEPTO ─────────────────────
+let _concListLoaded = false;
+
+async function initRepConcepto() {
+  if (!_concListLoaded) {
+    try {
+      const conceptos = await api('/conceptos?todos=true');
+      const sel = $('rconc-select');
+      if (sel) {
+        sel.innerHTML = '<option value="">-- Seleccionar concepto --</option>' +
+          conceptos.map(c => `<option value="${c.nombre}">${c.nombre}</option>`).join('');
+        _concListLoaded = true;
+      }
+    } catch(e) { /* silencioso */ }
+  }
+}
+
+async function loadRepConcepto() {
+  const concepto = $('rconc-select')?.value;
+  if (!concepto) return;
+  $('rconc-body').innerHTML = '<p class="empty">Cargando análisis…</p>';
+  try {
+    const data = await api(`/reportes/concepto?concepto=${encodeURIComponent(concepto)}`);
+    const { mensual, top_clientes, historico, kpi } = data;
+
+    const ct  = parseFloat(kpi.concepto_total)  || 0;
+    const tf  = parseFloat(kpi.total_facturado) || 0;
+    const pct = tf > 0 ? ((ct / tf) * 100).toFixed(1) : '0.0';
+
+    // Crecimiento mes a mes
+    const ultDos = mensual.slice(-2);
+    const mom = ultDos.length === 2 && parseFloat(ultDos[0].total) > 0
+      ? (((parseFloat(ultDos[1].total) - parseFloat(ultDos[0].total)) / parseFloat(ultDos[0].total)) * 100).toFixed(1)
+      : null;
+
+    // Crecimiento año a año
+    const ultDosH = historico.slice(-2);
+    const yoy = ultDosH.length === 2 && parseFloat(ultDosH[0].total) > 0
+      ? (((parseFloat(ultDosH[1].total) - parseFloat(ultDosH[0].total)) / parseFloat(ultDosH[0].total)) * 100).toFixed(1)
+      : null;
+
+    const MESES_C = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+    $('rconc-body').innerHTML = `
+      <!-- KPIs -->
+      <div class="kpi-grid" style="margin-bottom:18px">
+        <div class="kpi success">
+          <div class="kpi-icon">💰</div>
+          <div class="label">Total acumulado</div>
+          <div class="value" style="font-size:20px">${fmt(ct)}</div>
+          <div class="sub">Histórico completo</div>
+        </div>
+        <div class="kpi primary">
+          <div class="kpi-icon">📊</div>
+          <div class="label">Participación en facturación</div>
+          <div class="value">${pct}%</div>
+          <div class="sub" style="display:block;margin-top:6px">
+            <div style="background:#e5e7eb;border-radius:4px;height:4px">
+              <div style="background:var(--red);height:4px;border-radius:4px;width:${Math.min(parseFloat(pct),100)}%"></div>
+            </div>
+          </div>
+        </div>
+        <div class="kpi warning">
+          <div class="kpi-icon">🧾</div>
+          <div class="label">Ocurrencias en facturas</div>
+          <div class="value">${kpi.ocurrencias || 0}</div>
+          <div class="sub">Líneas de desglose</div>
+        </div>
+        <div class="kpi primary">
+          <div class="kpi-icon">👥</div>
+          <div class="label">Clientes que lo generan</div>
+          <div class="value">${kpi.clientes || 0}</div>
+          <div class="sub">Clientes únicos</div>
+        </div>
+      </div>
+
+      <!-- Evolución mensual (ancho completo) -->
+      <div style="background:var(--bg-alt);border-radius:10px;padding:16px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)">Evolución mensual — últimos 24 meses</span>
+          ${mom !== null ? `<span style="font-size:12px;font-weight:700;padding:2px 8px;border-radius:20px;background:${parseFloat(mom)>=0?'#dcfce7':'#fee2e2'};color:${parseFloat(mom)>=0?'var(--success)':'var(--danger)'}">${parseFloat(mom)>=0?'▲':'▼'} ${Math.abs(mom)}% vs mes anterior</span>` : ''}
+        </div>
+        <div style="height:200px"><canvas id="chart-conc-mensual"></canvas></div>
+      </div>
+
+      <!-- Top clientes + Histórico anual -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div style="background:var(--bg-alt);border-radius:10px;padding:16px">
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:12px">Top clientes por monto</div>
+          <div style="height:250px"><canvas id="chart-conc-clientes"></canvas></div>
+        </div>
+        <div style="background:var(--bg-alt);border-radius:10px;padding:16px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)">Crecimiento histórico anual</span>
+            ${yoy !== null ? `<span style="font-size:12px;font-weight:700;padding:2px 8px;border-radius:20px;background:${parseFloat(yoy)>=0?'#dcfce7':'#fee2e2'};color:${parseFloat(yoy)>=0?'var(--success)':'var(--danger)'}">${parseFloat(yoy)>=0?'▲':'▼'} ${Math.abs(yoy)}% vs año anterior</span>` : ''}
+          </div>
+          <div style="height:250px"><canvas id="chart-conc-historico"></canvas></div>
+        </div>
+      </div>
+    `;
+
+    // Evolución mensual — línea
+    const mLabels = mensual.map(r => `${MESES_C[r.mes-1]} ${r.año}`);
+    const mData   = mensual.map(r => parseFloat(r.total));
+    makeChart('conc-mensual', $('chart-conc-mensual'), {
+      type: 'line',
+      data: {
+        labels: mLabels,
+        datasets: [{
+          label: concepto,
+          data: mData,
+          borderColor: '#b91c1c',
+          backgroundColor: 'rgba(185,28,28,0.08)',
+          tension: 0.4,
+          fill: true,
+          pointRadius: 3,
+          pointBackgroundColor: '#b91c1c',
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { ticks: { callback: v => '$' + v.toLocaleString('es-MX', { maximumFractionDigits: 0 }) } }
+        }
+      }
+    });
+
+    // Top clientes — barras horizontales
+    const cLabels = top_clientes.map(c => c.razon_social.length > 28 ? c.razon_social.slice(0,28)+'…' : c.razon_social);
+    const cData   = top_clientes.map(c => parseFloat(c.total));
+    makeChart('conc-clientes', $('chart-conc-clientes'), {
+      type: 'bar',
+      data: {
+        labels: cLabels,
+        datasets: [{ data: cData, backgroundColor: '#b91c1c', borderRadius: 4 }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { callback: v => '$' + v.toLocaleString('es-MX', { maximumFractionDigits: 0 }) } }
+        }
+      }
+    });
+
+    // Histórico anual — barras
+    const hLabels = historico.map(r => r.año.toString());
+    const hData   = historico.map(r => parseFloat(r.total));
+    const hColors = hData.map((_, i) => i === hData.length - 1 ? '#b91c1c' : 'rgba(185,28,28,0.35)');
+    makeChart('conc-historico', $('chart-conc-historico'), {
+      type: 'bar',
+      data: {
+        labels: hLabels,
+        datasets: [{ data: hData, backgroundColor: hColors, borderRadius: 6 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { ticks: { callback: v => '$' + v.toLocaleString('es-MX', { maximumFractionDigits: 0 }) } }
+        }
+      }
+    });
+
+  } catch(e) {
+    $('rconc-body').innerHTML = `<p class="empty">Error: ${e.message}</p>`;
+  }
 }
 
 async function loadRepEjecutivo() {
