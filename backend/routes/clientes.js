@@ -51,12 +51,26 @@ router.get('/rfc/:rfc', async (req, res) => {
 // POST /api/clientes
 router.post('/', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { rfc, razon_social, nombre_comercial, contacto, email, telefono, direccion, ciudad, notas, comision } = req.body;
+    const {
+      rfc, razon_social, nombre_comercial, contacto, email, telefono,
+      direccion, ciudad, notas, comision,
+      contacto_admin, contacto_pagos, whatsapp,
+      dias_credito, condiciones_pago, ejecutivo_cuenta
+    } = req.body;
     if (!rfc || !razon_social) return res.status(400).json({ error: 'RFC y razón social requeridos.' });
     const r = await query(
-      `INSERT INTO fac_clientes(rfc,razon_social,nombre_comercial,contacto,email,telefono,direccion,ciudad,notas,comision)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [rfc.toUpperCase(), razon_social, nombre_comercial, contacto, email, telefono, direccion, ciudad, notas, parseFloat(comision)||0]
+      `INSERT INTO fac_clientes(
+         rfc,razon_social,nombre_comercial,contacto,email,telefono,
+         direccion,ciudad,notas,comision,
+         contacto_admin,contacto_pagos,whatsapp,
+         dias_credito,condiciones_pago,ejecutivo_cuenta
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+      [
+        rfc.toUpperCase(), razon_social, nombre_comercial, contacto,
+        email, telefono, direccion, ciudad, notas, parseFloat(comision)||0,
+        contacto_admin||null, contacto_pagos||null, whatsapp||null,
+        parseInt(dias_credito)||0, condiciones_pago||null, ejecutivo_cuenta||null
+      ]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) {
@@ -68,11 +82,27 @@ router.post('/', requireRol('admin', 'capturista'), async (req, res) => {
 // PUT /api/clientes/:id
 router.put('/:id', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { rfc, razon_social, nombre_comercial, contacto, email, telefono, direccion, ciudad, activo, notas, comision } = req.body;
+    const {
+      rfc, razon_social, nombre_comercial, contacto, email, telefono,
+      direccion, ciudad, activo, notas, comision,
+      contacto_admin, contacto_pagos, whatsapp,
+      dias_credito, condiciones_pago, ejecutivo_cuenta
+    } = req.body;
     await query(
-      `UPDATE fac_clientes SET rfc=$1,razon_social=$2,nombre_comercial=$3,contacto=$4,email=$5,
-       telefono=$6,direccion=$7,ciudad=$8,activo=$9,notas=$10,comision=$11,actualizado_en=NOW() WHERE id=$12`,
-      [rfc?.toUpperCase(), razon_social, nombre_comercial, contacto, email, telefono, direccion, ciudad, activo, notas, parseFloat(comision)||0, req.params.id]
+      `UPDATE fac_clientes SET
+         rfc=$1, razon_social=$2, nombre_comercial=$3, contacto=$4, email=$5,
+         telefono=$6, direccion=$7, ciudad=$8, activo=$9, notas=$10, comision=$11,
+         contacto_admin=$12, contacto_pagos=$13, whatsapp=$14,
+         dias_credito=$15, condiciones_pago=$16, ejecutivo_cuenta=$17,
+         actualizado_en=NOW()
+       WHERE id=$18`,
+      [
+        rfc?.toUpperCase(), razon_social, nombre_comercial, contacto,
+        email, telefono, direccion, ciudad, activo, notas, parseFloat(comision)||0,
+        contacto_admin||null, contacto_pagos||null, whatsapp||null,
+        parseInt(dias_credito)||0, condiciones_pago||null, ejecutivo_cuenta||null,
+        req.params.id
+      ]
     );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }

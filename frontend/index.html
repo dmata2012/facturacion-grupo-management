@@ -1667,11 +1667,13 @@ async function loadClientes() {
     const d = await api(url);
     $('cl-table').innerHTML = d.length ? `
     <div class="tscroll"><table>
-      <thead><tr><th>RFC</th><th>Razón social</th><th>Ciudad</th><th>Comisión</th><th>Facturas</th><th>Facturado</th><th>Cobrado</th><th>Estatus</th><th>Acciones</th></tr></thead>
+      <thead><tr><th>RFC</th><th>Razón social</th><th>Ciudad</th><th>Ejecutivo</th><th>Días cred.</th><th>Comisión</th><th>Facturas</th><th>Facturado</th><th>Cobrado</th><th>Estatus</th><th>Acciones</th></tr></thead>
       <tbody>${d.map(c=>`<tr>
         <td style="font-weight:600">${c.rfc}</td>
         <td>${c.razon_social}${c.nombre_comercial?`<br><span style="color:var(--muted);font-size:11px">${c.nombre_comercial}</span>`:''}</td>
         <td>${c.ciudad||'—'}</td>
+        <td style="font-size:11px">${c.ejecutivo_cuenta||'—'}</td>
+        <td style="text-align:center">${parseInt(c.dias_credito||0)>0?`<span class="badge b-parcial">${c.dias_credito}d</span>`:'<span style="color:var(--muted)">—</span>'}</td>
         <td style="text-align:center">${parseFloat(c.comision||0)>0?`<span class="badge b-parcial">${parseFloat(c.comision).toFixed(2)}%</span>`:'<span style="color:var(--muted)">—</span>'}</td>
         <td>${c.total_facturas||0}</td>
         <td>${fmt(c.total_facturado)}</td>
@@ -1688,23 +1690,42 @@ async function loadClientes() {
 }
 
 function openCliente(id=null, rfcPre='') {
+  const sec = (titulo) =>
+    `<div style="grid-column:1/-1;margin:10px 0 4px;padding-bottom:6px;border-bottom:1.5px solid var(--border);
+                 font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:var(--muted)">${titulo}</div>`;
+
   $('modal-cliente-body').innerHTML = `
-  <h4>${id?'Editar':'Nuevo'} Cliente</h4>
+  <h4 style="margin-bottom:14px">${id?'Editar':'Nuevo'} Cliente</h4>
   <div class="fg">
+
+    ${sec('📋 Datos Fiscales')}
     <div class="fi"><label>RFC *</label><input id="cc-rfc" placeholder="XAXX010101000" value="${rfcPre}" style="text-transform:uppercase"></div>
     <div class="fi"><label>Razón social *</label><input id="cc-rs" placeholder="Nombre fiscal completo"></div>
     <div class="fi"><label>Nombre comercial</label><input id="cc-nc" placeholder="Nombre de uso común"></div>
-    <div class="fi"><label>Contacto</label><input id="cc-contacto"></div>
-    <div class="fi"><label>Email</label><input type="email" id="cc-email"></div>
-    <div class="fi"><label>Teléfono</label><input id="cc-tel"></div>
     <div class="fi"><label>Ciudad</label><input id="cc-ciudad"></div>
-    <div class="fi"><label>Comisión (%)</label><input type="number" id="cc-comision" min="0" max="100" step="0.01" placeholder="0.00"></div>
     <div class="fi full"><label>Dirección</label><input id="cc-dir"></div>
-    <div class="fi full"><label>Notas</label><textarea id="cc-notas" rows="2"></textarea></div>
+
+    ${sec('👤 Contactos')}
+    <div class="fi"><label>Contacto principal</label><input id="cc-contacto" placeholder="Nombre del representante"></div>
+    <div class="fi"><label>Email</label><input type="email" id="cc-email" placeholder="correo@empresa.com"></div>
+    <div class="fi"><label>Contacto administrativo</label><input id="cc-cadmin" placeholder="Nombre contacto administrativo"></div>
+    <div class="fi"><label>Contacto de pagos</label><input id="cc-cpagos" placeholder="Nombre contacto de pagos"></div>
+    <div class="fi"><label>Teléfono</label><input id="cc-tel" placeholder="(55) 1234-5678"></div>
+    <div class="fi"><label>WhatsApp</label><input id="cc-whatsapp" placeholder="Número con lada"></div>
+
+    ${sec('💼 Condiciones Comerciales')}
+    <div class="fi"><label>Días de crédito</label><input type="number" id="cc-dias" min="0" step="1" placeholder="0" value="0"></div>
+    <div class="fi"><label>Comisión (%)</label><input type="number" id="cc-comision" min="0" max="100" step="0.01" placeholder="0.00"></div>
+    <div class="fi"><label>Condiciones de pago</label><input id="cc-condpago" placeholder="Ej: 30 días neto, anticipo 50%"></div>
+    <div class="fi"><label>Ejecutivo de cuenta</label><input id="cc-ejecutivo" placeholder="Nombre del ejecutivo asignado"></div>
+
+    ${sec('📝 Notas')}
+    <div class="fi full"><label>Notas internas</label><textarea id="cc-notas" rows="2" placeholder="Observaciones, acuerdos especiales..."></textarea></div>
+
   </div>
   <div class="form-actions">
     <button class="btn bo" onclick="closeModal('modal-cliente')">Cancelar</button>
-    <button class="btn bs" onclick="saveCliente(${id||null})">Guardar</button>
+    <button class="btn bs" onclick="saveCliente(${id||null})">Guardar cliente</button>
   </div>`;
   if (id) loadClienteEdit(id);
   openModal('modal-cliente');
@@ -1713,26 +1734,43 @@ function openCliente(id=null, rfcPre='') {
 async function loadClienteEdit(id) {
   try {
     const c = await api(`/clientes/${id}`);
-    $('cc-rfc').value      = c.rfc;
-    $('cc-rs').value       = c.razon_social;
-    $('cc-nc').value       = c.nombre_comercial||'';
-    $('cc-contacto').value = c.contacto||'';
-    $('cc-email').value    = c.email||'';
-    $('cc-tel').value      = c.telefono||'';
-    $('cc-ciudad').value    = c.ciudad||'';
-    $('cc-comision').value  = c.comision||'';
-    $('cc-dir').value       = c.direccion||'';
-    $('cc-notas').value     = c.notas||'';
+    $('cc-rfc').value       = c.rfc              || '';
+    $('cc-rs').value        = c.razon_social      || '';
+    $('cc-nc').value        = c.nombre_comercial  || '';
+    $('cc-contacto').value  = c.contacto          || '';
+    $('cc-email').value     = c.email             || '';
+    $('cc-tel').value       = c.telefono          || '';
+    $('cc-ciudad').value    = c.ciudad            || '';
+    $('cc-comision').value  = c.comision          || '';
+    $('cc-dir').value       = c.direccion         || '';
+    $('cc-notas').value     = c.notas             || '';
+    $('cc-cadmin').value    = c.contacto_admin    || '';
+    $('cc-cpagos').value    = c.contacto_pagos    || '';
+    $('cc-whatsapp').value  = c.whatsapp          || '';
+    $('cc-dias').value      = c.dias_credito      ?? 0;
+    $('cc-condpago').value  = c.condiciones_pago  || '';
+    $('cc-ejecutivo').value = c.ejecutivo_cuenta  || '';
   } catch {}
 }
 
 async function saveCliente(id) {
   const body = {
-    rfc: $('cc-rfc').value.trim().toUpperCase(), razon_social: $('cc-rs').value.trim(),
-    nombre_comercial: $('cc-nc').value, contacto: $('cc-contacto').value,
-    email: $('cc-email').value, telefono: $('cc-tel').value,
-    ciudad: $('cc-ciudad').value, comision: $('cc-comision').value,
-    direccion: $('cc-dir').value, notas: $('cc-notas').value,
+    rfc:              $('cc-rfc').value.trim().toUpperCase(),
+    razon_social:     $('cc-rs').value.trim(),
+    nombre_comercial: $('cc-nc').value.trim(),
+    contacto:         $('cc-contacto').value.trim(),
+    email:            $('cc-email').value.trim(),
+    telefono:         $('cc-tel').value.trim(),
+    ciudad:           $('cc-ciudad').value.trim(),
+    comision:         $('cc-comision').value,
+    direccion:        $('cc-dir').value.trim(),
+    notas:            $('cc-notas').value.trim(),
+    contacto_admin:   $('cc-cadmin').value.trim(),
+    contacto_pagos:   $('cc-cpagos').value.trim(),
+    whatsapp:         $('cc-whatsapp').value.trim(),
+    dias_credito:     $('cc-dias').value,
+    condiciones_pago: $('cc-condpago').value.trim(),
+    ejecutivo_cuenta: $('cc-ejecutivo').value.trim(),
     activo: true
   };
   if (!body.rfc || !body.razon_social) return toast('RFC y razón social requeridos.','err');
