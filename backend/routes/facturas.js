@@ -161,13 +161,16 @@ router.put('/:id/desglose', requireRol('admin', 'capturista'), async (req, res) 
       );
     }
 
-    // Validar si la suma coincide con el total de la factura
-    const tot = await query(`SELECT total FROM fac_facturas WHERE id=$1`, [facId]);
-    const suma = (partidas || []).reduce((a, p) => a + (parseFloat(p.monto) || 0), 0);
-    const validado = Math.abs(suma - parseFloat(tot.rows[0]?.total || 0)) < 0.01;
+    // Validar si (subtotal + IVA 16%) coincide con el total de la factura
+    const tot      = await query(`SELECT total FROM fac_facturas WHERE id=$1`, [facId]);
+    const subtotal = (partidas || []).reduce((a, p) => a + (parseFloat(p.monto) || 0), 0);
+    const iva      = Math.round(subtotal * 0.16 * 100) / 100;
+    const total    = Math.round((subtotal + iva) * 100) / 100;
+    const facTotal = parseFloat(tot.rows[0]?.total || 0);
+    const validado = Math.abs(total - facTotal) < 0.01;
     await query(`UPDATE fac_facturas SET desglose_validado=$1,actualizado_en=NOW() WHERE id=$2`, [validado, facId]);
 
-    res.json({ ok: true, validado, suma, total: parseFloat(tot.rows[0]?.total || 0) });
+    res.json({ ok: true, validado, subtotal, iva, total, factura_total: facTotal });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
