@@ -44,16 +44,19 @@ router.get('/', async (req, res) => {
     const r = await query(`
       SELECT f.*,
         c.razon_social, c.rfc,
+        er.razon_social    AS emisora_razon_social,
+        er.rfc             AS emisora_rfc,
         COALESCE(SUM(p.monto),0)                            AS cobrado,
         f.total - COALESCE(SUM(p.monto),0)                 AS saldo,
         COALESCE(SUM(d.monto),0)                           AS rh_total,
         COUNT(d.id)::int                                   AS rh_partidas
       FROM fac_facturas f
-      LEFT JOIN fac_clientes c ON c.id = f.cliente_id
-      LEFT JOIN fac_pagos    p ON p.factura_id = f.id
-      LEFT JOIN fac_desglose_rh d ON d.factura_id = f.id
+      LEFT JOIN fac_clientes c              ON c.id = f.cliente_id
+      LEFT JOIN fac_empresas_receptoras er  ON er.id = f.empresa_receptora_id
+      LEFT JOIN fac_pagos    p              ON p.factura_id = f.id
+      LEFT JOIN fac_desglose_rh d           ON d.factura_id = f.id
       ${where}
-      GROUP BY f.id, c.razon_social, c.rfc
+      GROUP BY f.id, c.razon_social, c.rfc, er.razon_social, er.rfc
       ORDER BY f.desglose_validado DESC NULLS LAST, f.fecha_emision DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `, params);
