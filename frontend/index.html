@@ -1075,9 +1075,34 @@ async function loadFacturas() {
         </td>
       </tr>`).join('')}</tbody>
     </table></div>
-    <div style="padding:10px 0;color:var(--muted);font-size:12px">Mostrando ${d.data.length} de ${d.total} facturas</div>
+    ${(() => {
+      const totalPag = Math.max(1, Math.ceil(d.total / d.limit));
+      const desde = (d.page - 1) * d.limit + 1;
+      const hasta = Math.min(d.page * d.limit, d.total);
+      return `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 4px 4px;flex-wrap:wrap">
+        <div style="color:var(--muted);font-size:12px">
+          Mostrando <strong>${desde}–${hasta}</strong> de <strong>${d.total}</strong> facturas
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="btn bo bsm" onclick="facPagina(${d.page-1})" ${d.page<=1?'disabled style="opacity:.4;cursor:not-allowed"':''} title="Anterior">◀</button>
+          <span style="font-size:12px;font-weight:700;color:var(--dark);min-width:90px;text-align:center">
+            Página ${d.page} / ${totalPag}
+          </span>
+          <button class="btn bo bsm" onclick="facPagina(${d.page+1})" ${d.page>=totalPag?'disabled style="opacity:.4;cursor:not-allowed"':''} title="Siguiente">▶</button>
+        </div>
+      </div>`;
+    })()}
     ` : `<p class="empty">No hay facturas con esos filtros.</p>`;
   } catch(e) { $('fac-table').innerHTML = `<p class="empty">${e.message}</p>`; }
+}
+
+function facPagina(p) {
+  if (p < 1) return;
+  _facPage = p;
+  loadFacturas();
+  // Scroll suave al inicio de la tabla
+  $('fac-table')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function openFactura(id = null) {
