@@ -3088,6 +3088,7 @@ async function estadisticas() {
     <div id="est-body"><p class="empty">Cargando...</p></div>`;
   try {
     const añoSel = $('est-año')?.value || año;
+    window._estAño = añoSel;
     const d = await api(`/dashboard?año=${añoSel}`);
     const kpi = d.rh_kpi || {};
     const colores = ['#9B1528','#C41E3A','#1d4ed8','#166534','#d97706','#7c3aed','#0891b2','#be185d','#4d7c0f','#b45309'];
@@ -3104,13 +3105,13 @@ async function estadisticas() {
           </div>` : '';
       return alertPend + `
       <div class="kpi-grid" style="margin-bottom:20px">
-        <div class="kpi primary">
+        <div class="kpi primary" id="ekpi-total" onclick="cargarDetalleEst('total_desglose')" style="cursor:pointer" title="Ver partidas de desglose">
           <div class="kpi-icon" style="background:rgba(155,21,40,.1)">📊</div>
           <div class="label">Total Desglose ${añoSel}</div>
           <div class="value" style="font-size:20px">${fmt(kpi.total_desglose||0)}</div>
           <div class="sub">${kpi.total_partidas||0} partidas registradas</div>
         </div>
-        <div class="kpi success">
+        <div class="kpi success" id="ekpi-cuadradas" onclick="cargarDetalleEst('cuadradas')" style="cursor:pointer" title="Ver facturas cuadradas">
           <div class="kpi-icon" style="background:#f0fdf4">✔</div>
           <div class="label">Facturas Cuadradas</div>
           <div class="value">${kpi.cuadradas||0} <span style="font-size:13px;font-weight:600;color:#16a34a">/${kpi.facturas_con_desglose||0}</span></div>
@@ -3123,19 +3124,22 @@ async function estadisticas() {
             </div>
           </div>
         </div>
-        <div class="kpi warning">
+        <div class="kpi warning" id="ekpi-pendientes" onclick="cargarDetalleEst('pendientes')" style="cursor:pointer" title="Ver facturas sin cuadrar">
           <div class="kpi-icon" style="background:#fffbeb">⏳</div>
           <div class="label">Pendientes de Cuadrar</div>
           <div class="value">${kpi.pendientes||0}</div>
           <div class="sub">Sin desglose validado</div>
         </div>
-        <div class="kpi primary">
+        <div class="kpi primary" id="ekpi-condesglose" onclick="cargarDetalleEst('con_desglose')" style="cursor:pointer" title="Ver facturas con desglose">
           <div class="kpi-icon" style="background:rgba(155,21,40,.1)">🗂</div>
           <div class="label">Facturas con Desglose</div>
           <div class="value">${kpi.facturas_con_desglose||0}</div>
           <div class="sub">Al menos 1 partida</div>
         </div>
-      </div>`;
+      </div>
+
+      <!-- DETALLE KPI (se llena al hacer clic) -->
+      <div id="est-detail" style="display:none;margin-bottom:18px"></div>`;
     })()}
 
     <!-- Gráficas fila 1 -->
@@ -3241,6 +3245,100 @@ async function estadisticas() {
     });
 
   } catch(e) { $('est-body').innerHTML=`<p class="empty">${e.message}</p>`; }
+}
+
+async function cargarDetalleEst(tipo) {
+  const año = window._estAño || new Date().getFullYear();
+  // Resaltar card activo
+  document.querySelectorAll('#est-body .kpi').forEach(el => { el.style.outline=''; el.style.outlineOffset=''; });
+  const ids = { total_desglose:'ekpi-total', cuadradas:'ekpi-cuadradas', pendientes:'ekpi-pendientes', con_desglose:'ekpi-condesglose' };
+  const activo = $(ids[tipo]);
+  if (activo) { activo.style.outline='2px solid var(--red)'; activo.style.outlineOffset='2px'; }
+
+  const det = $('est-detail');
+  det.style.display = 'block';
+  det.innerHTML = `
+    <div class="card" style="margin-top:0">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <div class="card-title" id="ed-title" style="margin:0">Cargando…</div>
+        <button class="btn bo bsm" style="margin-left:auto"
+          onclick="$('est-detail').style.display='none';document.querySelectorAll('#est-body .kpi').forEach(e=>{e.style.outline='';e.style.outlineOffset=''})">
+          ✕ Cerrar
+        </button>
+      </div>
+      <div id="ed-body"><p class="empty">Cargando…</p></div>
+    </div>`;
+  det.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  try {
+    if (tipo === 'total_desglose') {
+      $('ed-title').textContent = `Partidas de desglose — ${año}`;
+      const desde = `${año}-01-01`, hasta = `${año}-12-31`;
+      const d = await api(`/reportes/rh?desde=${desde}&hasta=${hasta}`);
+      const filas = d.detalle || [];
+      const total = filas.reduce((a,r) => a + parseFloat(r.monto || 0), 0);
+      $('ed-body').innerHTML = filas.length ? `
+        <div class="ibox info" style="margin-bottom:10px">
+          <strong>${filas.length}</strong> partidas · Total: <strong>${fmt(total)}</strong>
+        </div>
+        <div class="tscroll"><table>
+          <thead><tr><th>Folio</th><th>Cliente</th><th>Fecha</th><th>Concepto</th><th>Monto</th><th>Notas</th></tr></thead>
+          <tbody>${filas.map(r => `<tr>
+            <td><a href="#" onclick="detalleFactura(${r.id})" style="color:var(--red);font-weight:600">${r.folio||'#'+r.id}</a></td>
+            <td>${r.razon_social||'—'}</td>
+            <td>${fmtDate(r.fecha_emision)}</td>
+            <td style="font-weight:600">${r.concepto}</td>
+            <td style="font-weight:700;color:var(--red)">${fmt(r.monto)}</td>
+            <td style="font-size:11px;color:var(--muted)">${r.notas||'—'}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>` : `<p class="empty">Sin partidas en ${año}.</p>`;
+      return;
+    }
+
+    // Para los demás tipos usamos /facturas con filtro de año
+    $('ed-title').textContent = ({
+      cuadradas    : `Facturas cuadradas — ${año}`,
+      pendientes   : `Facturas pendientes de cuadrar — ${año}`,
+      con_desglose : `Facturas con desglose — ${año}`,
+    })[tipo];
+
+    const desde = `${año}-01-01`, hasta = `${año}-12-31`;
+    const d = await api(`/facturas?desde=${desde}&hasta=${hasta}&limit=500`);
+    let filas = (d.data || []).filter(f => f.estatus !== 'cancelada');
+
+    if (tipo === 'cuadradas') {
+      filas = filas.filter(f => f.desglose_validado === true);
+    } else if (tipo === 'pendientes') {
+      filas = filas.filter(f => f.desglose_validado !== true && parseInt(f.rh_partidas||0) > 0);
+    } else if (tipo === 'con_desglose') {
+      filas = filas.filter(f => parseInt(f.rh_partidas||0) > 0);
+    }
+
+    const totalFact   = filas.reduce((a,f) => a + parseFloat(f.total||0), 0);
+    const totalDesg   = filas.reduce((a,f) => a + parseFloat(f.rh_total||0), 0);
+    $('ed-body').innerHTML = filas.length ? `
+      <div class="ibox ${tipo==='cuadradas'?'ok':tipo==='pendientes'?'warn':'info'}" style="margin-bottom:10px">
+        <strong>${filas.length}</strong> facturas · Total facturado: <strong>${fmt(totalFact)}</strong>
+        ${tipo!=='total_desglose'?` · Total desglose: <strong>${fmt(totalDesg)}</strong>`:''}
+      </div>
+      <div class="tscroll"><table>
+        <thead><tr><th>Folio</th><th>Cliente</th><th>Fecha</th><th>Total</th><th>Subtotal desglose</th><th>Partidas</th><th>Estatus</th></tr></thead>
+        <tbody>${filas.map(f => `<tr>
+          <td><a href="#" onclick="detalleFactura(${f.id})" style="color:var(--red);font-weight:600">${f.folio||'#'+f.id}</a></td>
+          <td>${f.razon_social||'—'}</td>
+          <td>${fmtDate(f.fecha_emision)}</td>
+          <td style="font-weight:600">${fmt(f.total)}</td>
+          <td>${fmt(f.rh_total||0)}</td>
+          <td style="text-align:center">${f.rh_partidas||0}</td>
+          <td>${f.desglose_validado
+            ? '<span style="display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:20px;padding:2px 8px;color:#166534;font-size:11px;font-weight:800">✔ CUADRADA</span>'
+            : badgeEstatus(f.estatus)}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>` : `<p class="empty">Sin facturas para este filtro.</p>`;
+
+  } catch(e) {
+    if ($('ed-body')) $('ed-body').innerHTML = `<p class="empty">Error: ${e.message}</p>`;
+  }
 }
 
 // ══ USUARIOS ════════════════════════════════
