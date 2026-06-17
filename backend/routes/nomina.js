@@ -157,14 +157,14 @@ router.put('/quincenas/:id/detalle', requireRol('admin', 'capturista'), async (r
 // Guardar totales de quincena (captura global, sin desglose por empleado)
 router.put('/quincenas/:id/totales', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { pago_imss, pago_efectivo, total_isr, total_imss, costo_patronal_gm, notas } = req.body;
-    const pi = parseFloat(pago_imss)         || 0;
-    const pe = parseFloat(pago_efectivo)     || 0;
-    const ti = parseFloat(total_isr)         || 0;
-    const tm = parseFloat(total_imss)        || 0;
-    const cp = parseFloat(costo_patronal_gm) || 0;
+    const { pago_imss, pago_efectivo, total_isr, total_imss, total_costos_patronales, costo_patronal_gm, notas } = req.body;
+    const pi   = parseFloat(pago_imss)                || 0;
+    const pe   = parseFloat(pago_efectivo)            || 0;
+    const ti   = parseFloat(total_isr)                || 0;
+    const tm   = parseFloat(total_imss)               || 0;
+    const cpat = parseFloat(total_costos_patronales)  || 0;
+    const cp   = parseFloat(costo_patronal_gm)        || 0;
     const neto = +(pi + pe).toFixed(2);
-    const cpat = +(ti + tm).toFixed(2);
     const tot  = +(neto + cpat + cp).toFixed(2);
 
     await query(
