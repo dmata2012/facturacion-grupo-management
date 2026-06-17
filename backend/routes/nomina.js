@@ -77,26 +77,77 @@ router.put('/quincenas/:id/detalle', requireRol('admin', 'capturista'), async (r
   const client = await getClient();
   try {
     await client.query('BEGIN');
-    const { partidas } = req.body; // [{ empleado_id, percepciones, deducciones, notas }]
+    const { partidas } = req.body;
+    // partidas: [{ empleado_id, pago_imss, pago_efectivo, total_isr, total_imss, costo_patronal_gm, notas }]
     const qId = req.params.id;
 
     await client.query(`DELETE FROM fac_nomina_detalle WHERE quincena_id=$1`, [qId]);
-    let totPerc = 0, totDed = 0;
+
+    let tPagoImss=0, tPagoEf=0, tNetoPag=0,
+        tISR=0, tIMSS=0, tCostPat=0,
+        tCostPatGM=0, tCostoGM=0;
+
     for (const p of (partidas || [])) {
-      const perc = parseFloat(p.percepciones) || 0;
-      const ded  = parseFloat(p.deducciones)  || 0;
+      const pagoImss   = parseFloat(p.pago_imss)         || 0;
+      const pagoEf     = parseFloat(p.pago_efectivo)     || 0;
+      const totIsr     = parseFloat(p.total_isr)         || 0;
+      const totImss    = parseFloat(p.total_imss)        || 0;
+      const costPatGM  = parseFloat(p.costo_patronal_gm) || 0;
+
+      const netoPagado = +(pagoImss + pagoEf).toFixed(2);
+      const costPat    = +(totIsr + totImss).toFixed(2);
+      const costoGM    = +(netoPagado + costPat + costPatGM).toFixed(2);
+
+      // Para compatibilidad con totales antiguos: percepciones = neto_total_pagado
       await client.query(
-        `INSERT INTO fac_nomina_detalle(quincena_id,empleado_id,percepciones,deducciones,notas) VALUES($1,$2,$3,$4,$5)`,
-        [qId, p.empleado_id, perc, ded, p.notas || null]
+        `INSERT INTO fac_nomina_detalle(
+           quincena_id, empleado_id,
+           percepciones, deducciones,
+           pago_imss, pago_efectivo, neto_total_pagado,
+           total_isr, total_imss, total_costos_patronales,
+           costo_patronal_gm, costo_total_gm,
+           notas
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [qId, p.empleado_id,
+         netoPagado, 0,
+         pagoImss, pagoEf, netoPagado,
+         totIsr, totImss, costPat,
+         costPatGM, costoGM,
+         p.notas || null]
       );
-      totPerc += perc; totDed += ded;
+
+      tPagoImss  += pagoImss;
+      tPagoEf    += pagoEf;
+      tNetoPag   += netoPagado;
+      tISR       += totIsr;
+      tIMSS      += totImss;
+      tCostPat   += costPat;
+      tCostPatGM += costPatGM;
+      tCostoGM   += costoGM;
     }
+
     await client.query(
-      `UPDATE fac_nomina_quincenas SET total_percepciones=$1,total_deducciones=$2,total_neto=$3,actualizado_en=NOW() WHERE id=$4`,
-      [totPerc, totDed, totPerc - totDed, qId]
+      `UPDATE fac_nomina_quincenas SET
+         total_percepciones=$1, total_deducciones=0, total_neto=$1,
+         total_pago_imss=$2, total_pago_efectivo=$3, total_neto_pagado=$4,
+         total_isr=$5, total_imss=$6, total_costos_patronales=$7,
+         total_costo_patronal_gm=$8, total_costo_gm=$9,
+         actualizado_en=NOW()
+       WHERE id=$10`,
+      [tNetoPag, tPagoImss, tPagoEf, tNetoPag,
+       tISR, tIMSS, tCostPat, tCostPatGM, tCostoGM, qId]
     );
+
     await client.query('COMMIT');
-    res.json({ ok: true, total_percepciones: totPerc, total_deducciones: totDed, total_neto: totPerc - totDed });
+    res.json({
+      ok: true,
+      total_pago_imss: tPagoImss, total_pago_efectivo: tPagoEf,
+      total_neto_pagado: tNetoPag,
+      total_isr: tISR, total_imss: tIMSS,
+      total_costos_patronales: tCostPat,
+      total_costo_patronal_gm: tCostPatGM,
+      total_costo_gm: tCostoGM
+    });
   } catch (e) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: e.message });
