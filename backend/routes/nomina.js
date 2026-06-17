@@ -154,6 +154,40 @@ router.put('/quincenas/:id/detalle', requireRol('admin', 'capturista'), async (r
   } finally { client.release(); }
 });
 
+// Guardar totales de quincena (captura global, sin desglose por empleado)
+router.put('/quincenas/:id/totales', requireRol('admin', 'capturista'), async (req, res) => {
+  try {
+    const { pago_imss, pago_efectivo, total_isr, total_imss, costo_patronal_gm, notas } = req.body;
+    const pi = parseFloat(pago_imss)         || 0;
+    const pe = parseFloat(pago_efectivo)     || 0;
+    const ti = parseFloat(total_isr)         || 0;
+    const tm = parseFloat(total_imss)        || 0;
+    const cp = parseFloat(costo_patronal_gm) || 0;
+    const neto = +(pi + pe).toFixed(2);
+    const cpat = +(ti + tm).toFixed(2);
+    const tot  = +(neto + cpat + cp).toFixed(2);
+
+    await query(
+      `UPDATE fac_nomina_quincenas SET
+         total_pago_imss=$1, total_pago_efectivo=$2, total_neto_pagado=$3,
+         total_isr=$4, total_imss=$5, total_costos_patronales=$6,
+         total_costo_patronal_gm=$7, total_costo_gm=$8,
+         total_percepciones=$3, total_deducciones=0, total_neto=$3,
+         notas=COALESCE($9, notas),
+         actualizado_en=NOW()
+       WHERE id=$10`,
+      [pi, pe, neto, ti, tm, cpat, cp, tot, notas || null, req.params.id]
+    );
+
+    res.json({
+      ok: true,
+      total_pago_imss: pi, total_pago_efectivo: pe, total_neto_pagado: neto,
+      total_isr: ti, total_imss: tm, total_costos_patronales: cpat,
+      total_costo_patronal_gm: cp, total_costo_gm: tot
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Cerrar quincena
 router.patch('/quincenas/:id/cerrar', requireRol('admin'), async (req, res) => {
   try {

@@ -2556,15 +2556,13 @@ async function saveQuincena() {
 async function editQuincena(id) {
   $('content').innerHTML = `<div class="page-title">Captura de Nómina</div><p class="empty">Cargando...</p>`;
   try {
-    const [q, emps] = await Promise.all([api(`/nomina/quincenas/${id}`), api('/nomina/empleados')]);
-    const capturados = new Map(q.detalle.map(d=>[d.empleado_id, d]));
-    const partidas = emps.map(e => capturados.get(e.id) || {
-      empleado_id:e.id, nombre:e.nombre, puesto:e.puesto,
-      pago_imss:0, pago_efectivo:0, total_isr:0, total_imss:0, costo_patronal_gm:0, notas:''
-    });
+    const q = await api(`/nomina/quincenas/${id}`);
     const ro = q.estatus === 'cerrada' ? 'disabled' : '';
-    const inp = (id, val, edit=true) =>
-      `<input type="number" step="0.01" value="${parseFloat(val)||0}" ${ro} id="${id}" ${edit?`oninput="recalcRH(this.id.match(/np-(\\d+)-/)[1])"`:''} style="width:110px;text-align:right">`;
+    const pi = parseFloat(q.total_pago_imss)         || 0;
+    const pe = parseFloat(q.total_pago_efectivo)     || 0;
+    const ti = parseFloat(q.total_isr)               || 0;
+    const tm = parseFloat(q.total_imss)              || 0;
+    const cp = parseFloat(q.total_costo_patronal_gm) || 0;
 
     $('content').innerHTML = `
     <div class="ch">
@@ -2577,134 +2575,81 @@ async function editQuincena(id) {
       </div>
     </div>
     ${q.estatus==='cerrada'?'<div class="ibox ok">Quincena cerrada — solo lectura.</div>':''}
+
     <div class="card">
-      <div class="tscroll"><table style="font-size:11px">
-        <thead>
-          <tr>
-            <th rowspan="2" style="vertical-align:bottom">Empleado</th>
-            <th rowspan="2" style="vertical-align:bottom">Puesto</th>
-            <th colspan="3" style="background:#fef9c3;color:#854d0e;text-align:center">PAGO AL COLABORADOR</th>
-            <th colspan="3" style="background:#dbeafe;color:#1e40af;text-align:center">COSTOS PATRONALES</th>
-            <th style="background:#ede9fe;color:#6b21a8;text-align:center;vertical-align:bottom">PATRONAL GM</th>
-            <th style="background:#dcfce7;color:#166534;text-align:center;vertical-align:bottom">COSTO TOTAL GM</th>
-            <th rowspan="2" style="vertical-align:bottom">Notas</th>
-          </tr>
-          <tr>
-            <th style="background:#fef9c3;color:#854d0e">Pago IMSS</th>
-            <th style="background:#fef9c3;color:#854d0e">Pago Efectivo</th>
-            <th style="background:#fde68a;color:#78350f">Neto Total</th>
-            <th style="background:#dbeafe;color:#1e40af">Total ISR</th>
-            <th style="background:#dbeafe;color:#1e40af">Total IMSS</th>
-            <th style="background:#bfdbfe;color:#1e3a8a">Total Costos</th>
-            <th style="background:#ede9fe;color:#6b21a8">Costo Patronal GM</th>
-            <th style="background:#dcfce7;color:#166534">Costo Total GM</th>
-          </tr>
-        </thead>
-        <tbody id="nom-rows">
-          ${partidas.map((p,i)=>{
-            const pi = parseFloat(p.pago_imss)||0;
-            const pe = parseFloat(p.pago_efectivo)||0;
-            const ti = parseFloat(p.total_isr)||0;
-            const tm = parseFloat(p.total_imss)||0;
-            const cp = parseFloat(p.costo_patronal_gm)||0;
-            const neto = pi+pe;
-            const cpat = ti+tm;
-            const tot  = neto+cpat+cp;
-            return `<tr>
-              <td style="font-weight:600">${p.nombre}</td>
-              <td>${p.puesto||'—'}</td>
-              <td style="background:#fefce8">${inp(`np-${i}-pi`, pi)}</td>
-              <td style="background:#fefce8">${inp(`np-${i}-pe`, pe)}</td>
-              <td id="np-${i}-neto" style="background:#fde68a;font-weight:700;color:#78350f;text-align:right">${fmt(neto)}</td>
-              <td style="background:#eff6ff">${inp(`np-${i}-ti`, ti)}</td>
-              <td style="background:#eff6ff">${inp(`np-${i}-tm`, tm)}</td>
-              <td id="np-${i}-cpat" style="background:#bfdbfe;font-weight:700;color:#1e3a8a;text-align:right">${fmt(cpat)}</td>
-              <td style="background:#f5f3ff">${inp(`np-${i}-cp`, cp)}</td>
-              <td id="np-${i}-tot" style="background:#dcfce7;font-weight:800;color:#166534;text-align:right">${fmt(tot)}</td>
-              <td><input placeholder="Notas" value="${p.notas||''}" ${ro} id="np-${i}-notas" style="width:110px"></td>
-              <input type="hidden" id="np-${i}-eid" value="${p.empleado_id}">
-            </tr>`;
-          }).join('')}
-        </tbody>
-        <tfoot>
-          <tr style="background:#f8f9fb;font-weight:800">
-            <td colspan="2" style="text-align:right">TOTALES</td>
-            <td id="tot-pi" style="text-align:right">$0.00</td>
-            <td id="tot-pe" style="text-align:right">$0.00</td>
-            <td id="tot-neto" style="background:#fde68a;color:#78350f;text-align:right">$0.00</td>
-            <td id="tot-ti" style="text-align:right">$0.00</td>
-            <td id="tot-tm" style="text-align:right">$0.00</td>
-            <td id="tot-cpat" style="background:#bfdbfe;color:#1e3a8a;text-align:right">$0.00</td>
-            <td id="tot-cp" style="text-align:right">$0.00</td>
-            <td id="tot-gm" style="background:#dcfce7;color:#166534;text-align:right;font-size:13px">$0.00</td>
-            <td></td>
-          </tr>
-        </tfoot>
-      </table></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:900px">
+
+        <!-- PAGO AL COLABORADOR (AMARILLO) -->
+        <div style="border:2px solid #fde68a;border-radius:10px;padding:14px;background:#fefce8">
+          <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#854d0e;letter-spacing:.6px;margin-bottom:10px">💵 Pago al Colaborador</div>
+          <label style="font-size:11px;font-weight:700;color:#78350f;display:block;margin-bottom:3px">Pago IMSS</label>
+          <input type="number" step="0.01" id="nq-pi" value="${pi}" ${ro} oninput="recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600;margin-bottom:10px">
+          <label style="font-size:11px;font-weight:700;color:#78350f;display:block;margin-bottom:3px">Pago Efectivo</label>
+          <input type="number" step="0.01" id="nq-pe" value="${pe}" ${ro} oninput="recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600;margin-bottom:10px">
+          <div style="padding-top:8px;border-top:1.5px solid #fde68a;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:11px;font-weight:800;text-transform:uppercase;color:#854d0e">Neto Total Pagado</span>
+            <span id="nq-neto" style="font-size:18px;font-weight:900;color:#78350f">${fmt(pi+pe)}</span>
+          </div>
+        </div>
+
+        <!-- COSTOS PATRONALES (AZUL) -->
+        <div style="border:2px solid #bfdbfe;border-radius:10px;padding:14px;background:#eff6ff">
+          <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#1e40af;letter-spacing:.6px;margin-bottom:10px">🏛 Costos Patronales</div>
+          <label style="font-size:11px;font-weight:700;color:#1e3a8a;display:block;margin-bottom:3px">Total ISR</label>
+          <input type="number" step="0.01" id="nq-ti" value="${ti}" ${ro} oninput="recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600;margin-bottom:10px">
+          <label style="font-size:11px;font-weight:700;color:#1e3a8a;display:block;margin-bottom:3px">Total IMSS</label>
+          <input type="number" step="0.01" id="nq-tm" value="${tm}" ${ro} oninput="recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600;margin-bottom:10px">
+          <div style="padding-top:8px;border-top:1.5px solid #bfdbfe;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:11px;font-weight:800;text-transform:uppercase;color:#1e40af">Total Costos Patronales</span>
+            <span id="nq-cpat" style="font-size:18px;font-weight:900;color:#1e3a8a">${fmt(ti+tm)}</span>
+          </div>
+        </div>
+
+        <!-- COSTO PATRONAL GM (MORADO) -->
+        <div style="border:2px solid #ddd6fe;border-radius:10px;padding:14px;background:#f5f3ff">
+          <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#6b21a8;letter-spacing:.6px;margin-bottom:10px">🏢 Costo Patronal GM</div>
+          <label style="font-size:11px;font-weight:700;color:#6b21a8;display:block;margin-bottom:3px">Costo Patronal GM</label>
+          <input type="number" step="0.01" id="nq-cp" value="${cp}" ${ro} oninput="recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600">
+        </div>
+
+        <!-- COSTO TOTAL GM (VERDE) -->
+        <div style="border:2px solid #86efac;border-radius:10px;padding:14px;background:#dcfce7;display:flex;flex-direction:column;justify-content:center">
+          <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#166534;letter-spacing:.6px;margin-bottom:8px">💰 Costo Total GM</div>
+          <div id="nq-gm" style="font-size:30px;font-weight:900;color:#166534;text-align:center;line-height:1.1">${fmt(pi+pe+ti+tm+cp)}</div>
+          <div style="font-size:11px;color:#15803d;text-align:center;margin-top:4px">Neto + Patronales + Patronal GM</div>
+        </div>
+      </div>
+
       ${q.estatus!=='cerrada'&&canWrite()?`
-      <div class="form-actions" style="margin-top:12px">
-        <button class="btn bs" onclick="saveNomina(${id},${partidas.length})">💾 Guardar nómina</button>
+      <div class="form-actions" style="margin-top:18px">
+        <button class="btn bs" onclick="saveNominaTotales(${id})">💾 Guardar nómina</button>
       </div>`:''}
     </div>`;
-    // Calcular totales iniciales
-    recalcRH(0);
   } catch(e){$('content').innerHTML=`<p class="empty">${e.message}</p>`;}
 }
 
-function recalcRH(i) {
-  // Recalcular fila i si existe
-  const pi = parseFloat($(`np-${i}-pi`)?.value)||0;
-  const pe = parseFloat($(`np-${i}-pe`)?.value)||0;
-  const ti = parseFloat($(`np-${i}-ti`)?.value)||0;
-  const tm = parseFloat($(`np-${i}-tm`)?.value)||0;
-  const cp = parseFloat($(`np-${i}-cp`)?.value)||0;
-  const neto = pi+pe;
-  const cpat = ti+tm;
-  const tot  = neto+cpat+cp;
-  if ($(`np-${i}-neto`)) $(`np-${i}-neto`).textContent = fmt(neto);
-  if ($(`np-${i}-cpat`)) $(`np-${i}-cpat`).textContent = fmt(cpat);
-  if ($(`np-${i}-tot`))  $(`np-${i}-tot`).textContent  = fmt(tot);
-
-  // Recalcular totales de columna
-  let tPi=0,tPe=0,tNeto=0,tTi=0,tTm=0,tCpat=0,tCp=0,tGM=0;
-  let j = 0;
-  while ($(`np-${j}-pi`)) {
-    const xpi = parseFloat($(`np-${j}-pi`).value)||0;
-    const xpe = parseFloat($(`np-${j}-pe`).value)||0;
-    const xti = parseFloat($(`np-${j}-ti`).value)||0;
-    const xtm = parseFloat($(`np-${j}-tm`).value)||0;
-    const xcp = parseFloat($(`np-${j}-cp`).value)||0;
-    const xneto = xpi+xpe, xcpat = xti+xtm;
-    tPi+=xpi; tPe+=xpe; tNeto+=xneto;
-    tTi+=xti; tTm+=xtm; tCpat+=xcpat;
-    tCp+=xcp; tGM+=(xneto+xcpat+xcp);
-    j++;
-  }
-  if ($('tot-pi'))  $('tot-pi').textContent  = fmt(tPi);
-  if ($('tot-pe'))  $('tot-pe').textContent  = fmt(tPe);
-  if ($('tot-neto'))$('tot-neto').textContent= fmt(tNeto);
-  if ($('tot-ti'))  $('tot-ti').textContent  = fmt(tTi);
-  if ($('tot-tm'))  $('tot-tm').textContent  = fmt(tTm);
-  if ($('tot-cpat'))$('tot-cpat').textContent= fmt(tCpat);
-  if ($('tot-cp'))  $('tot-cp').textContent  = fmt(tCp);
-  if ($('tot-gm'))  $('tot-gm').textContent  = fmt(tGM);
+function recalcQ() {
+  const pi = parseFloat($('nq-pi')?.value)||0;
+  const pe = parseFloat($('nq-pe')?.value)||0;
+  const ti = parseFloat($('nq-ti')?.value)||0;
+  const tm = parseFloat($('nq-tm')?.value)||0;
+  const cp = parseFloat($('nq-cp')?.value)||0;
+  const neto = pi+pe, cpat = ti+tm, tot = neto+cpat+cp;
+  if ($('nq-neto')) $('nq-neto').textContent = fmt(neto);
+  if ($('nq-cpat')) $('nq-cpat').textContent = fmt(cpat);
+  if ($('nq-gm'))   $('nq-gm').textContent   = fmt(tot);
 }
 
-async function saveNomina(quincenaId, count) {
-  const partidas = [];
-  for (let i=0; i<count; i++) {
-    partidas.push({
-      empleado_id      : $(`np-${i}-eid`).value,
-      pago_imss        : parseFloat($(`np-${i}-pi`).value)||0,
-      pago_efectivo    : parseFloat($(`np-${i}-pe`).value)||0,
-      total_isr        : parseFloat($(`np-${i}-ti`).value)||0,
-      total_imss       : parseFloat($(`np-${i}-tm`).value)||0,
-      costo_patronal_gm: parseFloat($(`np-${i}-cp`).value)||0,
-      notas            : $(`np-${i}-notas`).value
-    });
-  }
+async function saveNominaTotales(quincenaId) {
+  const body = {
+    pago_imss        : parseFloat($('nq-pi').value)||0,
+    pago_efectivo    : parseFloat($('nq-pe').value)||0,
+    total_isr        : parseFloat($('nq-ti').value)||0,
+    total_imss       : parseFloat($('nq-tm').value)||0,
+    costo_patronal_gm: parseFloat($('nq-cp').value)||0
+  };
   try {
-    await api(`/nomina/quincenas/${quincenaId}/detalle`,{method:'PUT',body:JSON.stringify({partidas})});
+    await api(`/nomina/quincenas/${quincenaId}/totales`,{method:'PUT',body:JSON.stringify(body)});
     toast('Nómina guardada.');
     editQuincena(quincenaId);
   } catch(e){toast(e.message,'err');}
