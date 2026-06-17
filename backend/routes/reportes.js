@@ -347,6 +347,73 @@ router.get('/concepto', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── ESTADO DE CUENTA: clientes + sus facturas ──
+router.get('/estado-cuenta', async (req, res) => {
+  try {
+    const { buscar, solo_saldo } = req.query;
+    const params = [];
+    let whereCli = 'WHERE c.activo = TRUE';
+    if (buscar) {
+      params.push(`%${buscar}%`);
+      whereCli += ` AND (c.razon_social ILIKE $${params.length} OR c.rfc ILIKE $${params.length} OR c.nombre_comercial ILIKE $${params.length})`;
+    }
+
+    // Traer clientes con totales agregados
+    const clientes = await query(`
+      SELECT c.id, c.rfc, c.razon_social, c.nombre_comercial, c.ejecutivo_cuenta,
+        COUNT(f.id) FILTER (WHERE f.estatus != 'cancelada')::int           AS facturas,
+        COALESCE(SUM(f.total) FILTER (WHERE f.estatus != 'cancelada'),0)  AS facturado,
+        COALESCE(SUM(sub_p.cobrado),0)                                     AS cobrado,
+        COALESCE(SUM(
+          CASE WHEN f.estatus NOT IN ('cancelada','pagada')
+               THEN f.total - COALESCE(sub_p.cobrado,0) ELSE 0 END
+        ),0)                                                                AS saldo,
+        COALESCE(SUM(
+          CASE WHEN f.estatus NOT IN ('cancelada','pagada')
+                AND f.fecha_vencimiento < CURRENT_DATE
+               THEN f.total - COALESCE(sub_p.cobrado,0) ELSE 0 END
+        ),0)                                                                AS vencido
+      FROM fac_clientes c
+      LEFT JOIN fac_facturas f ON f.cliente_id = c.id
+      LEFT JOIN (
+        SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
+      ) sub_p ON sub_p.factura_id = f.id
+      ${whereCli}
+      GROUP BY c.id
+      ORDER BY saldo DESC, c.razon_social
+    `, params);
+
+    let lista = clientes.rows;
+    if (solo_saldo === 'true') lista = lista.filter(c => parseFloat(c.saldo) > 0);
+
+    // Traer todas las facturas (no canceladas) de esos clientes
+    const ids = lista.map(c => c.id);
+    let facturas = [];
+    if (ids.length) {
+      const fr = await query(`
+        SELECT f.id, f.cliente_id, f.folio, f.fecha_emision, f.fecha_vencimiento,
+               f.total, f.estatus, f.desglose_validado,
+               COALESCE(sub_p.cobrado,0)                  AS cobrado,
+               f.total - COALESCE(sub_p.cobrado,0)        AS saldo
+        FROM fac_facturas f
+        LEFT JOIN (
+          SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
+        ) sub_p ON sub_p.factura_id = f.id
+        WHERE f.cliente_id = ANY($1::int[]) AND f.estatus != 'cancelada'
+        ORDER BY f.fecha_emision DESC
+      `, [ids]);
+      facturas = fr.rows;
+    }
+
+    // Adjuntar facturas a cada cliente
+    const byCli = {};
+    facturas.forEach(f => { (byCli[f.cliente_id] = byCli[f.cliente_id] || []).push(f); });
+    lista.forEach(c => { c.facturas = byCli[c.id] || []; });
+
+    res.json(lista);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── ESTADÍSTICAS POR CLIENTE ──────────────────
 router.get('/cliente/:id', async (req, res) => {
   try {

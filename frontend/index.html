@@ -480,6 +480,7 @@ canvas{max-height:230px}
       <div class="nav-section">Operación</div>
       <a href="#" onclick="nav('facturas')"  id="nav-facturas"><span class="ni">🧾</span> Facturas</a>
       <a href="#" onclick="nav('cobranza')"  id="nav-cobranza"><span class="ni">💰</span> Cobranza</a>
+      <a href="#" onclick="nav('estadoCuenta')" id="nav-estadoCuenta"><span class="ni">📑</span> Estado de Cuenta</a>
       <a href="#" onclick="nav('clientes')"  id="nav-clientes"><span class="ni">🏢</span> Clientes</a>
       <div class="nav-section">Nómina</div>
       <a href="#" onclick="nav('nomina')"    id="nav-nomina"><span class="ni">👥</span> Nómina</a>
@@ -691,7 +692,8 @@ function nav(page) {
   // Cerrar sidebar en móvil y actualizar título del topbar
   toggleSidebar(false);
   const titulos = {
-    dashboard:'Dashboard', facturas:'Facturas', cobranza:'Cobranza', clientes:'Clientes',
+    dashboard:'Dashboard', facturas:'Facturas', cobranza:'Cobranza',
+    estadoCuenta:'Estado de Cuenta', clientes:'Clientes',
     receptoras:'Empresas Emisoras', nomina:'Nómina', empleados:'Empleados',
     reportes:'Reportes', estadisticas:'Estadísticas', usuarios:'Usuarios',
     catalogo:'Conceptos de Desglose'
@@ -699,7 +701,7 @@ function nav(page) {
   const mt = $('mt-title');
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
-    dashboard, facturas, cobranza, clientes, receptoras, nomina, empleados, reportes, estadisticas, usuarios, catalogo
+    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, reportes, estadisticas, usuarios, catalogo
   };
   if (pages[page]) pages[page]();
 }
@@ -2077,6 +2079,197 @@ async function mostrarCobradoMes() {
   } catch(e) {
     $('cb-table').innerHTML = `<p class="empty">Error: ${e.message}</p>`;
   }
+}
+
+// ══ ESTADO DE CUENTA ═════════════════════════
+async function estadoCuenta() {
+  $('content').innerHTML = `
+  <div class="page-header">
+    <div class="page-header-left">
+      <div class="page-title">Estado de Cuenta</div>
+      <div class="page-sub">Clientes con sus facturas y saldos</div>
+    </div>
+  </div>
+  <div id="ec-kpis" style="margin-bottom:18px"></div>
+  <div class="card">
+    <div class="filters">
+      <input id="ec-buscar" placeholder="🔍 Cliente o RFC..." style="width:240px" oninput="ecFiltrar()">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dark);cursor:pointer">
+        <input type="checkbox" id="ec-solo-saldo" onchange="loadEstadoCuenta()" style="width:auto"> Solo con saldo
+      </label>
+      <button class="btn bo bsm" onclick="ecExpandirTodos(true)">⊞ Expandir todos</button>
+      <button class="btn bo bsm" onclick="ecExpandirTodos(false)">⊟ Colapsar todos</button>
+      <button class="btn bo bsm" onclick="ecExportar()">⬇ Excel</button>
+    </div>
+    <div id="ec-body"><p class="empty">Cargando...</p></div>
+  </div>`;
+  await loadEstadoCuenta();
+}
+
+let _ecTO = null;
+function ecFiltrar() {
+  clearTimeout(_ecTO);
+  _ecTO = setTimeout(loadEstadoCuenta, 250);
+}
+
+async function loadEstadoCuenta() {
+  const buscar    = $('ec-buscar')?.value || '';
+  const soloSaldo = $('ec-solo-saldo')?.checked ? 'true' : '';
+  let url = '/reportes/estado-cuenta?';
+  if (buscar)    url += `buscar=${encodeURIComponent(buscar)}&`;
+  if (soloSaldo) url += `solo_saldo=true&`;
+  try {
+    const data = await api(url);
+    window._ecData = data;
+
+    // KPIs globales
+    const totFact = data.reduce((a,c) => a + parseFloat(c.facturado||0), 0);
+    const totCob  = data.reduce((a,c) => a + parseFloat(c.cobrado||0), 0);
+    const totSal  = data.reduce((a,c) => a + parseFloat(c.saldo||0), 0);
+    const totVen  = data.reduce((a,c) => a + parseFloat(c.vencido||0), 0);
+    $('ec-kpis').innerHTML = `
+      <div class="kpi-grid">
+        <div class="kpi primary">
+          <div class="kpi-icon">🏢</div>
+          <div class="label">Clientes</div>
+          <div class="value">${data.length}</div>
+          <div class="sub">${data.filter(c=>parseFloat(c.saldo)>0).length} con saldo</div>
+        </div>
+        <div class="kpi success">
+          <div class="kpi-icon">🧾</div>
+          <div class="label">Total facturado</div>
+          <div class="value" style="font-size:18px">${fmt(totFact)}</div>
+          <div class="sub">Histórico</div>
+        </div>
+        <div class="kpi success">
+          <div class="kpi-icon">💵</div>
+          <div class="label">Total cobrado</div>
+          <div class="value" style="font-size:18px">${fmt(totCob)}</div>
+          <div class="sub">${totFact>0?Math.round((totCob/totFact)*100):0}% del facturado</div>
+        </div>
+        <div class="kpi warning">
+          <div class="kpi-icon">⏳</div>
+          <div class="label">Saldo por cobrar</div>
+          <div class="value" style="font-size:18px">${fmt(totSal)}</div>
+          <div class="sub">Pendiente de cobro</div>
+        </div>
+        <div class="kpi danger">
+          <div class="kpi-icon">⚠️</div>
+          <div class="label">Saldo vencido</div>
+          <div class="value" style="font-size:18px">${fmt(totVen)}</div>
+          <div class="sub">Requiere gestión</div>
+        </div>
+      </div>`;
+
+    if (!data.length) {
+      $('ec-body').innerHTML = '<p class="empty">Sin clientes para mostrar.</p>';
+      return;
+    }
+
+    $('ec-body').innerHTML = data.map(c => {
+      const pctCob = parseFloat(c.facturado)>0 ? Math.round((parseFloat(c.cobrado)/parseFloat(c.facturado))*100) : 0;
+      const tieneSaldo = parseFloat(c.saldo) > 0;
+      const tieneVencido = parseFloat(c.vencido) > 0;
+      const colorSaldo = tieneVencido ? 'var(--danger)' : tieneSaldo ? 'var(--warning)' : 'var(--success)';
+      return `
+      <div class="ec-card" data-cli="${c.id}" style="border:1px solid var(--border);border-radius:10px;margin-bottom:10px;background:#fff;overflow:hidden">
+        <div onclick="ecToggle(${c.id})" style="cursor:pointer;padding:14px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;transition:background .15s" onmouseover="this.style.background='var(--bg-alt)'" onmouseout="this.style.background='#fff'">
+          <div style="flex:1;min-width:200px">
+            <div style="font-size:14px;font-weight:800;color:var(--dark);line-height:1.2">${c.razon_social}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">${c.rfc} · ${c.facturas.length} factura${c.facturas.length!==1?'s':''}${c.ejecutivo_cuenta?` · 👤 ${c.ejecutivo_cuenta}`:''}</div>
+          </div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+            <div style="text-align:right">
+              <div style="font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700">Facturado</div>
+              <div style="font-size:13px;font-weight:700;color:var(--dark)">${fmt(c.facturado)}</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700">Cobrado</div>
+              <div style="font-size:13px;font-weight:700;color:var(--success)">${fmt(c.cobrado)} <span style="font-size:10px;font-weight:600;opacity:.7">(${pctCob}%)</span></div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700">Saldo</div>
+              <div style="font-size:15px;font-weight:800;color:${colorSaldo}">${fmt(c.saldo)}</div>
+            </div>
+            ${tieneVencido?`<div style="background:#fee2e2;border:1.5px solid #fca5a5;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:800;color:#991b1b">⚠ ${fmt(c.vencido)} vencido</div>`:''}
+            <span class="ec-arrow" id="ec-arr-${c.id}" style="font-size:14px;color:var(--muted);transition:transform .2s">▶</span>
+          </div>
+        </div>
+        <div class="ec-detalle" id="ec-det-${c.id}" style="display:none;border-top:1px solid var(--border);background:var(--bg-alt);padding:10px 12px">
+          ${c.facturas.length?`
+          <div class="tscroll"><table style="margin:0;background:#fff;border-radius:8px;overflow:hidden">
+            <thead><tr>
+              <th>Folio</th><th>Emisión</th><th>Vence</th>
+              <th>Total</th><th>Cobrado</th><th>Saldo</th>
+              <th>Estatus</th><th>Días</th><th></th>
+            </tr></thead>
+            <tbody>${c.facturas.map(f => {
+              const dV = f.fecha_vencimiento && new Date(f.fecha_vencimiento)<new Date()
+                ? Math.floor((new Date()-new Date(f.fecha_vencimiento))/86400000) : 0;
+              return `<tr>
+                <td><a href="#" onclick="event.stopPropagation();detalleFactura(${f.id})" style="color:var(--red);font-weight:600">${f.folio||'#'+f.id}</a></td>
+                <td>${fmtDate(f.fecha_emision)}</td>
+                <td>${f.fecha_vencimiento?fmtDate(f.fecha_vencimiento):'—'}</td>
+                <td style="font-weight:600">${fmt(f.total)}</td>
+                <td style="color:var(--success)">${fmt(f.cobrado)}</td>
+                <td style="color:${parseFloat(f.saldo)>0?'var(--danger)':'var(--success)'};font-weight:700">${fmt(f.saldo)}</td>
+                <td>${f.desglose_validado
+                  ?'<span style="display:inline-flex;align-items:center;gap:3px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:20px;padding:2px 7px;color:#166534;font-size:10px;font-weight:800">✔ CUADRADA</span>'
+                  :badgeEstatus(f.estatus)}</td>
+                <td style="color:${dV>30?'var(--danger)':dV>0?'var(--warning)':'var(--muted)'};font-size:11px;font-weight:600">${dV>0?dV+'d':'—'}</td>
+                <td>${canWrite()&&parseFloat(f.saldo)>0?`<button class="btn bsuc bsm" onclick="event.stopPropagation();openPago(${f.id})" style="padding:3px 8px;font-size:10px">💲</button>`:''}</td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table></div>`:`<p class="empty" style="margin:8px 0">Sin facturas registradas.</p>`}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    $('ec-body').innerHTML = `<p class="empty">${e.message}</p>`;
+  }
+}
+
+function ecToggle(id) {
+  const det = $(`ec-det-${id}`);
+  const arr = $(`ec-arr-${id}`);
+  if (!det) return;
+  const abierto = det.style.display !== 'none';
+  det.style.display = abierto ? 'none' : 'block';
+  if (arr) arr.style.transform = abierto ? '' : 'rotate(90deg)';
+}
+
+function ecExpandirTodos(abrir) {
+  (window._ecData||[]).forEach(c => {
+    const det = $(`ec-det-${c.id}`), arr = $(`ec-arr-${c.id}`);
+    if (det) det.style.display = abrir ? 'block' : 'none';
+    if (arr) arr.style.transform = abrir ? 'rotate(90deg)' : '';
+  });
+}
+
+function ecExportar() {
+  const data = window._ecData || [];
+  if (!data.length) return toast('No hay datos para exportar.', 'warn');
+  // Hoja 1: resumen por cliente
+  const wb = XLSX.utils.book_new();
+  const resumen = data.map(c => ({
+    'RFC': c.rfc, 'Cliente': c.razon_social, 'Ejecutivo': c.ejecutivo_cuenta||'',
+    'Facturas': c.facturas.length,
+    'Facturado': parseFloat(c.facturado), 'Cobrado': parseFloat(c.cobrado),
+    'Saldo': parseFloat(c.saldo), 'Vencido': parseFloat(c.vencido)
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumen), 'Resumen');
+  // Hoja 2: detalle de facturas
+  const detalle = [];
+  data.forEach(c => c.facturas.forEach(f => detalle.push({
+    'RFC': c.rfc, 'Cliente': c.razon_social,
+    'Folio': f.folio, 'Emisión': fmtDate(f.fecha_emision),
+    'Vencimiento': f.fecha_vencimiento ? fmtDate(f.fecha_vencimiento) : '',
+    'Total': parseFloat(f.total), 'Cobrado': parseFloat(f.cobrado),
+    'Saldo': parseFloat(f.saldo), 'Estatus': f.estatus,
+    'Cuadrada': f.desglose_validado ? 'SI' : 'NO'
+  })));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detalle), 'Facturas');
+  XLSX.writeFile(wb, `Estado_de_Cuenta_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 // ══ CLIENTES ═════════════════════════════════
