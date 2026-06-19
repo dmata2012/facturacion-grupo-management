@@ -151,8 +151,25 @@ router.post('/', requireRol('admin', 'capturista'), async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// PUT /api/pagos/:id
+router.put('/:id', requireRol('admin', 'capturista'), async (req, res) => {
+  try {
+    const { fecha_pago, monto, forma_pago, referencia, notas } = req.body;
+    if (!fecha_pago || !monto) return res.status(400).json({ error: 'Fecha y monto requeridos.' });
+
+    const r = await query(
+      `UPDATE fac_pagos SET fecha_pago=$1, monto=$2, forma_pago=$3, referencia=$4, notas=$5
+       WHERE id=$6 RETURNING factura_id`,
+      [fecha_pago, parseFloat(monto), forma_pago || 'transferencia', referencia, notas, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Pago no encontrado.' });
+    await recalcularEstatus(r.rows[0].factura_id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // DELETE /api/pagos/:id
-router.delete('/:id', requireRol('admin'), async (req, res) => {
+router.delete('/:id', requireRol('admin', 'capturista'), async (req, res) => {
   try {
     const r = await query(`DELETE FROM fac_pagos WHERE id=$1 RETURNING factura_id`, [req.params.id]);
     if (r.rows.length) await recalcularEstatus(r.rows[0].factura_id);

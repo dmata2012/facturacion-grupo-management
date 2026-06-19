@@ -1518,11 +1518,22 @@ async function detalleFactura(id) {
       <div class="tab" onclick="showTab(this,'dtab-rh')">Desglose (${f.desglose?.length||0})</div>
     </div>
     <div class="tab-panel active" id="dtab-pagos">
-      ${f.pagos?.length ? `<table><thead><tr><th>Fecha</th><th>Monto</th><th>Forma</th><th>Referencia</th></tr></thead><tbody>
-        ${f.pagos.map(p=>`<tr><td>${fmtDate(p.fecha_pago)}</td><td style="font-weight:600;color:var(--success)">${fmt(p.monto)}</td><td>${p.forma_pago}</td><td>${p.referencia||'—'}</td></tr>`).join('')}
+      ${f.pagos?.length ? `<table><thead><tr><th>Fecha</th><th>Monto</th><th>Forma</th><th>Referencia</th><th>Notas</th>${canWrite()?'<th></th>':''}</tr></thead><tbody>
+        ${f.pagos.map(p=>`<tr>
+          <td>${fmtDate(p.fecha_pago)}</td>
+          <td style="font-weight:600;color:var(--success)">${fmt(p.monto)}</td>
+          <td>${p.forma_pago}</td>
+          <td>${p.referencia||'—'}</td>
+          <td style="font-size:11px;color:var(--muted)">${p.notas||'—'}</td>
+          ${canWrite()?`<td style="white-space:nowrap">
+            <button class="btn bg bsm" onclick="editPago(${p.id},${id},'${(p.fecha_pago||'').slice(0,10)}',${p.monto},'${p.forma_pago||''}','${(p.referencia||'').replace(/'/g,"\\'")}','${(p.notas||'').replace(/'/g,"\\'")}')">✏️</button>
+            <button class="btn bd bsm" onclick="eliminarPago(${p.id},${id})">🗑️</button>
+          </td>`:''}
+        </tr>`).join('')}
       </tbody></table>
       <div class="rh-total"><span>Saldo pendiente:</span><span style="${parseFloat(f.saldo)>0?'color:var(--danger)':''}">${fmt(f.saldo)}</span></div>`
       : '<p class="empty">Sin pagos registrados.</p>'}
+      ${canWrite()&&parseFloat(f.saldo)>0?`<div style="margin-top:10px"><button class="btn bsuc bsm" onclick="closeModal('modal-detalle-factura');openPago(${id})">💲 Registrar pago</button></div>`:''}
     </div>
     <div class="tab-panel" id="dtab-rh">
       ${f.desglose?.length ? `<table><thead><tr><th>Concepto</th><th>Monto</th><th>Notas</th></tr></thead><tbody>
@@ -1878,6 +1889,50 @@ async function savePago(facturaId) {
     toast('Pago registrado.');
     closeModal('modal-pago');
     facturas();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+function editPago(pagoId, facturaId, fecha, monto, forma, ref, notas) {
+  closeModal('modal-detalle-factura');
+  $('modal-pago-body').innerHTML = `
+  <h4>Editar Pago</h4>
+  <div class="fi" style="margin-bottom:10px"><label>Fecha de pago *</label><input type="date" id="pp-fecha" value="${fecha}"></div>
+  <div class="fi" style="margin-bottom:10px"><label>Monto *</label><input type="number" id="pp-monto" step="0.01" value="${monto}"></div>
+  <div class="fi" style="margin-bottom:10px"><label>Forma de pago</label>
+    <select id="pp-forma">
+      ${['transferencia','cheque','efectivo','tarjeta','otro'].map(f=>`<option ${f===forma?'selected':''}>${f}</option>`).join('')}
+    </select>
+  </div>
+  <div class="fi" style="margin-bottom:10px"><label>Referencia</label><input id="pp-ref" value="${ref||''}"></div>
+  <div class="fi" style="margin-bottom:14px"><label>Notas</label><textarea id="pp-notas" rows="2">${notas||''}</textarea></div>
+  <div class="form-actions">
+    <button class="btn bo" onclick="closeModal('modal-pago');detalleFactura(${facturaId})">Cancelar</button>
+    <button class="btn bs" onclick="updatePago(${pagoId},${facturaId})">💾 Guardar cambios</button>
+  </div>`;
+  openModal('modal-pago');
+}
+
+async function updatePago(pagoId, facturaId) {
+  try {
+    await api(`/pagos/${pagoId}`, { method:'PUT', body: JSON.stringify({
+      fecha_pago: $('pp-fecha').value,
+      monto: $('pp-monto').value,
+      forma_pago: $('pp-forma').value,
+      referencia: $('pp-ref').value,
+      notas: $('pp-notas').value
+    })});
+    toast('Pago actualizado.');
+    closeModal('modal-pago');
+    detalleFactura(facturaId);
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarPago(pagoId, facturaId) {
+  if (!await confirm2('¿Eliminar este pago? El estatus de la factura se recalculará.')) return;
+  try {
+    await api(`/pagos/${pagoId}`, { method:'DELETE' });
+    toast('Pago eliminado.');
+    detalleFactura(facturaId);
   } catch(e) { toast(e.message, 'err'); }
 }
 
