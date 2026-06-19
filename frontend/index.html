@@ -623,7 +623,7 @@ function canAdmin() { return ME && ME.rol === 'admin'; }
 function isCapturista() { return ME && ME.rol === 'capturista'; }
 
 // Páginas permitidas para capturista
-const PAGES_CAPTURISTA = ['facturas'];
+const PAGES_CAPTURISTA = ['facturas', 'empleados', 'vacaciones'];
 
 function badgeEstatus(e) {
   const map = {pendiente:'b-pendiente',parcial:'b-parcial',pagada:'b-pagada',vencida:'b-vencida',cancelada:'b-cancelada',borrador:'b-borrador',cerrada:'b-cerrada'};
@@ -686,7 +686,16 @@ function initApp() {
       const pg = a.id?.replace('nav-','');
       if (!PAGES_CAPTURISTA.includes(pg)) a.style.display = 'none';
     });
-    document.querySelectorAll('nav .nav-section').forEach(s => s.style.display = 'none');
+    // Ocultar encabezados de sección que no tengan ningún link visible debajo
+    document.querySelectorAll('nav .nav-section').forEach(s => {
+      let n = s.nextElementSibling;
+      let hayVisible = false;
+      while (n && !n.classList.contains('nav-section')) {
+        if (n.tagName === 'A' && n.style.display !== 'none') { hayVisible = true; break; }
+        n = n.nextElementSibling;
+      }
+      if (!hayVisible) s.style.display = 'none';
+    });
     nav('facturas');
     return;
   }
