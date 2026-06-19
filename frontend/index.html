@@ -3933,12 +3933,17 @@ async function openSolicitudVac(empIdPredef) {
 function recalcDiasSol() {
   const i = $('vs-ini').value, f = $('vs-fin').value;
   if (!i || !f) return;
-  const d1 = new Date(i), d2 = new Date(f);
-  const dias = Math.floor((d2-d1)/86400000) + 1;
+  const d1 = new Date(i+'T00:00:00'), d2 = new Date(f+'T00:00:00');
+  // Contar días excluyendo domingos (día 0 en getDay)
+  let dias = 0;
+  for (let d = new Date(d1); d <= d2; d.setDate(d.getDate()+1)) {
+    if (d.getDay() !== 0) dias++;
+  }
   if ($('vs-dias') && dias > 0) $('vs-dias').value = dias;
-  // Sugerir fecha de regreso (siguiente día hábil aproximado: día siguiente)
+  // Sugerir fecha de regreso: día siguiente al fin; si cae domingo, saltar al lunes
   if (!$('vs-regreso').value) {
     const ret = new Date(d2); ret.setDate(ret.getDate()+1);
+    if (ret.getDay() === 0) ret.setDate(ret.getDate()+1);
     $('vs-regreso').value = ret.toISOString().slice(0,10);
   }
 }
