@@ -140,11 +140,26 @@ router.post('/', requireRol('admin', 'capturista'), async (req, res) => {
   try {
     const { factura_id, fecha_pago, monto, forma_pago, referencia, notas } = req.body;
     if (!factura_id || !fecha_pago || !monto) return res.status(400).json({ error: 'Factura, fecha y monto requeridos.' });
+    const m = parseFloat(monto);
+    if (!(m > 0)) return res.status(400).json({ error: 'El monto debe ser mayor a 0.' });
+
+    // Validar contra saldo pendiente
+    const s = await query(`
+      SELECT f.total - COALESCE((SELECT SUM(monto) FROM fac_pagos WHERE factura_id=f.id),0) AS saldo
+      FROM fac_facturas f WHERE f.id=$1
+    `, [factura_id]);
+    if (!s.rows.length) return res.status(404).json({ error: 'Factura no encontrada.' });
+    const saldo = parseFloat(s.rows[0].saldo);
+    if (m - saldo > 0.01) {
+      return res.status(400).json({
+        error: `El monto $${m.toFixed(2)} supera el saldo pendiente de $${saldo.toFixed(2)}.`
+      });
+    }
 
     const r = await query(
       `INSERT INTO fac_pagos(factura_id,fecha_pago,monto,forma_pago,referencia,notas,creado_por)
        VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [factura_id, fecha_pago, parseFloat(monto), forma_pago || 'transferencia', referencia, notas, req.usuario.id]
+      [factura_id, fecha_pago, m, forma_pago || 'transferencia', referencia, notas, req.usuario.id]
     );
     await recalcularEstatus(factura_id);
     res.status(201).json(r.rows[0]);
@@ -156,13 +171,29 @@ router.put('/:id', requireRol('admin', 'capturista'), async (req, res) => {
   try {
     const { fecha_pago, monto, forma_pago, referencia, notas } = req.body;
     if (!fecha_pago || !monto) return res.status(400).json({ error: 'Fecha y monto requeridos.' });
+    const m = parseFloat(monto);
+    if (!(m > 0)) return res.status(400).json({ error: 'El monto debe ser mayor a 0.' });
+
+    // Validar contra saldo pendiente EXCLUYENDO este pago (porque vamos a reemplazarlo)
+    const s = await query(`
+      SELECT f.total
+        - COALESCE((SELECT SUM(monto) FROM fac_pagos WHERE factura_id=f.id AND id != $2),0) AS saldo_otros
+      FROM fac_pagos p JOIN fac_facturas f ON f.id = p.factura_id
+      WHERE p.id=$1
+    `, [req.params.id, req.params.id]);
+    if (!s.rows.length) return res.status(404).json({ error: 'Pago no encontrado.' });
+    const saldoDisponible = parseFloat(s.rows[0].saldo_otros);
+    if (m - saldoDisponible > 0.01) {
+      return res.status(400).json({
+        error: `El monto $${m.toFixed(2)} supera el saldo disponible de la factura ($${saldoDisponible.toFixed(2)}).`
+      });
+    }
 
     const r = await query(
       `UPDATE fac_pagos SET fecha_pago=$1, monto=$2, forma_pago=$3, referencia=$4, notas=$5
        WHERE id=$6 RETURNING factura_id`,
-      [fecha_pago, parseFloat(monto), forma_pago || 'transferencia', referencia, notas, req.params.id]
+      [fecha_pago, m, forma_pago || 'transferencia', referencia, notas, req.params.id]
     );
-    if (!r.rows.length) return res.status(404).json({ error: 'Pago no encontrado.' });
     await recalcularEstatus(r.rows[0].factura_id);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
