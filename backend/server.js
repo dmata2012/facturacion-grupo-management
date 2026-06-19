@@ -50,6 +50,7 @@ app.use('/api/clientes',  require('./routes/clientes'));
 app.use('/api/facturas',  require('./routes/facturas'));
 app.use('/api/pagos',     require('./routes/pagos'));
 app.use('/api/nomina',    require('./routes/nomina'));
+app.use('/api/vacaciones', require('./routes/vacaciones'));
 app.use('/api/conceptos',  require('./routes/conceptos'));
 app.use('/api/receptoras', require('./routes/receptoras'));
 app.use('/api/dashboard', require('./routes/dashboard'));

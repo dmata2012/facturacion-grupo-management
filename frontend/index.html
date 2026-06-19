@@ -360,6 +360,15 @@ canvas{max-height:230px}
 .progress-bar{height:6px;background:#e5e7eb;border-radius:99px;overflow:hidden;margin-top:8px}
 .progress-fill{height:100%;border-radius:99px;background:var(--grad-red);transition:width .6s ease}
 
+/* ══ PRINT ══════════════════════════════════════════════════════ */
+@media print {
+  body * { visibility: hidden !important; }
+  #modal-vac-print, #modal-vac-print *, #print-vac, #print-vac * { visibility: visible !important; }
+  #modal-vac-print { position: absolute; inset: 0; background: #fff !important; padding: 20px !important; }
+  #modal-vac-print .form-actions, #modal-vac-print .btn { display: none !important; }
+  .sidebar, .sidebar-backdrop, .mobile-topbar { display: none !important; }
+}
+
 /* ══ MOBILE TOGGLE / HAMBURGER ═══════════════════════════════════ */
 .mobile-topbar{
   display:none;position:sticky;top:0;z-index:90;
@@ -485,6 +494,7 @@ canvas{max-height:230px}
       <div class="nav-section">Recurso Humano</div>
       <a href="#" onclick="nav('nomina')"    id="nav-nomina"><span class="ni">👥</span> Nómina</a>
       <a href="#" onclick="nav('empleados')" id="nav-empleados"><span class="ni">👤</span> Empleados</a>
+      <a href="#" onclick="nav('vacaciones')" id="nav-vacaciones"><span class="ni">🌴</span> Vacaciones</a>
       <div class="nav-section">Análisis</div>
       <a href="#" onclick="nav('reportes')"  id="nav-reportes"><span class="ni">📋</span> Reportes</a>
       <a href="#" onclick="nav('estadisticas')" id="nav-estadisticas"><span class="ni">📈</span> Estadísticas</a>
@@ -520,6 +530,9 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-quincena"><div class="modal" id="modal-quincena-body"></div></div>
 <div class="overlay" id="modal-usuario"><div class="modal modal-sm" id="modal-usuario-body"></div></div>
 <div class="overlay" id="modal-detalle-factura"><div class="modal" id="modal-detalle-factura-body"></div></div>
+<div class="overlay" id="modal-vac-emp"><div class="modal" style="width:min(900px,96vw)" id="modal-vac-emp-body"></div></div>
+<div class="overlay" id="modal-vac-sol"><div class="modal" id="modal-vac-sol-body"></div></div>
+<div class="overlay" id="modal-vac-print"><div class="modal" style="width:min(800px,98vw);background:#fff" id="modal-vac-print-body"></div></div>
 
 <script>
 // ══ CONFIG ══════════════════════════════════════
@@ -695,13 +708,14 @@ function nav(page) {
     dashboard:'Dashboard', facturas:'Facturas', cobranza:'Cobranza',
     estadoCuenta:'Estado de Cuenta', clientes:'Clientes',
     receptoras:'Empresas Emisoras', nomina:'Nómina', empleados:'Empleados',
+    vacaciones:'Vacaciones',
     reportes:'Reportes', estadisticas:'Estadísticas', usuarios:'Usuarios',
     catalogo:'Conceptos de Desglose'
   };
   const mt = $('mt-title');
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
-    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, reportes, estadisticas, usuarios, catalogo
+    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, reportes, estadisticas, usuarios, catalogo
   };
   if (pages[page]) pages[page]();
 }
@@ -3685,6 +3699,370 @@ async function cargarDetalleEst(tipo) {
   } catch(e) {
     if ($('ed-body')) $('ed-body').innerHTML = `<p class="empty">Error: ${e.message}</p>`;
   }
+}
+
+// ══ VACACIONES ══════════════════════════════
+async function vacaciones() {
+  $('content').innerHTML = `
+    <div class="page-header">
+      <div class="page-header-left">
+        <div class="page-title">Vacaciones</div>
+        <div class="page-sub">Control vacacional de colaboradores</div>
+      </div>
+      ${canWrite()?`<button class="btn bs" onclick="openSolicitudVac()">+ Nueva solicitud</button>`:''}
+    </div>
+    <div class="card">
+      <div class="filters">
+        <input id="vac-buscar" placeholder="🔍 Nombre o puesto..." style="width:240px" oninput="loadVacEmpleados()">
+      </div>
+      <div id="vac-table"><p class="empty">Cargando...</p></div>
+    </div>`;
+  await loadVacEmpleados();
+}
+
+async function loadVacEmpleados() {
+  try {
+    const data = await api('/vacaciones/empleados');
+    window._vacData = data;
+    const buscar = ($('vac-buscar')?.value || '').toLowerCase();
+    const filtered = buscar
+      ? data.filter(e => (e.nombre||'').toLowerCase().includes(buscar) || (e.puesto||'').toLowerCase().includes(buscar))
+      : data;
+
+    $('vac-table').innerHTML = filtered.length ? `
+    <div class="tscroll"><table>
+      <thead><tr>
+        <th>#</th><th>Colaborador</th><th>Puesto</th><th>Departamento</th>
+        <th>Ingreso</th><th>Antigüedad</th>
+        <th>Días totales</th><th>Tomados</th><th>Pendientes</th>
+        <th>Acciones</th>
+      </tr></thead>
+      <tbody>${filtered.map(e=>`<tr>
+        <td style="font-weight:700">${e.id}</td>
+        <td style="font-weight:600">${e.nombre}</td>
+        <td>${e.puesto||'—'}</td>
+        <td>${e.departamento||'—'}</td>
+        <td>${e.fecha_ingreso?fmtDate(e.fecha_ingreso):'—'}</td>
+        <td style="text-align:center"><span class="badge b-parcial">${e.antiguedad_anios} año${e.antiguedad_anios!==1?'s':''}</span></td>
+        <td style="text-align:right;font-weight:600">${parseFloat(e.dias_total).toFixed(1)}</td>
+        <td style="text-align:right;color:var(--warning);font-weight:600">${parseFloat(e.dias_tomados).toFixed(1)}</td>
+        <td style="text-align:right;color:${parseFloat(e.dias_pendientes)>0?'var(--success)':'var(--muted)'};font-weight:700">${parseFloat(e.dias_pendientes).toFixed(1)}</td>
+        <td><button class="btn bg bsm" onclick="openVacEmpleado(${e.id})">📋 Detalle</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>` : '<p class="empty">Sin colaboradores.</p>';
+  } catch(e) { $('vac-table').innerHTML=`<p class="empty">${e.message}</p>`; }
+}
+
+async function openVacEmpleado(id) {
+  $('modal-vac-emp-body').innerHTML = '<h4>Detalle vacacional</h4><p class="empty">Cargando...</p>';
+  openModal('modal-vac-emp');
+  try {
+    const e = await api(`/vacaciones/empleados/${id}`);
+    window._vacEmp = e;
+    renderVacEmpleado();
+  } catch(err) { $('modal-vac-emp-body').innerHTML = `<p class="empty">${err.message}</p>`; }
+}
+
+function renderVacEmpleado() {
+  const e = window._vacEmp;
+  if (!e) return;
+  const periodos = e.periodos || [];
+  const totalDias = periodos.reduce((a,p)=>a+parseFloat(p.dias_correspondientes||0),0);
+  const totalTomados = periodos.reduce((a,p)=>a+parseFloat(p.dias_tomados||0),0);
+  const totalPend = totalDias - totalTomados;
+
+  $('modal-vac-emp-body').innerHTML = `
+    <h4>${e.nombre}</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-size:12px;margin-bottom:14px;padding:10px;background:var(--bg-alt);border-radius:8px">
+      <div><strong>N° Colaborador:</strong> ${e.id}</div>
+      <div><strong>Puesto:</strong> ${e.puesto||'—'}</div>
+      <div><strong>Departamento:</strong> ${e.departamento||'—'}</div>
+      <div><strong>Fecha ingreso:</strong> ${e.fecha_ingreso?fmtDate(e.fecha_ingreso):'—'}</div>
+      <div><strong>Antigüedad:</strong> ${e.antiguedad_anios} año${e.antiguedad_anios!==1?'s':''}</div>
+      <div><strong>Días totales:</strong> ${totalDias.toFixed(1)} · <span style="color:var(--success)">Pendientes: ${totalPend.toFixed(1)}</span></div>
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--muted);letter-spacing:.5px">Periodos vacacionales</div>
+      ${canWrite()?`<div style="display:flex;gap:6px">
+        <button class="btn bo bsm" onclick="generarPeriodosVac(${e.id})">⚙ Generar por antigüedad</button>
+        <button class="btn bo bsm" onclick="agregarPeriodoFila()">+ Agregar</button>
+      </div>`:''}
+    </div>
+    <div class="tscroll" style="margin-bottom:14px"><table id="vac-per-table">
+      <thead><tr>
+        <th>N° Periodo</th><th>Días correspondientes</th><th>Días tomados</th><th>Días pendientes</th><th>Notas</th><th></th>
+      </tr></thead>
+      <tbody id="vac-per-body">
+        ${periodos.length?periodos.map((p,i)=>periodoFila(p,i)).join(''):'<tr><td colspan="6" class="empty" style="text-align:center;padding:14px">Sin periodos. Usa "Generar por antigüedad" o "Agregar".</td></tr>'}
+      </tbody>
+    </table></div>
+    ${canWrite()?`<div style="margin-bottom:14px;display:flex;gap:8px">
+      <button class="btn bs bsm" onclick="guardarPeriodosVac(${e.id})">💾 Guardar periodos</button>
+    </div>`:''}
+
+    <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--muted);letter-spacing:.5px;margin-bottom:8px">Historial de solicitudes</div>
+    ${e.solicitudes.length?`
+    <div class="tscroll"><table>
+      <thead><tr><th>Solicitud</th><th>Inicio</th><th>Fin</th><th>Días</th><th>Regreso</th><th>Periodos</th><th>Estatus</th><th></th></tr></thead>
+      <tbody>${e.solicitudes.map(s=>`<tr>
+        <td>${fmtDate(s.fecha_solicitud)}</td>
+        <td>${fmtDate(s.fecha_inicio)}</td>
+        <td>${fmtDate(s.fecha_fin)}</td>
+        <td style="text-align:right;font-weight:700">${parseFloat(s.dias_solicitados).toFixed(1)}</td>
+        <td>${s.fecha_regreso?fmtDate(s.fecha_regreso):'—'}</td>
+        <td style="font-size:11px">${s.periodos_aplicados||'—'}</td>
+        <td>${badgeEstatus(s.estatus)}</td>
+        <td style="white-space:nowrap">
+          <button class="btn bg bsm" onclick="imprimirSolicitudVac(${s.id})" title="Imprimir">🖨</button>
+          ${canAdmin()?`<button class="btn bd bsm" onclick="eliminarSolicitudVac(${s.id},${e.id})" title="Eliminar">🗑</button>`:''}
+        </td>
+      </tr>`).join('')}</tbody>
+    </table></div>`:'<p class="empty">Sin solicitudes registradas.</p>'}
+
+    <div class="form-actions" style="margin-top:18px">
+      <button class="btn bo" onclick="closeModal('modal-vac-emp')">Cerrar</button>
+      ${canWrite()?`<button class="btn bs" onclick="openSolicitudVac(${e.id})">+ Nueva solicitud</button>`:''}
+    </div>`;
+}
+
+function periodoFila(p, i) {
+  const dc = parseFloat(p.dias_correspondientes||0);
+  const dt = parseFloat(p.dias_tomados||0);
+  const dp = dc - dt;
+  return `<tr id="vp-row-${i}">
+    <td><input type="number" value="${p.num_periodo||0}" id="vp-${i}-n" style="width:70px"></td>
+    <td><input type="number" step="0.5" value="${dc}" id="vp-${i}-dc" style="width:90px" oninput="recalcPeriodo(${i})"></td>
+    <td><input type="number" step="0.5" value="${dt}" id="vp-${i}-dt" style="width:90px" oninput="recalcPeriodo(${i})"></td>
+    <td id="vp-${i}-dp" style="font-weight:700;color:${dp>0?'var(--success)':'var(--muted)'}">${dp.toFixed(1)}</td>
+    <td><input value="${p.notas||''}" id="vp-${i}-notas" placeholder="Notas" style="width:140px"></td>
+    <td><button class="btn bd bsm" onclick="quitarPeriodoFila(${i})">✕</button></td>
+  </tr>`;
+}
+
+function recalcPeriodo(i) {
+  const dc = parseFloat($(`vp-${i}-dc`)?.value)||0;
+  const dt = parseFloat($(`vp-${i}-dt`)?.value)||0;
+  const el = $(`vp-${i}-dp`);
+  if (el) { el.textContent = (dc-dt).toFixed(1); el.style.color = (dc-dt)>0?'var(--success)':'var(--muted)'; }
+}
+
+function agregarPeriodoFila() {
+  const tbody = $('vac-per-body');
+  if (!tbody) return;
+  // Si está vacío, limpiamos el mensaje
+  if (tbody.querySelector('.empty')) tbody.innerHTML = '';
+  const i = tbody.querySelectorAll('tr').length;
+  tbody.insertAdjacentHTML('beforeend', periodoFila({num_periodo:i+1,dias_correspondientes:12,dias_tomados:0,notas:''}, i));
+}
+
+function quitarPeriodoFila(i) {
+  const tr = $(`vp-row-${i}`); if (tr) tr.remove();
+}
+
+async function generarPeriodosVac(empId) {
+  try {
+    const r = await api(`/vacaciones/empleados/${empId}/generar-periodos`, { method:'POST' });
+    toast(r.mensaje || `${r.periodos_creados} periodos creados.`);
+    openVacEmpleado(empId);
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function guardarPeriodosVac(empId) {
+  const filas = document.querySelectorAll('#vac-per-body tr');
+  const periodos = [];
+  filas.forEach((tr, idx) => {
+    const i = tr.id?.replace('vp-row-','') ?? idx;
+    const n = $(`vp-${i}-n`);
+    if (!n) return;
+    periodos.push({
+      num_periodo: parseInt(n.value)||0,
+      dias_correspondientes: parseFloat($(`vp-${i}-dc`)?.value)||0,
+      dias_tomados: parseFloat($(`vp-${i}-dt`)?.value)||0,
+      notas: $(`vp-${i}-notas`)?.value || ''
+    });
+  });
+  try {
+    await api(`/vacaciones/empleados/${empId}/periodos`, { method:'PUT', body: JSON.stringify({periodos}) });
+    toast('Periodos guardados.');
+    openVacEmpleado(empId);
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function openSolicitudVac(empIdPredef) {
+  $('modal-vac-sol-body').innerHTML = '<h4>Nueva solicitud de vacaciones</h4><p class="empty">Cargando...</p>';
+  openModal('modal-vac-sol');
+  try {
+    const emps = await api('/vacaciones/empleados');
+    const today = new Date().toISOString().slice(0,10);
+    $('modal-vac-sol-body').innerHTML = `
+      <h4>Nueva solicitud de vacaciones</h4>
+      <div class="fg">
+        <div class="fi"><label>Colaborador *</label>
+          <select id="vs-emp">
+            <option value="">— Seleccionar —</option>
+            ${emps.map(e=>`<option value="${e.id}" ${empIdPredef==e.id?'selected':''}>${e.nombre} (${e.puesto||'sin puesto'}) — Pendientes: ${parseFloat(e.dias_pendientes).toFixed(1)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fi"><label>Fecha solicitud</label><input type="date" id="vs-solicitud" value="${today}"></div>
+        <div class="fi"><label>Fecha inicio *</label><input type="date" id="vs-ini" onchange="recalcDiasSol()"></div>
+        <div class="fi"><label>Fecha fin *</label><input type="date" id="vs-fin" onchange="recalcDiasSol()"></div>
+        <div class="fi"><label>Días solicitados</label><input type="number" step="0.5" id="vs-dias" value="0"></div>
+        <div class="fi"><label>Fecha regreso a laborar</label><input type="date" id="vs-regreso"></div>
+        <div class="fi full"><label>Periodos aplicados (texto libre)</label>
+          <input id="vs-periodos" placeholder="Ej: 6/periodo 9, 6/periodo 10">
+        </div>
+        <div class="fi full"><label>Observaciones</label>
+          <textarea id="vs-obs" rows="2"></textarea>
+        </div>
+        <div class="fi"><label>Estatus</label>
+          <select id="vs-est">
+            <option value="aprobada">Aprobada</option>
+            <option value="pendiente">Pendiente</option>
+            <option value="rechazada">Rechazada</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn bo" onclick="closeModal('modal-vac-sol')">Cancelar</button>
+        <button class="btn bs" onclick="guardarSolicitudVac()">💾 Guardar</button>
+      </div>`;
+  } catch(e) { $('modal-vac-sol-body').innerHTML = `<p class="empty">${e.message}</p>`; }
+}
+
+function recalcDiasSol() {
+  const i = $('vs-ini').value, f = $('vs-fin').value;
+  if (!i || !f) return;
+  const d1 = new Date(i), d2 = new Date(f);
+  const dias = Math.floor((d2-d1)/86400000) + 1;
+  if ($('vs-dias') && dias > 0) $('vs-dias').value = dias;
+  // Sugerir fecha de regreso (siguiente día hábil aproximado: día siguiente)
+  if (!$('vs-regreso').value) {
+    const ret = new Date(d2); ret.setDate(ret.getDate()+1);
+    $('vs-regreso').value = ret.toISOString().slice(0,10);
+  }
+}
+
+async function guardarSolicitudVac() {
+  const body = {
+    empleado_id       : $('vs-emp').value,
+    fecha_solicitud   : $('vs-solicitud').value,
+    fecha_inicio      : $('vs-ini').value,
+    fecha_fin         : $('vs-fin').value,
+    dias_solicitados  : $('vs-dias').value,
+    fecha_regreso     : $('vs-regreso').value,
+    periodos_aplicados: $('vs-periodos').value,
+    observaciones     : $('vs-obs').value,
+    estatus           : $('vs-est').value
+  };
+  if (!body.empleado_id || !body.fecha_inicio || !body.fecha_fin)
+    return toast('Colaborador y fechas son requeridos.', 'warn');
+  try {
+    await api('/vacaciones/solicitudes', { method:'POST', body: JSON.stringify(body) });
+    toast('Solicitud guardada.');
+    closeModal('modal-vac-sol');
+    // Refrescar vista
+    if (window._vacEmp && window._vacEmp.id == body.empleado_id) {
+      openVacEmpleado(body.empleado_id);
+    } else {
+      loadVacEmpleados();
+    }
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarSolicitudVac(id, empId) {
+  if (!await confirm2('¿Eliminar esta solicitud?')) return;
+  try {
+    await api(`/vacaciones/solicitudes/${id}`, { method:'DELETE' });
+    toast('Solicitud eliminada.');
+    openVacEmpleado(empId);
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function imprimirSolicitudVac(id) {
+  try {
+    const s = await api(`/vacaciones/solicitudes/${id}`);
+    const emp = await api(`/vacaciones/empleados/${s.empleado_id}`);
+    const periodos = emp.periodos || [];
+    const totDias = periodos.reduce((a,p)=>a+parseFloat(p.dias_correspondientes||0),0);
+    const totTom = periodos.reduce((a,p)=>a+parseFloat(p.dias_tomados||0),0);
+    const totPend = totDias - totTom;
+    const fmtDateLg = d => d ? new Date(d).toLocaleDateString('es-MX',{year:'numeric',month:'long',day:'numeric'}) : '—';
+    const fmtDateRet = d => d ? new Date(d).toLocaleDateString('es-MX',{weekday:'long',year:'numeric',month:'long',day:'numeric'}) : '—';
+
+    $('modal-vac-print-body').innerHTML = `
+      <div id="print-vac" style="font-family:Arial,sans-serif;padding:14px;background:#fff;color:#000">
+        <div style="text-align:center;margin-bottom:14px">
+          <div style="font-size:22px;font-weight:800;letter-spacing:1px">GRUPO MANAGEMENT</div>
+          <div style="font-size:16px;font-weight:700;margin-top:6px">SOLICITUD DE VACACIONES</div>
+        </div>
+        <div style="border:1px solid #888;padding:6px;display:inline-block;float:right;margin-bottom:10px">
+          <span style="font-weight:700">FECHA:</span> ${fmtDate(s.fecha_solicitud)}
+        </div>
+        <div style="clear:both"></div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">
+          <tr>
+            <td style="border:1px solid #888;padding:4px;font-weight:700;background:#f3f4f6">N° COLABORADOR</td>
+            <td style="border:1px solid #888;padding:4px">${emp.id}</td>
+            <td style="border:1px solid #888;padding:4px;font-weight:700;background:#f3f4f6">NOMBRE COMPLETO</td>
+            <td style="border:1px solid #888;padding:4px">${emp.nombre}</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #888;padding:4px;font-weight:700;background:#f3f4f6">DEPARTAMENTO</td>
+            <td style="border:1px solid #888;padding:4px">${emp.departamento||''}</td>
+            <td style="border:1px solid #888;padding:4px;font-weight:700;background:#f3f4f6">PUESTO</td>
+            <td style="border:1px solid #888;padding:4px">${emp.puesto||''}</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #888;padding:4px;font-weight:700;background:#f3f4f6">FECHA DE INGRESO</td>
+            <td style="border:1px solid #888;padding:4px">${fmtDate(emp.fecha_ingreso)}</td>
+            <td style="border:1px solid #888;padding:4px;font-weight:700;background:#f3f4f6">ANTIGÜEDAD</td>
+            <td style="border:1px solid #888;padding:4px">${emp.antiguedad_anios} año${emp.antiguedad_anios!==1?'s':''}</td>
+          </tr>
+        </table>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+          <table style="border-collapse:collapse;font-size:12px;width:100%">
+            <thead><tr><th colspan="2" style="border:1px solid #888;padding:4px;background:#e5e7eb">PERIODO VACACIONAL</th></tr></thead>
+            <tbody>${periodos.map(p=>`<tr>
+              <td style="border:1px solid #888;padding:3px 6px">${p.num_periodo}° Periodo (${parseFloat(p.dias_correspondientes).toFixed(0)} días)</td>
+              <td style="border:1px solid #888;padding:3px 6px;text-align:right">${parseFloat(p.dias_tomados).toFixed(0)}</td>
+            </tr>`).join('')}</tbody>
+          </table>
+          <table style="border-collapse:collapse;font-size:12px;width:100%">
+            <thead><tr>
+              <th style="border:1px solid #888;padding:4px;background:#e5e7eb">DÍAS DISFRUTADOS</th>
+              <th style="border:1px solid #888;padding:4px;background:#e5e7eb">DÍAS A DISFRUTAR</th>
+              <th style="border:1px solid #888;padding:4px;background:#e5e7eb">DÍAS PENDIENTES</th>
+            </tr></thead>
+            <tbody><tr>
+              <td style="border:1px solid #888;padding:6px;vertical-align:top">${totTom.toFixed(0)}</td>
+              <td style="border:1px solid #888;padding:6px;text-align:center;font-size:18px;font-weight:700">${parseFloat(s.dias_solicitados).toFixed(0)}</td>
+              <td style="border:1px solid #888;padding:6px;vertical-align:top">${totPend.toFixed(0)}</td>
+            </tr></tbody>
+          </table>
+        </div>
+
+        <div style="font-size:12px;margin-bottom:6px"><strong>Por lo que tomaré mis vacaciones en la fecha señalada del día:</strong> ${fmtDateLg(s.fecha_inicio)} al ${fmtDateLg(s.fecha_fin)}</div>
+        <div style="font-size:12px;margin-bottom:6px"><strong>Presentándome a laborar el día:</strong> ${fmtDateRet(s.fecha_regreso)}</div>
+        <div style="font-size:12px;margin-bottom:30px"><strong>Observaciones:</strong> ${s.observaciones||''}</div>
+
+        <table style="width:100%;font-size:11px;margin-top:40px">
+          <tr style="text-align:center">
+            <td style="border-top:1px solid #000;padding-top:4px;width:33%">Jefe del Depto. / Gte. Del Área</td>
+            <td></td>
+            <td style="border-top:1px solid #000;padding-top:4px;width:33%">${emp.nombre}<br>Colaborador</td>
+            <td></td>
+            <td style="border-top:1px solid #000;padding-top:4px;width:33%">Autorización</td>
+          </tr>
+        </table>
+      </div>
+      <div class="form-actions" style="margin-top:14px">
+        <button class="btn bo" onclick="closeModal('modal-vac-print')">Cerrar</button>
+        <button class="btn bs" onclick="window.print()">🖨 Imprimir</button>
+      </div>`;
+    openModal('modal-vac-print');
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 // ══ USUARIOS ════════════════════════════════
