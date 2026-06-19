@@ -47,17 +47,21 @@ router.get('/', async (req, res) => {
         er.razon_social     AS emisora_razon_social,
         er.nombre_comercial AS emisora_nombre_comercial,
         er.rfc              AS emisora_rfc,
-        COALESCE(SUM(p.monto),0)                            AS cobrado,
-        f.total - COALESCE(SUM(p.monto),0)                 AS saldo,
-        COALESCE(SUM(d.monto),0)                           AS rh_total,
-        COUNT(d.id)::int                                   AS rh_partidas
+        COALESCE(sub_p.cobrado, 0)                AS cobrado,
+        f.total - COALESCE(sub_p.cobrado, 0)      AS saldo,
+        COALESCE(sub_d.rh_total, 0)               AS rh_total,
+        COALESCE(sub_d.rh_partidas, 0)::int       AS rh_partidas
       FROM fac_facturas f
       LEFT JOIN fac_clientes c              ON c.id = f.cliente_id
       LEFT JOIN fac_empresas_receptoras er  ON er.id = f.empresa_receptora_id
-      LEFT JOIN fac_pagos    p              ON p.factura_id = f.id
-      LEFT JOIN fac_desglose_rh d           ON d.factura_id = f.id
+      LEFT JOIN (
+        SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
+      ) sub_p ON sub_p.factura_id = f.id
+      LEFT JOIN (
+        SELECT factura_id, SUM(monto) AS rh_total, COUNT(*) AS rh_partidas
+        FROM fac_desglose_rh GROUP BY factura_id
+      ) sub_d ON sub_d.factura_id = f.id
       ${where}
-      GROUP BY f.id, c.razon_social, c.rfc, er.razon_social, er.nombre_comercial, er.rfc
       ORDER BY f.desglose_validado DESC NULLS LAST, f.fecha_emision DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `, params);
