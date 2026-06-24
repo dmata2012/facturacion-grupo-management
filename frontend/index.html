@@ -3775,19 +3775,182 @@ async function vacaciones() {
       </div>
       ${canWrite()?`<button class="btn bs" onclick="openSolicitudVac()">+ Nueva solicitud</button>`:''}
     </div>
-    <div class="card">
-      <div class="filters">
-        <input id="vac-buscar" placeholder="🔍 Nombre o puesto..." style="width:240px" oninput="loadVacEmpleados()">
+
+    <div id="vac-kpis" style="margin-bottom:14px"></div>
+
+    <div class="tabs">
+      <div class="tab active" onclick="showTab(this,'vtab-lista')">📋 Colaboradores</div>
+      <div class="tab" onclick="showTab(this,'vtab-grafica');renderGraficaVac()">📊 Gráfica de pendientes</div>
+      <div class="tab" onclick="showTab(this,'vtab-vencer');loadVacPorVencer()">⏰ Por vencer</div>
+    </div>
+
+    <div class="tab-panel active" id="vtab-lista">
+      <div class="card">
+        <div class="filters">
+          <input id="vac-buscar" placeholder="🔍 Nombre o puesto..." style="width:240px" oninput="loadVacEmpleados()">
+        </div>
+        <div id="vac-table"><p class="empty">Cargando...</p></div>
       </div>
-      <div id="vac-table"><p class="empty">Cargando...</p></div>
+    </div>
+
+    <div class="tab-panel" id="vtab-grafica">
+      <div class="card">
+        <div style="font-size:13px;font-weight:700;color:var(--dark);margin-bottom:10px">
+          Días pendientes por colaborador
+        </div>
+        <div style="height:480px"><canvas id="ch-vac-pend"></canvas></div>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="vtab-vencer">
+      <div class="card">
+        <div id="vac-vencer-body"><p class="empty">Cargando...</p></div>
+      </div>
     </div>`;
   await loadVacEmpleados();
+}
+
+function renderGraficaVac() {
+  const data = (window._vacData || []).filter(e => parseFloat(e.dias_pendientes||0) > 0)
+                                       .sort((a,b) => parseFloat(b.dias_pendientes) - parseFloat(a.dias_pendientes));
+  if (!data.length) {
+    $('ch-vac-pend').parentElement.innerHTML = '<p class="empty">Sin colaboradores con días pendientes.</p>';
+    return;
+  }
+  // Color: si tiene muchos días pendientes, alerta
+  const colors = data.map(e => {
+    const d = parseFloat(e.dias_pendientes);
+    return d >= 30 ? '#dc2626' : d >= 15 ? '#d97706' : d >= 8 ? '#0891b2' : '#16a34a';
+  });
+  makeChart('vac-pend', $('ch-vac-pend'), {
+    type: 'bar',
+    data: {
+      labels: data.map(e => e.nombre),
+      datasets: [{
+        label: 'Días pendientes',
+        data: data.map(e => parseFloat(e.dias_pendientes)),
+        backgroundColor: colors,
+        borderRadius: 6
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: {
+          label: ctx => `${ctx.raw} días pendientes (de ${parseFloat(data[ctx.dataIndex].dias_total||0).toFixed(0)} totales)`
+        }}
+      },
+      scales: {
+        x: { ticks: { stepSize: 5 } },
+        y: { ticks: { font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+async function loadVacPorVencer() {
+  try {
+    const data = await api('/vacaciones/por-vencer');
+    if (!data.length) {
+      $('vac-vencer-body').innerHTML = '<p class="empty">Ningún periodo con días pendientes 🎉</p>';
+      return;
+    }
+    const venc       = data.filter(p => parseInt(p.dias_para_vencer) < 0);
+    const por60      = data.filter(p => parseInt(p.dias_para_vencer) >= 0 && parseInt(p.dias_para_vencer) <= 60);
+    const proximos   = data.filter(p => parseInt(p.dias_para_vencer) > 60 && parseInt(p.dias_para_vencer) <= 180);
+    const lejanos    = data.filter(p => parseInt(p.dias_para_vencer) > 180);
+
+    const totalPendientes = data.reduce((a,p)=>a+parseFloat(p.dias_pendientes||0),0);
+
+    $('vac-vencer-body').innerHTML = `
+      <div class="kpi-grid" style="margin-bottom:14px">
+        <div class="kpi danger">
+          <div class="kpi-icon">🚨</div>
+          <div class="label">Periodos vencidos</div>
+          <div class="value">${venc.length}</div>
+          <div class="sub">${venc.reduce((a,p)=>a+parseFloat(p.dias_pendientes),0).toFixed(1)} días en total</div>
+        </div>
+        <div class="kpi warning">
+          <div class="kpi-icon">⏰</div>
+          <div class="label">Vencen en 60 días</div>
+          <div class="value">${por60.length}</div>
+          <div class="sub">Acción urgente</div>
+        </div>
+        <div class="kpi primary">
+          <div class="kpi-icon">📅</div>
+          <div class="label">Vencen en 6 meses</div>
+          <div class="value">${proximos.length}</div>
+          <div class="sub">Planificar</div>
+        </div>
+        <div class="kpi success">
+          <div class="kpi-icon">✅</div>
+          <div class="label">Total periodos con saldo</div>
+          <div class="value">${data.length}</div>
+          <div class="sub">${totalPendientes.toFixed(1)} días pendientes</div>
+        </div>
+      </div>
+      <div class="tscroll"><table>
+        <thead><tr>
+          <th>Colaborador</th><th>Puesto</th><th>Ingreso</th>
+          <th>Periodo</th><th>Ganado</th><th>Vence</th>
+          <th>Días para vencer</th><th>Días pendientes</th><th></th>
+        </tr></thead>
+        <tbody>${data.map(p => {
+          const dv = parseInt(p.dias_para_vencer);
+          const color = dv < 0 ? '#dc2626' : dv <= 60 ? '#d97706' : dv <= 180 ? '#0891b2' : 'var(--muted)';
+          const label = dv < 0 ? `Vencido hace ${Math.abs(dv)} días` : dv === 0 ? 'Vence hoy' : `${dv} días`;
+          return `<tr>
+            <td style="font-weight:600">${p.nombre}</td>
+            <td>${p.puesto||'—'}</td>
+            <td>${fmtDate(p.fecha_ingreso)}</td>
+            <td style="text-align:center"><span class="badge b-parcial">${p.num_periodo}°</span></td>
+            <td>${fmtDate(p.fecha_ganado)}</td>
+            <td style="font-weight:700;color:${dv<0?'#dc2626':'var(--dark)'}">${fmtDate(p.fecha_vence)}</td>
+            <td style="font-weight:700;color:${color}">${label}</td>
+            <td style="text-align:right;font-weight:800;color:var(--success)">${parseFloat(p.dias_pendientes).toFixed(1)}</td>
+            <td><button class="btn bg bsm" onclick="openVacEmpleado(${p.empleado_id})">📋 Ver</button></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`;
+  } catch(e) {
+    $('vac-vencer-body').innerHTML = `<p class="empty">${e.message}</p>`;
+  }
 }
 
 async function loadVacEmpleados() {
   try {
     const data = await api('/vacaciones/empleados');
     window._vacData = data;
+    // KPIs globales
+    const conPend = data.filter(e => parseFloat(e.dias_pendientes||0) > 0);
+    const totalPend = data.reduce((a,e)=>a+parseFloat(e.dias_pendientes||0),0);
+    const totalTom = data.reduce((a,e)=>a+parseFloat(e.dias_tomados||0),0);
+    const sinTomar = data.filter(e => parseFloat(e.dias_tomados||0) === 0 && parseFloat(e.dias_total||0) > 0);
+    if ($('vac-kpis')) $('vac-kpis').innerHTML = `
+      <div class="kpi-grid">
+        <div class="kpi primary"><div class="kpi-icon">👥</div>
+          <div class="label">Colaboradores</div>
+          <div class="value">${data.length}</div>
+          <div class="sub">${conPend.length} con días pendientes</div>
+        </div>
+        <div class="kpi success"><div class="kpi-icon">🌴</div>
+          <div class="label">Días pendientes</div>
+          <div class="value">${totalPend.toFixed(0)}</div>
+          <div class="sub">Total de la empresa</div>
+        </div>
+        <div class="kpi warning"><div class="kpi-icon">📅</div>
+          <div class="label">Días tomados</div>
+          <div class="value">${totalTom.toFixed(0)}</div>
+          <div class="sub">Histórico</div>
+        </div>
+        <div class="kpi danger"><div class="kpi-icon">⚠️</div>
+          <div class="label">Sin tomar nada</div>
+          <div class="value">${sinTomar.length}</div>
+          <div class="sub">Con periodos pero 0 tomados</div>
+        </div>
+      </div>`;
     const buscar = ($('vac-buscar')?.value || '').toLowerCase();
     const filtered = buscar
       ? data.filter(e => (e.nombre||'').toLowerCase().includes(buscar) || (e.puesto||'').toLowerCase().includes(buscar))

@@ -48,6 +48,33 @@ router.get('/empleados', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── REPORTE: PERIODOS POR VENCER ──
+// Cada periodo se gana cuando se cumple ese año de antigüedad
+// Por LFT vencen 6 meses después de cumplido el año
+router.get('/por-vencer', async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT
+        e.id          AS empleado_id,
+        e.nombre, e.puesto, e.departamento, e.fecha_ingreso,
+        p.num_periodo,
+        p.dias_correspondientes,
+        p.dias_tomados,
+        (p.dias_correspondientes - p.dias_tomados)::numeric AS dias_pendientes,
+        (e.fecha_ingreso + (p.num_periodo || ' years')::INTERVAL)::date              AS fecha_ganado,
+        (e.fecha_ingreso + (p.num_periodo || ' years')::INTERVAL + INTERVAL '6 months')::date AS fecha_vence,
+        ((e.fecha_ingreso + (p.num_periodo || ' years')::INTERVAL + INTERVAL '6 months')::date - CURRENT_DATE) AS dias_para_vencer
+      FROM fac_empleados e
+      JOIN fac_vacaciones_periodos p ON p.empleado_id = e.id
+      WHERE e.activo = TRUE
+        AND e.fecha_ingreso IS NOT NULL
+        AND p.dias_correspondientes - p.dias_tomados > 0
+      ORDER BY fecha_vence ASC, e.nombre
+    `);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── DETALLE DE UN EMPLEADO ──
 router.get('/empleados/:id', async (req, res) => {
   try {
