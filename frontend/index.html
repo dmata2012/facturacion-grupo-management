@@ -2572,31 +2572,108 @@ async function nomina() {
     </div>
     ${canWrite()?`<button class="btn bs" onclick="openQuincena()">+ Nueva quincena</button>`:''}
   </div>
-  <div class="card">
-    <div id="nom-table"><p class="empty">Cargando...</p></div>
-  </div>`;
+  <div id="nom-kpis" style="margin-bottom:14px"></div>
+  <div id="nom-table"><p class="empty">Cargando...</p></div>`;
   await loadQuincenas();
 }
 
 async function loadQuincenas() {
   try {
     const d = await api('/nomina/quincenas');
-    $('nom-table').innerHTML = d.length ? `
-    <div class="tscroll"><table>
-      <thead><tr><th>Quincena</th><th>Período</th><th>Percepciones</th><th>Deducciones</th><th>Neto</th><th>Estatus</th><th>Acciones</th></tr></thead>
-      <tbody>${d.map(q=>`<tr>
-        <td style="font-weight:600">${q.quincena}</td>
-        <td>${fmtDate(q.fecha_inicio)} – ${fmtDate(q.fecha_fin)}</td>
-        <td>${fmt(q.total_percepciones)}</td>
-        <td style="color:var(--danger)">${fmt(q.total_deducciones)}</td>
-        <td style="font-weight:700;color:var(--success)">${fmt(q.total_neto)}</td>
-        <td>${badgeEstatus(q.estatus)}</td>
-        <td style="white-space:nowrap">
-          ${canWrite()?`<button class="btn bg bsm" onclick="editQuincena(${q.id})">✏️ Detalle</button>`:''}
-          ${canAdmin()&&q.estatus!=='cerrada'?`<button class="btn bsuc bsm" onclick="cerrarQuincena(${q.id})">🔒 Cerrar</button>`:''}
-        </td>
-      </tr>`).join('')}</tbody>
-    </table></div>` : `<p class="empty">No hay quincenas registradas.</p>`;
+    if (!d.length) {
+      $('nom-table').innerHTML = `
+        <div class="card" style="text-align:center;padding:60px 20px">
+          <div style="font-size:54px;margin-bottom:10px">📭</div>
+          <div style="font-size:15px;font-weight:700;color:var(--dark)">No hay quincenas registradas</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px">Pulsa "+ Nueva quincena" para empezar</div>
+        </div>`;
+      $('nom-kpis').innerHTML = '';
+      return;
+    }
+
+    // KPIs del año
+    const anio = new Date().getFullYear();
+    const delAnio = d.filter(q => new Date(q.fecha_inicio).getFullYear() === anio);
+    const totGM   = delAnio.reduce((a,q) => a + parseFloat(q.total_costo_gm||0), 0);
+    const totNeto = delAnio.reduce((a,q) => a + parseFloat(q.total_neto_pagado||q.total_neto||0), 0);
+    const totPat  = delAnio.reduce((a,q) => a + parseFloat(q.total_costos_patronales||0), 0);
+    const cerradas = delAnio.filter(q=>q.estatus==='cerrada').length;
+
+    $('nom-kpis').innerHTML = `
+    <div class="kpi-grid">
+      <div class="kpi success">
+        <div class="kpi-icon">💵</div>
+        <div class="label">Neto pagado ${anio}</div>
+        <div class="value" style="font-size:18px">${fmt(totNeto)}</div>
+        <div class="sub">A colaboradores</div>
+      </div>
+      <div class="kpi primary">
+        <div class="kpi-icon">🏛</div>
+        <div class="label">Costos patronales ${anio}</div>
+        <div class="value" style="font-size:18px">${fmt(totPat)}</div>
+        <div class="sub">ISR + IMSS + otros</div>
+      </div>
+      <div class="kpi warning">
+        <div class="kpi-icon">💰</div>
+        <div class="label">Costo total GM ${anio}</div>
+        <div class="value" style="font-size:18px">${fmt(totGM)}</div>
+        <div class="sub">Gasto total nómina</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-icon">📋</div>
+        <div class="label">Quincenas ${anio}</div>
+        <div class="value">${delAnio.length}</div>
+        <div class="sub">${cerradas} cerrada${cerradas!==1?'s':''}</div>
+      </div>
+    </div>`;
+
+    // Lista de quincenas en grid de tarjetas
+    $('nom-table').innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px">
+      ${d.map(q => {
+        const cerrada = q.estatus === 'cerrada';
+        const neto = parseFloat(q.total_neto_pagado||q.total_neto||0);
+        const gm   = parseFloat(q.total_costo_gm||0);
+        const pat  = parseFloat(q.total_costos_patronales||0);
+        const cpgm = parseFloat(q.total_costo_patronal_gm||0);
+        return `
+        <div style="background:#fff;border-radius:14px;overflow:hidden;border:1px solid var(--border);box-shadow:0 2px 12px rgba(0,0,0,.04);transition:all .2s"
+             onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.08)'"
+             onmouseout="this.style.transform='';this.style.boxShadow='0 2px 12px rgba(0,0,0,.04)'">
+          <!-- Header con gradiente -->
+          <div style="background:${cerrada?'linear-gradient(135deg,#16a34a,#22c55e)':'var(--grad-red)'};color:#fff;padding:14px 16px;position:relative">
+            <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.85">${cerrada?'✔ Cerrada':'📝 Abierta'}</div>
+            <div style="font-size:18px;font-weight:900;letter-spacing:-.3px;margin-top:2px">${q.quincena}</div>
+            <div style="font-size:11px;opacity:.88;margin-top:3px">${fmtDate(q.fecha_inicio)} → ${fmtDate(q.fecha_fin)}</div>
+          </div>
+          <!-- Body con totales -->
+          <div style="padding:14px 16px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;margin-bottom:12px">
+              <div>
+                <div style="font-size:9.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px">Neto pagado</div>
+                <div style="font-size:13px;font-weight:800;color:#78350f">${fmt(neto)}</div>
+              </div>
+              <div>
+                <div style="font-size:9.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px">Costos patronales</div>
+                <div style="font-size:13px;font-weight:800;color:#1e3a8a">${fmt(pat)}</div>
+              </div>
+              <div>
+                <div style="font-size:9.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px">Patronal GM</div>
+                <div style="font-size:13px;font-weight:800;color:#6b21a8">${fmt(cpgm)}</div>
+              </div>
+              <div>
+                <div style="font-size:9.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px">Costo total GM</div>
+                <div style="font-size:14px;font-weight:900;color:#166534">${fmt(gm)}</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:6px;padding-top:10px;border-top:1px solid var(--border)">
+              ${canWrite()?`<button class="btn bg bsm" style="flex:1" onclick="editQuincena(${q.id})">✏️ Detalle</button>`:''}
+              ${canAdmin()&&!cerrada?`<button class="btn bsuc bsm" onclick="cerrarQuincena(${q.id})" title="Cerrar quincena">🔒</button>`:''}
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
   } catch(e) { $('nom-table').innerHTML=`<p class="empty">${e.message}</p>`; }
 }
 
@@ -3956,27 +4033,81 @@ async function loadVacEmpleados() {
       ? data.filter(e => (e.nombre||'').toLowerCase().includes(buscar) || (e.puesto||'').toLowerCase().includes(buscar))
       : data;
 
-    $('vac-table').innerHTML = filtered.length ? `
-    <div class="tscroll"><table>
-      <thead><tr>
-        <th>#</th><th>Colaborador</th><th>Puesto</th><th>Departamento</th>
-        <th>Ingreso</th><th>Antigüedad</th>
-        <th>Días totales</th><th>Tomados</th><th>Pendientes</th>
-        <th>Acciones</th>
-      </tr></thead>
-      <tbody>${filtered.map(e=>`<tr>
-        <td style="font-weight:700">${e.id}</td>
-        <td style="font-weight:600">${e.nombre}</td>
-        <td>${e.puesto||'—'}</td>
-        <td>${e.departamento||'—'}</td>
-        <td>${e.fecha_ingreso?fmtDate(e.fecha_ingreso):'—'}</td>
-        <td style="text-align:center"><span class="badge b-parcial">${e.antiguedad_anios} año${e.antiguedad_anios!==1?'s':''}</span></td>
-        <td style="text-align:right;font-weight:600">${parseFloat(e.dias_total).toFixed(1)}</td>
-        <td style="text-align:right;color:var(--warning);font-weight:600">${parseFloat(e.dias_tomados).toFixed(1)}</td>
-        <td style="text-align:right;color:${parseFloat(e.dias_pendientes)>0?'var(--success)':'var(--muted)'};font-weight:700">${parseFloat(e.dias_pendientes).toFixed(1)}</td>
-        <td><button class="btn bg bsm" onclick="openVacEmpleado(${e.id})">📋 Detalle</button></td>
-      </tr>`).join('')}</tbody>
-    </table></div>` : '<p class="empty">Sin colaboradores.</p>';
+    if (!filtered.length) {
+      $('vac-table').innerHTML = '<p class="empty">Sin colaboradores.</p>';
+      return;
+    }
+    // Colores para avatares (rotación)
+    const avatarColors = [
+      'linear-gradient(135deg,#9B1528,#dc2626)',
+      'linear-gradient(135deg,#1d4ed8,#3b82f6)',
+      'linear-gradient(135deg,#16a34a,#22c55e)',
+      'linear-gradient(135deg,#d97706,#fbbf24)',
+      'linear-gradient(135deg,#7c3aed,#a855f7)',
+      'linear-gradient(135deg,#0891b2,#06b6d4)',
+      'linear-gradient(135deg,#be185d,#ec4899)',
+      'linear-gradient(135deg,#4d7c0f,#84cc16)'
+    ];
+    const ini = n => (n||'?').trim().split(/\s+/).slice(0,2).map(s=>s[0]).join('').toUpperCase();
+    $('vac-table').innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px">
+      ${filtered.map((e,idx) => {
+        const dT = parseFloat(e.dias_total||0);
+        const dC = parseFloat(e.dias_tomados||0);
+        const dP = parseFloat(e.dias_pendientes||0);
+        const pct = dT > 0 ? Math.min(100, Math.round((dC/dT)*100)) : 0;
+        const color = avatarColors[idx % avatarColors.length];
+        const estado = dT === 0 ? {label:'Sin periodos', col:'#6b7280', bg:'#f3f4f6'}
+                     : dP === 0 ? {label:'Al corriente', col:'#15803d', bg:'#dcfce7'}
+                     : dP >= 30 ? {label:'Pendiente alto', col:'#991b1b', bg:'#fee2e2'}
+                     : dP >= 15 ? {label:'Pendiente medio', col:'#92400e', bg:'#fef3c7'}
+                     : {label:'Pendiente bajo', col:'#1e40af', bg:'#dbeafe'};
+        return `
+        <div style="background:#fff;border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.04);cursor:pointer;transition:all .2s"
+             onclick="openVacEmpleado(${e.id})"
+             onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'"
+             onmouseout="this.style.transform='';this.style.boxShadow='0 2px 12px rgba(0,0,0,.04)'">
+          <!-- Header: avatar + nombre -->
+          <div style="padding:14px 14px 10px;display:flex;align-items:center;gap:12px">
+            <div style="width:46px;height:46px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:15px;letter-spacing:.5px;flex-shrink:0;box-shadow:0 4px 10px rgba(0,0,0,.12)">${ini(e.nombre)}</div>
+            <div style="min-width:0;flex:1">
+              <div style="font-size:14px;font-weight:800;color:var(--dark);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.nombre}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.puesto||'Sin puesto'}${e.departamento?' · '+e.departamento:''}</div>
+            </div>
+          </div>
+          <!-- Estado -->
+          <div style="padding:0 14px 8px">
+            <span style="display:inline-flex;align-items:center;gap:4px;background:${estado.bg};color:${estado.col};font-size:10.5px;font-weight:800;padding:3px 9px;border-radius:20px;text-transform:uppercase;letter-spacing:.5px">${estado.label}</span>
+            <span style="display:inline-block;background:#f3f4f6;color:#374151;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;margin-left:4px">📅 ${e.antiguedad_anios} año${e.antiguedad_anios!==1?'s':''}</span>
+          </div>
+          <!-- Días: pendientes destacados -->
+          <div style="padding:0 14px 10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center">
+            <div style="background:#f8f9fb;border-radius:8px;padding:8px 4px">
+              <div style="font-size:9.5px;font-weight:700;color:var(--muted);text-transform:uppercase">Totales</div>
+              <div style="font-size:15px;font-weight:800;color:var(--dark)">${dT.toFixed(0)}</div>
+            </div>
+            <div style="background:#fef3c7;border-radius:8px;padding:8px 4px">
+              <div style="font-size:9.5px;font-weight:700;color:#854d0e;text-transform:uppercase">Tomados</div>
+              <div style="font-size:15px;font-weight:800;color:#92400e">${dC.toFixed(0)}</div>
+            </div>
+            <div style="background:${dP>0?'#dcfce7':'#f3f4f6'};border-radius:8px;padding:8px 4px">
+              <div style="font-size:9.5px;font-weight:700;color:${dP>0?'#166534':'var(--muted)'};text-transform:uppercase">Pendientes</div>
+              <div style="font-size:17px;font-weight:900;color:${dP>0?'#15803d':'var(--muted)'}">${dP.toFixed(0)}</div>
+            </div>
+          </div>
+          <!-- Progreso -->
+          <div style="padding:0 14px 14px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+              <span style="font-size:9.5px;color:var(--muted);font-weight:700;text-transform:uppercase">Progreso uso</span>
+              <span style="font-size:11px;font-weight:800;color:${pct>=80?'#15803d':pct>=40?'#0891b2':'#9ca3af'}">${pct}%</span>
+            </div>
+            <div style="background:#f3f4f6;height:6px;border-radius:99px;overflow:hidden">
+              <div style="height:100%;width:${pct}%;background:${pct>=80?'linear-gradient(90deg,#16a34a,#4ade80)':pct>=40?'linear-gradient(90deg,#0891b2,#06b6d4)':'linear-gradient(90deg,#9ca3af,#d1d5db)'};border-radius:99px;transition:width .5s"></div>
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
   } catch(e) { $('vac-table').innerHTML=`<p class="empty">${e.message}</p>`; }
 }
 
