@@ -2715,10 +2715,9 @@ async function editQuincena(id) {
     const ro = q.estatus === 'cerrada' ? 'disabled' : '';
     const pi = parseFloat(q.total_pago_imss)         || 0;
     const pe = parseFloat(q.total_pago_efectivo)     || 0;
-    const ti   = parseFloat(q.total_isr)               || 0;
-    const tm   = parseFloat(q.total_imss)              || 0;
-    const cpat = parseFloat(q.total_costos_patronales) || 0;
-    const cp   = parseFloat(q.total_costo_patronal_gm) || 0;
+    const ti = parseFloat(q.total_isr)               || 0;
+    const tm = parseFloat(q.total_imss)              || 0;
+    const cp = parseFloat(q.total_costo_patronal_gm) || 0;
 
     $('content').innerHTML = `
     <div class="ch">
@@ -2755,8 +2754,10 @@ async function editQuincena(id) {
           <input type="number" step="0.01" id="nq-ti" value="${ti}" ${ro} oninput="recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600;margin-bottom:10px">
           <label style="font-size:11px;font-weight:700;color:#1e3a8a;display:block;margin-bottom:3px">Total IMSS</label>
           <input type="number" step="0.01" id="nq-tm" value="${tm}" ${ro} oninput="recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600;margin-bottom:10px">
-          <label style="font-size:11px;font-weight:800;color:#1e40af;display:block;margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Total Costos Patronales</label>
-          <input type="number" step="0.01" id="nq-cpat" value="${cpat}" ${ro} oninput="recalcQ()" style="width:100%;text-align:right;font-size:16px;font-weight:800;color:#1e3a8a;background:#dbeafe;border-color:#93c5fd">
+          <div style="padding-top:8px;border-top:1.5px solid #bfdbfe;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:11px;font-weight:800;text-transform:uppercase;color:#1e40af">Total Costos Patronales</span>
+            <span id="nq-cpat" style="font-size:18px;font-weight:900;color:#1e3a8a">${fmt(ti+tm)}</span>
+          </div>
         </div>
 
         <!-- COSTO PATRONAL GM (MORADO) -->
@@ -2769,7 +2770,7 @@ async function editQuincena(id) {
         <!-- COSTO TOTAL GM (VERDE) -->
         <div style="border:2px solid #86efac;border-radius:10px;padding:14px;background:#dcfce7;display:flex;flex-direction:column;justify-content:center">
           <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#166534;letter-spacing:.6px;margin-bottom:8px">💰 Costo Total GM</div>
-          <div id="nq-gm" style="font-size:30px;font-weight:900;color:#166534;text-align:center;line-height:1.1">${fmt(pi+pe+cpat+cp)}</div>
+          <div id="nq-gm" style="font-size:30px;font-weight:900;color:#166534;text-align:center;line-height:1.1">${fmt(pi+pe+ti+tm+cp)}</div>
           <div style="font-size:11px;color:#15803d;text-align:center;margin-top:4px">Neto + Patronales + Patronal GM</div>
         </div>
       </div>
@@ -2783,23 +2784,24 @@ async function editQuincena(id) {
 }
 
 function recalcQ() {
-  const pi   = parseFloat($('nq-pi')?.value)||0;
-  const pe   = parseFloat($('nq-pe')?.value)||0;
-  const cpat = parseFloat($('nq-cpat')?.value)||0;
-  const cp   = parseFloat($('nq-cp')?.value)||0;
-  const neto = pi+pe, tot = neto+cpat+cp;
+  const pi = parseFloat($('nq-pi')?.value)||0;
+  const pe = parseFloat($('nq-pe')?.value)||0;
+  const ti = parseFloat($('nq-ti')?.value)||0;
+  const tm = parseFloat($('nq-tm')?.value)||0;
+  const cp = parseFloat($('nq-cp')?.value)||0;
+  const neto = pi+pe, cpat = ti+tm, tot = neto+cpat+cp;
   if ($('nq-neto')) $('nq-neto').textContent = fmt(neto);
+  if ($('nq-cpat')) $('nq-cpat').textContent = fmt(cpat);
   if ($('nq-gm'))   $('nq-gm').textContent   = fmt(tot);
 }
 
 async function saveNominaTotales(quincenaId) {
   const body = {
-    pago_imss              : parseFloat($('nq-pi').value)||0,
-    pago_efectivo          : parseFloat($('nq-pe').value)||0,
-    total_isr              : parseFloat($('nq-ti').value)||0,
-    total_imss             : parseFloat($('nq-tm').value)||0,
-    total_costos_patronales: parseFloat($('nq-cpat').value)||0,
-    costo_patronal_gm      : parseFloat($('nq-cp').value)||0
+    pago_imss        : parseFloat($('nq-pi').value)||0,
+    pago_efectivo    : parseFloat($('nq-pe').value)||0,
+    total_isr        : parseFloat($('nq-ti').value)||0,
+    total_imss       : parseFloat($('nq-tm').value)||0,
+    costo_patronal_gm: parseFloat($('nq-cp').value)||0
   };
   try {
     await api(`/nomina/quincenas/${quincenaId}/totales`,{method:'PUT',body:JSON.stringify(body)});
