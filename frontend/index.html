@@ -2729,7 +2729,11 @@ async function editQuincena(id) {
         <button class="btn bo" onclick="nomina()">← Volver</button>
       </div>
     </div>
-    ${q.estatus==='cerrada'?'<div class="ibox ok">Quincena cerrada — solo lectura.</div>':''}
+    ${q.estatus==='cerrada'?`
+    <div class="ibox ok" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <span>🔒 Quincena cerrada — solo lectura.</span>
+      ${canWrite()?`<button class="btn bd bsm" onclick="reabrirQuincena(${id})">🔓 Editar con clave</button>`:''}
+    </div>`:''}
 
     <div class="card">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:1000px;align-items:start">
@@ -2832,6 +2836,20 @@ async function saveNominaTotales(quincenaId) {
     toast('Nómina guardada.');
     editQuincena(quincenaId);
   } catch(e){toast(e.message,'err');}
+}
+
+async function reabrirQuincena(id) {
+  const clave = window.prompt('🔐 Ingresa la clave para reabrir esta quincena cerrada:');
+  if (clave == null) return; // canceló
+  if (!clave.trim()) return toast('Clave requerida.', 'warn');
+  try {
+    await api(`/nomina/quincenas/${id}/reabrir`, {
+      method: 'PATCH',
+      body: JSON.stringify({ clave: clave.trim() })
+    });
+    toast('Quincena reabierta — ya puedes editar.');
+    editQuincena(id);
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 async function cerrarQuincena(id) {

@@ -196,4 +196,20 @@ router.patch('/quincenas/:id/cerrar', requireRol('admin'), async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Reabrir quincena cerrada (requiere clave)
+router.patch('/quincenas/:id/reabrir', requireRol('admin', 'capturista'), async (req, res) => {
+  try {
+    const { clave } = req.body;
+    const claveCorrecta = process.env.NOMINA_UNLOCK_KEY || 'grupo2026';
+    if (!clave || clave !== claveCorrecta) {
+      return res.status(403).json({ error: 'Clave incorrecta.' });
+    }
+    const r = await query(
+      `UPDATE fac_nomina_quincenas SET estatus='abierta',actualizado_en=NOW()
+       WHERE id=$1 AND estatus='cerrada' RETURNING id`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Quincena no encontrada o ya estaba abierta.' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
