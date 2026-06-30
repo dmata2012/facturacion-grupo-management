@@ -2732,46 +2732,60 @@ async function editQuincena(id) {
     ${q.estatus==='cerrada'?'<div class="ibox ok">Quincena cerrada — solo lectura.</div>':''}
 
     <div class="card">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:900px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:1000px;align-items:start">
 
-        <!-- PAGO AL COLABORADOR (AMARILLO) -->
-        <div style="border:2px solid #fde68a;border-radius:10px;padding:14px;background:#fefce8">
-          <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#854d0e;letter-spacing:.6px;margin-bottom:10px">💵 Pago al Colaborador</div>
-          <label style="font-size:11px;font-weight:700;color:#78350f;display:block;margin-bottom:3px">Pago IMSS</label>
-          <input type="number" step="0.01" id="nq-pi" value="${pi}" ${ro} oninput="recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600;margin-bottom:10px">
-          <label style="font-size:11px;font-weight:700;color:#78350f;display:block;margin-bottom:3px">Pago Efectivo</label>
-          <input type="number" step="0.01" id="nq-pe" value="${pe}" ${ro} oninput="recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600;margin-bottom:10px">
-          <div style="padding-top:8px;border-top:1.5px solid #fde68a;display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:11px;font-weight:800;text-transform:uppercase;color:#854d0e">Neto Total Pagado</span>
-            <span id="nq-neto" style="font-size:18px;font-weight:900;color:#78350f">${fmt(pi+pe)}</span>
+        <!-- COLUMNA IZQUIERDA: Pago al Colaborador + Incidencias -->
+        <div style="display:flex;flex-direction:column;gap:18px">
+
+          <!-- PAGO AL COLABORADOR (AMARILLO) -->
+          <div style="border:2px solid #fde68a;border-radius:10px;padding:14px;background:#fefce8">
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#854d0e;letter-spacing:.6px;margin-bottom:10px">💵 Pago al Colaborador</div>
+            <label style="font-size:11px;font-weight:700;color:#78350f;display:block;margin-bottom:3px">Pago IMSS</label>
+            <input type="text" inputmode="decimal" id="nq-pi" value="${pi||''}" ${ro} oninput="ensureNum(this);recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600;margin-bottom:10px">
+            <label style="font-size:11px;font-weight:700;color:#78350f;display:block;margin-bottom:3px">Pago Efectivo</label>
+            <input type="text" inputmode="decimal" id="nq-pe" value="${pe||''}" ${ro} oninput="ensureNum(this);recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600;margin-bottom:10px">
+            <div style="padding-top:8px;border-top:1.5px solid #fde68a;display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11px;font-weight:800;text-transform:uppercase;color:#854d0e">Neto Total Pagado</span>
+              <span id="nq-neto" style="font-size:18px;font-weight:900;color:#78350f">${fmt(pi+pe)}</span>
+            </div>
+          </div>
+
+          <!-- INCIDENCIAS DE NÓMINA -->
+          <div style="border:2px solid #e5e7eb;border-radius:10px;padding:14px;background:#f9fafb">
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#374151;letter-spacing:.6px;margin-bottom:10px">📝 Incidencias de Nómina</div>
+            <textarea id="nq-notas" ${ro} placeholder="Capturar incidencias relevantes de esta quincena: ajustes, bonos, descuentos, faltas, etc." style="width:100%;min-height:160px;padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;background:#fff;color:var(--dark)">${q.notas||''}</textarea>
           </div>
         </div>
 
-        <!-- COSTOS PATRONALES (AZUL) -->
-        <div style="border:2px solid #bfdbfe;border-radius:10px;padding:14px;background:#eff6ff">
-          <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#1e40af;letter-spacing:.6px;margin-bottom:10px">🏛 Costos Patronales</div>
-          <label style="font-size:11px;font-weight:700;color:#1e3a8a;display:block;margin-bottom:3px">Total ISR</label>
-          <input type="number" step="0.01" id="nq-ti" value="${ti}" ${ro} oninput="recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600;margin-bottom:10px">
-          <label style="font-size:11px;font-weight:700;color:#1e3a8a;display:block;margin-bottom:3px">Total IMSS</label>
-          <input type="number" step="0.01" id="nq-tm" value="${tm}" ${ro} oninput="recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600;margin-bottom:10px">
-          <div style="padding-top:8px;border-top:1.5px solid #bfdbfe;display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:11px;font-weight:800;text-transform:uppercase;color:#1e40af">Total Costos Patronales</span>
-            <span id="nq-cpat" style="font-size:18px;font-weight:900;color:#1e3a8a">${fmt(ti+tm)}</span>
+        <!-- COLUMNA DERECHA: Patronales + Patronal GM + Costo Total GM -->
+        <div style="display:flex;flex-direction:column;gap:18px">
+
+          <!-- COSTOS PATRONALES (AZUL) -->
+          <div style="border:2px solid #bfdbfe;border-radius:10px;padding:14px;background:#eff6ff">
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#1e40af;letter-spacing:.6px;margin-bottom:10px">🏛 Costos Patronales</div>
+            <label style="font-size:11px;font-weight:700;color:#1e3a8a;display:block;margin-bottom:3px">Total ISR</label>
+            <input type="text" inputmode="decimal" id="nq-ti" value="${ti||''}" ${ro} oninput="ensureNum(this);recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600;margin-bottom:10px">
+            <label style="font-size:11px;font-weight:700;color:#1e3a8a;display:block;margin-bottom:3px">Total IMSS</label>
+            <input type="text" inputmode="decimal" id="nq-tm" value="${tm||''}" ${ro} oninput="ensureNum(this);recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600;margin-bottom:10px">
+            <div style="padding-top:8px;border-top:1.5px solid #bfdbfe;display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11px;font-weight:800;text-transform:uppercase;color:#1e40af">Total Costos Patronales</span>
+              <span id="nq-cpat" style="font-size:18px;font-weight:900;color:#1e3a8a">${fmt(ti+tm)}</span>
+            </div>
           </div>
-        </div>
 
-        <!-- COSTO PATRONAL GM (MORADO) -->
-        <div style="border:2px solid #ddd6fe;border-radius:10px;padding:14px;background:#f5f3ff">
-          <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#6b21a8;letter-spacing:.6px;margin-bottom:10px">🏢 Costo Patronal GM</div>
-          <label style="font-size:11px;font-weight:700;color:#6b21a8;display:block;margin-bottom:3px">Costo Patronal GM</label>
-          <input type="number" step="0.01" id="nq-cp" value="${cp}" ${ro} oninput="recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600">
-        </div>
+          <!-- COSTO PATRONAL GM (MORADO) -->
+          <div style="border:2px solid #ddd6fe;border-radius:10px;padding:14px;background:#f5f3ff">
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#6b21a8;letter-spacing:.6px;margin-bottom:10px">🏢 Costo Patronal GM</div>
+            <label style="font-size:11px;font-weight:700;color:#6b21a8;display:block;margin-bottom:3px">Costo Patronal GM</label>
+            <input type="text" inputmode="decimal" id="nq-cp" value="${cp||''}" ${ro} oninput="ensureNum(this);recalcQ()" style="width:100%;text-align:right;font-size:14px;font-weight:600">
+          </div>
 
-        <!-- COSTO TOTAL GM (VERDE) -->
-        <div style="border:2px solid #86efac;border-radius:10px;padding:14px;background:#dcfce7;display:flex;flex-direction:column;justify-content:center">
-          <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#166534;letter-spacing:.6px;margin-bottom:8px">💰 Costo Total GM</div>
-          <div id="nq-gm" style="font-size:30px;font-weight:900;color:#166534;text-align:center;line-height:1.1">${fmt(pi+pe+ti+tm+cp)}</div>
-          <div style="font-size:11px;color:#15803d;text-align:center;margin-top:4px">Neto + Patronales + Patronal GM</div>
+          <!-- COSTO TOTAL GM (VERDE) -->
+          <div style="border:2px solid #86efac;border-radius:10px;padding:14px;background:#dcfce7">
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#166534;letter-spacing:.6px;margin-bottom:8px">💰 Costo Total GM</div>
+            <div id="nq-gm" style="font-size:30px;font-weight:900;color:#166534;text-align:center;line-height:1.1">${fmt(pi+pe+ti+tm+cp)}</div>
+            <div style="font-size:11px;color:#15803d;text-align:center;margin-top:4px">Neto + Patronales + Patronal GM</div>
+          </div>
         </div>
       </div>
 
@@ -2781,6 +2795,15 @@ async function editQuincena(id) {
       </div>`:''}
     </div>`;
   } catch(e){$('content').innerHTML=`<p class="empty">${e.message}</p>`;}
+}
+
+// Permite solo dígitos y un punto decimal
+function ensureNum(el) {
+  const orig = el.value;
+  let v = orig.replace(/[^\d.]/g,'');         // elimina cualquier no-dígito excepto punto
+  const parts = v.split('.');
+  if (parts.length > 2) v = parts[0] + '.' + parts.slice(1).join('');   // un solo punto
+  if (v !== orig) el.value = v;
 }
 
 function recalcQ() {
@@ -2801,7 +2824,8 @@ async function saveNominaTotales(quincenaId) {
     pago_efectivo    : parseFloat($('nq-pe').value)||0,
     total_isr        : parseFloat($('nq-ti').value)||0,
     total_imss       : parseFloat($('nq-tm').value)||0,
-    costo_patronal_gm: parseFloat($('nq-cp').value)||0
+    costo_patronal_gm: parseFloat($('nq-cp').value)||0,
+    notas            : $('nq-notas')?.value || ''
   };
   try {
     await api(`/nomina/quincenas/${quincenaId}/totales`,{method:'PUT',body:JSON.stringify(body)});
