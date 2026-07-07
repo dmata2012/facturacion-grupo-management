@@ -5,6 +5,28 @@ const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
 
+// PUT /api/usuarios/cambiar-clave — cualquier usuario cambia su propia clave
+router.put('/cambiar-clave', async (req, res) => {
+  try {
+    const { clave_actual, clave_nueva } = req.body;
+    if (!clave_actual || !clave_nueva)
+      return res.status(400).json({ error: 'Clave actual y nueva son requeridas.' });
+    if (String(clave_nueva).length < 6)
+      return res.status(400).json({ error: 'La nueva clave debe tener al menos 6 caracteres.' });
+
+    const r = await query(`SELECT password_hash FROM fac_usuarios WHERE id=$1 AND activo=TRUE`, [req.usuario.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Usuario no encontrado.' });
+
+    const ok = await bcrypt.compare(clave_actual, r.rows[0].password_hash);
+    if (!ok) return res.status(403).json({ error: 'La clave actual es incorrecta.' });
+
+    const hash = await bcrypt.hash(clave_nueva, 10);
+    await query(`UPDATE fac_usuarios SET password_hash=$1, actualizado_en=NOW() WHERE id=$2`, [hash, req.usuario.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+
 // GET  /api/usuarios
 router.get('/', requireRol('admin'), async (req, res) => {
   try {

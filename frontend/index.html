@@ -508,6 +508,7 @@ canvas{max-height:230px}
       <a href="#" onclick="nav('usuarios')"  id="nav-usuarios" style="display:none"><span class="ni">🔒</span> Usuarios</a>
     </nav>
     <div class="sidebar-bottom">
+      <button onclick="openCambiarClave()" style="margin-bottom:6px">🔐 Cambiar mi clave</button>
       <button onclick="logout()">⏻ Cerrar sesión</button>
     </div>
   </div>
@@ -540,6 +541,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-cc-detalle"><div class="modal" style="width:min(960px,96vw)" id="modal-cc-detalle-body"></div></div>
 <div class="overlay" id="modal-cc-mov"><div class="modal modal-sm" id="modal-cc-mov-body"></div></div>
 <div class="overlay" id="modal-cc-informe"><div class="modal" style="width:min(1000px,96vw)" id="modal-cc-informe-body"></div></div>
+<div class="overlay" id="modal-cambiar-clave"><div class="modal modal-sm" id="modal-cambiar-clave-body"></div></div>
 
 <script>
 // ══ CONFIG ══════════════════════════════════════
@@ -676,6 +678,73 @@ function logout() {
   $('app').style.display = 'none';
   $('login-screen').style.display = 'flex';
   $('login-err').style.display = 'none';
+}
+
+function openCambiarClave() {
+  $('modal-cambiar-clave-body').innerHTML = `
+    <h4>🔐 Cambiar mi clave</h4>
+    <div style="background:var(--bg-alt);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--muted)">
+      Usuario: <strong style="color:var(--dark)">${ME?.nombre||'—'}</strong><br>
+      Email: <strong style="color:var(--dark)">${ME?.email||'—'}</strong>
+    </div>
+    <div class="fi" style="margin-bottom:10px">
+      <label>Clave actual *</label>
+      <input type="password" id="cc-actual" placeholder="Tu clave actual" autocomplete="current-password">
+    </div>
+    <div class="fi" style="margin-bottom:10px">
+      <label>Clave nueva *</label>
+      <input type="password" id="cc-nueva" placeholder="Mínimo 6 caracteres" autocomplete="new-password" oninput="validarClaveNueva()">
+      <div id="cc-hint" style="font-size:11px;color:var(--muted);margin-top:3px">Mínimo 6 caracteres</div>
+    </div>
+    <div class="fi" style="margin-bottom:14px">
+      <label>Confirmar clave nueva *</label>
+      <input type="password" id="cc-confirm" placeholder="Repetir clave nueva" autocomplete="new-password" oninput="validarClaveNueva()">
+      <div id="cc-match" style="font-size:11px;margin-top:3px"></div>
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-cambiar-clave')">Cancelar</button>
+      <button class="btn bs" id="cc-btn" onclick="guardarNuevaClave()">💾 Guardar clave</button>
+    </div>`;
+  openModal('modal-cambiar-clave');
+  setTimeout(() => $('cc-actual')?.focus(), 100);
+}
+
+function validarClaveNueva() {
+  const n = $('cc-nueva')?.value || '';
+  const c = $('cc-confirm')?.value || '';
+  const hint = $('cc-hint');
+  const match = $('cc-match');
+  const btn = $('cc-btn');
+  let ok = true;
+
+  if (hint) {
+    if (n.length === 0) { hint.textContent = 'Mínimo 6 caracteres'; hint.style.color = 'var(--muted)'; ok = false; }
+    else if (n.length < 6) { hint.textContent = `Faltan ${6-n.length} caracteres`; hint.style.color = '#dc2626'; ok = false; }
+    else { hint.textContent = '✓ Longitud correcta'; hint.style.color = '#16a34a'; }
+  }
+  if (match) {
+    if (c.length === 0) { match.textContent = ''; ok = false; }
+    else if (c !== n)  { match.textContent = '⚠ Las claves no coinciden'; match.style.color = '#dc2626'; ok = false; }
+    else               { match.textContent = '✓ Las claves coinciden';   match.style.color = '#16a34a'; }
+  }
+  if (btn) { btn.disabled = !ok; btn.style.opacity = ok?'':'.5'; btn.style.cursor = ok?'':'not-allowed'; }
+}
+
+async function guardarNuevaClave() {
+  const actual = $('cc-actual')?.value || '';
+  const nueva  = $('cc-nueva')?.value || '';
+  const confirm = $('cc-confirm')?.value || '';
+  if (!actual) return toast('Ingresa tu clave actual.', 'warn');
+  if (nueva.length < 6) return toast('La nueva clave debe tener al menos 6 caracteres.', 'warn');
+  if (nueva !== confirm) return toast('Las claves no coinciden.', 'warn');
+  try {
+    await api('/usuarios/cambiar-clave', {
+      method: 'PUT',
+      body: JSON.stringify({ clave_actual: actual, clave_nueva: nueva })
+    });
+    toast('✅ Clave actualizada correctamente.');
+    closeModal('modal-cambiar-clave');
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 function initApp() {
