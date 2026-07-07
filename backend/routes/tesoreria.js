@@ -68,7 +68,7 @@ router.get('/fondos/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/fondos', requireRol('admin', 'capturista'), async (req, res) => {
+router.post('/fondos', requireRol('admin', 'capturista', 'tesoreria'), async (req, res) => {
   try {
     const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, notas, clave_movimientos } = req.body;
     if (!nombre) return res.status(400).json({ error: 'Nombre requerido.' });
@@ -82,7 +82,7 @@ router.post('/fondos', requireRol('admin', 'capturista'), async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/fondos/:id', requireRol('admin', 'capturista'), async (req, res) => {
+router.put('/fondos/:id', requireRol('admin', 'capturista', 'tesoreria'), async (req, res) => {
   try {
     const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, activo, notas, clave_movimientos } = req.body;
     // Si clave_movimientos NO viene en el body, conservar la existente
@@ -132,7 +132,7 @@ router.delete('/fondos/:id', requireRol('admin'), async (req, res) => {
 });
 
 // ══ MOVIMIENTOS ═══════════════════════════════════════════
-router.post('/movimientos', requireRol('admin', 'capturista'), async (req, res) => {
+router.post('/movimientos', requireRol('admin', 'capturista', 'tesoreria'), async (req, res) => {
   try {
     const { fondo_id, fecha, tipo, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, clave, periodo_pago } = req.body;
     if (!fondo_id || !fecha || !tipo || !concepto || !monto)
@@ -176,7 +176,7 @@ router.post('/movimientos', requireRol('admin', 'capturista'), async (req, res) 
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/movimientos/:id', requireRol('admin', 'capturista'), async (req, res) => {
+router.put('/movimientos/:id', requireRol('admin', 'capturista', 'tesoreria'), async (req, res) => {
   try {
     const { fecha, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, clave, periodo_pago } = req.body;
     if (!fecha || !concepto || !monto)
@@ -220,7 +220,7 @@ router.put('/movimientos/:id', requireRol('admin', 'capturista'), async (req, re
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/movimientos/:id', requireRol('admin', 'capturista'), async (req, res) => {
+router.delete('/movimientos/:id', requireRol('admin', 'capturista', 'tesoreria'), async (req, res) => {
   try {
     const clave = req.query.clave || req.body?.clave;
     const cur = await query(`SELECT fondo_id FROM fac_caja_chica_movimientos WHERE id=$1`, [req.params.id]);
