@@ -4655,6 +4655,37 @@ function renderDetalleFondoCC() {
   const f = window._ccFondoActual;
   if (!f) return;
   const k = f.kpi || {};
+
+  // Cálculos de reembolso
+  const saldo    = parseFloat(k.saldo_actual)   || 0;
+  const asignado = parseFloat(f.fondo_asignado) || 0;
+  const reembolso = Math.max(0, asignado - saldo);
+  const pct = asignado > 0 ? Math.max(0, Math.min(100, (saldo/asignado)*100)) : 0;
+  const estado = asignado === 0 ? {label:'Sin fondo asignado', color:'#6b7280', bg:'#f3f4f6', accent:'#9ca3af'}
+               : pct >= 80      ? {label:'✅ Fondo completo',   color:'#166534', bg:'#dcfce7', accent:'#16a34a'}
+               : pct >= 40      ? {label:'⚠️ Reembolso pronto', color:'#92400e', bg:'#fef3c7', accent:'#d97706'}
+               : pct >= 10      ? {label:'🚨 Reembolso urgente',color:'#991b1b', bg:'#fee2e2', accent:'#dc2626'}
+                                : {label:'🚨 Fondo casi agotado',color:'#991b1b',bg:'#fee2e2',accent:'#dc2626'};
+
+  // Gastos por período (sobre movimientos ya cargados)
+  const hoy = new Date().toISOString().slice(0,10);
+  const inicioMes = hoy.slice(0,8) + '01';
+  const hace7 = new Date(); hace7.setDate(hace7.getDate()-6);
+  const inicioSem = hace7.toISOString().slice(0,10);
+  const salidas = (f.movimientos||[]).filter(m => m.tipo==='salida');
+  const sHoy = salidas.filter(m => m.fecha.slice(0,10) === hoy).reduce((a,m)=>a+parseFloat(m.monto),0);
+  const sSem = salidas.filter(m => m.fecha.slice(0,10) >= inicioSem).reduce((a,m)=>a+parseFloat(m.monto),0);
+  const sMes = salidas.filter(m => m.fecha.slice(0,10) >= inicioMes).reduce((a,m)=>a+parseFloat(m.monto),0);
+
+  // Saldo running (calculado cronológicamente desde el más antiguo)
+  const cronologicos = [...(f.movimientos||[])].reverse();
+  let saldoRun = parseFloat(f.saldo_inicial) || 0;
+  const saldosPorId = {};
+  cronologicos.forEach(m => {
+    saldoRun += m.tipo === 'entrada' ? parseFloat(m.monto) : -parseFloat(m.monto);
+    saldosPorId[m.id] = saldoRun;
+  });
+
   $('modal-cc-detalle-body').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:14px">
       <div>
@@ -4663,33 +4694,71 @@ function renderDetalleFondoCC() {
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${canWrite()?`<button class="btn bo bsm" onclick="openFondoCC(${f.id})">✏️ Editar fondo</button>`:''}
-        ${canWrite()?`<button class="btn bsuc bsm" onclick="openMovCC('entrada')">+ Entrada</button>`:''}
-        ${canWrite()?`<button class="btn bd bsm" onclick="openMovCC('salida')">− Salida</button>`:''}
+        ${canWrite()?`<button class="btn bsuc bsm" onclick="openMovCC('entrada')">+ Entrada de efectivo</button>`:''}
+        ${canWrite()?`<button class="btn bd bsm" onclick="openMovCC('salida')">− Gasto / Salida</button>`:''}
       </div>
     </div>
 
-    <div class="kpi-grid" style="margin-bottom:14px">
-      <div class="kpi success">
-        <div class="kpi-icon">💵</div>
-        <div class="label">Saldo actual</div>
-        <div class="value" style="font-size:22px">${fmt(k.saldo_actual)}</div>
+    <!-- PANEL DE FLUJO DE CAJA -->
+    <div style="background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:14px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;align-items:center">
+
+        <!-- Fondo asignado -->
+        <div style="text-align:center">
+          <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">🎯 Fondo asignado</div>
+          <div style="font-size:22px;font-weight:900;color:var(--dark);margin-top:2px">${fmt(asignado)}</div>
+        </div>
+
+        <!-- Saldo actual -->
+        <div style="text-align:center">
+          <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">💵 Saldo actual</div>
+          <div style="font-size:28px;font-weight:900;color:${estado.accent};margin-top:2px">${fmt(saldo)}</div>
+          <div style="margin-top:4px">
+            <div style="background:#e5e7eb;height:8px;border-radius:99px;overflow:hidden">
+              <div style="height:100%;width:${pct}%;background:${estado.accent};border-radius:99px;transition:width .5s"></div>
+            </div>
+            <div style="font-size:11px;color:${estado.accent};font-weight:700;margin-top:3px">${pct.toFixed(0)}% del fondo</div>
+          </div>
+        </div>
+
+        <!-- Reembolso -->
+        <div style="text-align:center;background:${estado.bg};padding:14px;border-radius:10px;border:2px solid ${estado.accent}">
+          <div style="font-size:10px;font-weight:800;color:${estado.color};text-transform:uppercase;letter-spacing:.6px">💰 Reembolso requerido</div>
+          <div style="font-size:26px;font-weight:900;color:${estado.color};margin-top:2px">${fmt(reembolso)}</div>
+          <div style="font-size:10.5px;color:${estado.color};font-weight:700;margin-top:2px">${estado.label}</div>
+          ${reembolso > 0 && canWrite() ? `
+          <button class="btn bsuc bsm" style="margin-top:8px;width:100%;font-size:11px" onclick="registrarReembolsoCC(${reembolso.toFixed(2)})">
+            💰 Registrar reembolso ${fmt(reembolso)}
+          </button>` : ''}
+        </div>
       </div>
-      <div class="kpi primary">
-        <div class="kpi-icon">📥</div>
-        <div class="label">Entradas</div>
-        <div class="value" style="font-size:18px">${fmt(k.total_entradas)}</div>
-        <div class="sub">${k.n_entradas||0} movimientos</div>
+    </div>
+
+    <!-- GASTOS POR PERÍODO -->
+    <div class="kpi-grid" style="margin-bottom:14px">
+      <div class="kpi warning">
+        <div class="kpi-icon">📅</div>
+        <div class="label">Gastos de hoy</div>
+        <div class="value" style="font-size:17px">${fmt(sHoy)}</div>
+        <div class="sub">${salidas.filter(m=>m.fecha.slice(0,10)===hoy).length} movimientos</div>
       </div>
       <div class="kpi warning">
-        <div class="kpi-icon">📤</div>
-        <div class="label">Salidas</div>
-        <div class="value" style="font-size:18px">${fmt(k.total_salidas)}</div>
-        <div class="sub">${k.n_salidas||0} movimientos</div>
+        <div class="kpi-icon">📆</div>
+        <div class="label">Últimos 7 días</div>
+        <div class="value" style="font-size:17px">${fmt(sSem)}</div>
+        <div class="sub">${salidas.filter(m=>m.fecha.slice(0,10)>=inicioSem).length} movimientos</div>
       </div>
-      <div class="kpi">
-        <div class="kpi-icon">🎯</div>
-        <div class="label">Asignado</div>
-        <div class="value" style="font-size:18px">${fmt(f.fondo_asignado)}</div>
+      <div class="kpi warning">
+        <div class="kpi-icon">📊</div>
+        <div class="label">Este mes</div>
+        <div class="value" style="font-size:17px">${fmt(sMes)}</div>
+        <div class="sub">${salidas.filter(m=>m.fecha.slice(0,10)>=inicioMes).length} movimientos</div>
+      </div>
+      <div class="kpi primary">
+        <div class="kpi-icon">💼</div>
+        <div class="label">Histórico total</div>
+        <div class="value" style="font-size:17px">${fmt(k.total_salidas)}</div>
+        <div class="sub">${k.n_salidas||0} gastos · ${fmt(k.total_entradas)} entradas</div>
       </div>
     </div>
 
@@ -4709,17 +4778,19 @@ function renderDetalleFondoCC() {
     <div class="tscroll"><table>
       <thead><tr>
         <th>Fecha</th><th>Tipo</th><th>Categoría</th><th>Concepto</th>
-        <th>Beneficiario</th><th>Monto</th><th></th>
+        <th>Beneficiario</th><th>Monto</th><th>Saldo</th><th></th>
       </tr></thead>
       <tbody>${f.movimientos.map(m=>{
         const es = m.tipo==='entrada';
+        const saldoAcum = saldosPorId[m.id] || 0;
         return `<tr>
           <td>${fmtDate(m.fecha)}</td>
           <td><span style="display:inline-flex;align-items:center;gap:3px;background:${es?'#dcfce7':'#fee2e2'};color:${es?'#166534':'#991b1b'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">${es?'📥 Entrada':'📤 Salida'}</span></td>
           <td>${m.categoria||'—'}</td>
-          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.concepto||''}">${m.concepto||''}</td>
+          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.concepto||''}">${m.concepto||''}</td>
           <td>${m.beneficiario||'—'}</td>
           <td style="text-align:right;font-weight:700;color:${es?'#166534':'#991b1b'}">${es?'+':'−'}${fmt(m.monto)}</td>
+          <td style="text-align:right;font-weight:800;color:${saldoAcum<0?'#dc2626':'var(--dark)'}">${fmt(saldoAcum)}</td>
           <td style="white-space:nowrap">
             ${canWrite()?`<button class="btn bg bsm" onclick="openMovCC('${m.tipo}',${m.id})">✏️</button>`:''}
             ${canWrite()?`<button class="btn bd bsm" onclick="eliminarMovCC(${m.id})">🗑</button>`:''}
@@ -4731,6 +4802,17 @@ function renderDetalleFondoCC() {
     <div class="form-actions" style="margin-top:16px">
       <button class="btn bo" onclick="closeModal('modal-cc-detalle')">Cerrar</button>
     </div>`;
+}
+
+function registrarReembolsoCC(monto) {
+  openMovCC('entrada');
+  // Pre-llenar el modal después de que se abra
+  setTimeout(() => {
+    if ($('cm-cat'))      { const opt=[...$('cm-cat').options].find(o=>o.value==='Reposición'); if(opt){opt.selected=true;} }
+    if ($('cm-concepto')) $('cm-concepto').value = 'Reembolso para completar fondo';
+    if ($('cm-monto'))    $('cm-monto').value    = monto;
+    if ($('cm-forma'))    $('cm-forma').value    = 'transferencia';
+  }, 50);
 }
 
 function openMovCC(tipo, id) {
