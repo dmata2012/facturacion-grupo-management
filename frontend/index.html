@@ -4613,6 +4613,11 @@ function openFondoCC(id) {
       <div class="fi"><label>Saldo inicial</label>
         <input type="text" inputmode="decimal" id="cf-sini" oninput="ensureNum(this)" value="${f.saldo_inicial||''}" placeholder="0.00">
       </div>
+      <div class="fi full" style="background:#fef9c3;border:1.5px solid #fde68a;border-radius:8px;padding:10px 12px">
+        <label style="color:#854d0e"><strong>🔐 Clave del responsable</strong> <span style="font-weight:400;color:#78350f;font-size:11px">(requerida para registrar movimientos)</span></label>
+        <input id="cf-clave" placeholder="${f.clave_movimientos?'••••••':'Ej: caja2026'}" value="${f.clave_movimientos||''}">
+        <div style="font-size:10.5px;color:#78350f;margin-top:4px">Deja en blanco para no requerir clave. Solo admin puede ver/cambiar esta clave.</div>
+      </div>
       <div class="fi full"><label>Notas</label>
         <textarea id="cf-notas" rows="2">${f.notas||''}</textarea>
       </div>
@@ -4626,12 +4631,13 @@ function openFondoCC(id) {
 
 async function saveFondoCC(id) {
   const body = {
-    nombre        : $('cf-nombre').value.trim(),
-    responsable   : $('cf-resp').value.trim(),
-    departamento  : $('cf-dep').value.trim(),
-    fondo_asignado: $('cf-asig').value,
-    saldo_inicial : $('cf-sini').value,
-    notas         : $('cf-notas').value
+    nombre           : $('cf-nombre').value.trim(),
+    responsable      : $('cf-resp').value.trim(),
+    departamento     : $('cf-dep').value.trim(),
+    fondo_asignado   : $('cf-asig').value,
+    saldo_inicial    : $('cf-sini').value,
+    notas            : $('cf-notas').value,
+    clave_movimientos: $('cf-clave').value
   };
   if (!body.nombre) return toast('Nombre requerido.', 'warn');
   try {
@@ -4641,6 +4647,18 @@ async function saveFondoCC(id) {
     closeModal('modal-cc-fondo');
     cajaChica();
   } catch(e) { toast(e.message, 'err'); }
+}
+
+// Cache de claves ya validadas en esta sesión (por fondo)
+window._ccClaveCache = window._ccClaveCache || {};
+
+async function pedirClaveFondoCC(fondoId) {
+  if (ME?.rol === 'admin') return ''; // admin no requiere clave
+  // Si ya se validó en esta sesión, no volver a preguntar
+  if (window._ccClaveCache[fondoId]) return window._ccClaveCache[fondoId];
+  const clave = window.prompt('🔐 Ingresa la clave del responsable de la caja:');
+  if (clave == null) return null; // canceló
+  return clave.trim();
 }
 
 async function openDetalleFondoCC(id) {
@@ -5237,27 +5255,46 @@ async function saveMovCC(tipo, id) {
     notas          : $('cm-notas').value
   };
   if (!body.concepto || !body.monto) return toast('Concepto y monto son requeridos.', 'warn');
+
+  // Pedir clave del responsable (admin no la requiere)
+  const clave = await pedirClaveFondoCC(f.id);
+  if (clave == null) return; // canceló
+  body.clave = clave;
+
   try {
     if (id) await api(`/tesoreria/movimientos/${id}`, { method:'PUT',  body: JSON.stringify(body) });
     else    await api('/tesoreria/movimientos',       { method:'POST', body: JSON.stringify(body) });
+    // Cachear clave validada para esta sesión
+    if (clave) window._ccClaveCache[f.id] = clave;
     toast('Movimiento guardado.');
     closeModal('modal-cc-mov');
     openDetalleFondoCC(f.id);
     loadKpisCC();
     loadFondosCC();
-  } catch(e) { toast(e.message, 'err'); }
+  } catch(e) {
+    // Si la clave fue incorrecta, limpiar caché para que vuelva a pedir
+    if (/clave/i.test(e.message)) delete window._ccClaveCache[f.id];
+    toast(e.message, 'err');
+  }
 }
 
 async function eliminarMovCC(id) {
   if (!await confirm2('¿Eliminar este movimiento?')) return;
   const f = window._ccFondoActual;
+  const clave = await pedirClaveFondoCC(f.id);
+  if (clave == null) return;
   try {
-    await api(`/tesoreria/movimientos/${id}`, { method:'DELETE' });
+    const url = clave ? `/tesoreria/movimientos/${id}?clave=${encodeURIComponent(clave)}` : `/tesoreria/movimientos/${id}`;
+    await api(url, { method:'DELETE' });
+    if (clave) window._ccClaveCache[f.id] = clave;
     toast('Movimiento eliminado.');
     openDetalleFondoCC(f.id);
     loadKpisCC();
     loadFondosCC();
-  } catch(e) { toast(e.message, 'err'); }
+  } catch(e) {
+    if (/clave/i.test(e.message)) delete window._ccClaveCache[f.id];
+    toast(e.message, 'err');
+  }
 }
 
 // ══ USUARIOS ════════════════════════════════

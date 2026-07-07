@@ -70,13 +70,13 @@ router.get('/fondos/:id', async (req, res) => {
 
 router.post('/fondos', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, notas } = req.body;
+    const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, notas, clave_movimientos } = req.body;
     if (!nombre) return res.status(400).json({ error: 'Nombre requerido.' });
     const r = await query(
-      `INSERT INTO fac_caja_chica_fondos(nombre,responsable,departamento,fondo_asignado,saldo_inicial,moneda,notas,creado_por)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      `INSERT INTO fac_caja_chica_fondos(nombre,responsable,departamento,fondo_asignado,saldo_inicial,moneda,notas,clave_movimientos,creado_por)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
       [nombre, responsable, departamento, parseFloat(fondo_asignado)||0, parseFloat(saldo_inicial)||0,
-       moneda||'MXN', notas, req.usuario.id]
+       moneda||'MXN', notas, (clave_movimientos||'').trim() || null, req.usuario.id]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -84,19 +84,45 @@ router.post('/fondos', requireRol('admin', 'capturista'), async (req, res) => {
 
 router.put('/fondos/:id', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, activo, notas } = req.body;
-    await query(
-      `UPDATE fac_caja_chica_fondos SET
-         nombre=$1, responsable=$2, departamento=$3,
-         fondo_asignado=$4, saldo_inicial=$5, moneda=$6,
-         activo=$7, notas=$8, actualizado_en=NOW()
-       WHERE id=$9`,
-      [nombre, responsable, departamento, parseFloat(fondo_asignado)||0, parseFloat(saldo_inicial)||0,
-       moneda||'MXN', activo !== false, notas, req.params.id]
-    );
+    const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, activo, notas, clave_movimientos } = req.body;
+    // Si clave_movimientos NO viene en el body, conservar la existente
+    if (clave_movimientos === undefined) {
+      await query(
+        `UPDATE fac_caja_chica_fondos SET
+           nombre=$1, responsable=$2, departamento=$3,
+           fondo_asignado=$4, saldo_inicial=$5, moneda=$6,
+           activo=$7, notas=$8, actualizado_en=NOW()
+         WHERE id=$9`,
+        [nombre, responsable, departamento, parseFloat(fondo_asignado)||0, parseFloat(saldo_inicial)||0,
+         moneda||'MXN', activo !== false, notas, req.params.id]
+      );
+    } else {
+      await query(
+        `UPDATE fac_caja_chica_fondos SET
+           nombre=$1, responsable=$2, departamento=$3,
+           fondo_asignado=$4, saldo_inicial=$5, moneda=$6,
+           activo=$7, notas=$8, clave_movimientos=$9, actualizado_en=NOW()
+         WHERE id=$10`,
+        [nombre, responsable, departamento, parseFloat(fondo_asignado)||0, parseFloat(saldo_inicial)||0,
+         moneda||'MXN', activo !== false, notas, (clave_movimientos||'').trim() || null, req.params.id]
+      );
+    }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// Helper: valida clave del fondo (admin no la requiere)
+async function validarClaveFondo(fondoId, claveRecibida, usuario) {
+  if (usuario.rol === 'admin') return { ok: true };
+  const r = await query(`SELECT clave_movimientos FROM fac_caja_chica_fondos WHERE id=$1`, [fondoId]);
+  if (!r.rows.length) return { ok: false, code: 404, error: 'Fondo no encontrado.' };
+  const claveFondo = (r.rows[0].clave_movimientos || '').trim();
+  if (!claveFondo) return { ok: true }; // sin clave configurada, pasa
+  if (!claveRecibida || String(claveRecibida).trim() !== claveFondo) {
+    return { ok: false, code: 403, error: 'Clave del responsable incorrecta.' };
+  }
+  return { ok: true };
+}
 
 router.delete('/fondos/:id', requireRol('admin'), async (req, res) => {
   try {
@@ -108,13 +134,17 @@ router.delete('/fondos/:id', requireRol('admin'), async (req, res) => {
 // ══ MOVIMIENTOS ═══════════════════════════════════════════
 router.post('/movimientos', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { fondo_id, fecha, tipo, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas } = req.body;
+    const { fondo_id, fecha, tipo, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, clave } = req.body;
     if (!fondo_id || !fecha || !tipo || !concepto || !monto)
       return res.status(400).json({ error: 'Fondo, fecha, tipo, concepto y monto son requeridos.' });
     if (!['entrada','salida'].includes(tipo))
       return res.status(400).json({ error: 'Tipo debe ser entrada o salida.' });
     const m = parseFloat(monto);
     if (!(m > 0)) return res.status(400).json({ error: 'El monto debe ser mayor a 0.' });
+
+    // Validar clave del responsable
+    const chk = await validarClaveFondo(fondo_id, clave, req.usuario);
+    if (!chk.ok) return res.status(chk.code||403).json({ error: chk.error });
 
     // Validar saldo suficiente en salidas
     if (tipo === 'salida') {
@@ -148,7 +178,7 @@ router.post('/movimientos', requireRol('admin', 'capturista'), async (req, res) 
 
 router.put('/movimientos/:id', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { fecha, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas } = req.body;
+    const { fecha, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, clave } = req.body;
     if (!fecha || !concepto || !monto)
       return res.status(400).json({ error: 'Fecha, concepto y monto requeridos.' });
     const m = parseFloat(monto);
@@ -158,6 +188,10 @@ router.put('/movimientos/:id', requireRol('admin', 'capturista'), async (req, re
     const cur = await query(`SELECT fondo_id, tipo FROM fac_caja_chica_movimientos WHERE id=$1`, [req.params.id]);
     if (!cur.rows.length) return res.status(404).json({ error: 'Movimiento no encontrado.' });
     const { fondo_id, tipo } = cur.rows[0];
+
+    // Validar clave del responsable
+    const chk = await validarClaveFondo(fondo_id, clave, req.usuario);
+    if (!chk.ok) return res.status(chk.code||403).json({ error: chk.error });
     if (tipo === 'salida') {
       const fs = await query(`
         SELECT f.saldo_inicial
@@ -188,6 +222,11 @@ router.put('/movimientos/:id', requireRol('admin', 'capturista'), async (req, re
 
 router.delete('/movimientos/:id', requireRol('admin', 'capturista'), async (req, res) => {
   try {
+    const clave = req.query.clave || req.body?.clave;
+    const cur = await query(`SELECT fondo_id FROM fac_caja_chica_movimientos WHERE id=$1`, [req.params.id]);
+    if (!cur.rows.length) return res.status(404).json({ error: 'Movimiento no encontrado.' });
+    const chk = await validarClaveFondo(cur.rows[0].fondo_id, clave, req.usuario);
+    if (!chk.ok) return res.status(chk.code||403).json({ error: chk.error });
     await query(`DELETE FROM fac_caja_chica_movimientos WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
