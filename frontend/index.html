@@ -393,6 +393,7 @@ canvas{max-height:230px}
 }
 .sidebar-backdrop.open{display:block}
 @keyframes fadein{from{opacity:0}to{opacity:1}}
+@keyframes pulseLuz{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.15);opacity:.75}}
 
 /* ══ TABLET ════════════════════════════════════════════════════════ */
 @media(max-width:900px){
@@ -4699,37 +4700,56 @@ function renderDetalleFondoCC() {
       </div>
     </div>
 
-    <!-- PANEL DE FLUJO DE CAJA -->
-    <div style="background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:14px">
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;align-items:center">
+    <!-- PANEL DE FLUJO DE CAJA CON LUZ DE ESTADO -->
+    <div style="background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:14px;position:relative">
 
-        <!-- Fondo asignado -->
-        <div style="text-align:center">
-          <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">🎯 Fondo asignado</div>
+      <!-- LUZ DE ESTADO (arriba, centrada) -->
+      <div style="display:flex;align-items:center;justify-content:center;gap:12px;padding-bottom:14px;border-bottom:1px solid var(--border);margin-bottom:16px">
+        <div style="position:relative;width:22px;height:22px;flex-shrink:0">
+          <div style="position:absolute;inset:0;border-radius:50%;background:${estado.accent};box-shadow:0 0 0 4px ${estado.bg}, 0 0 18px ${estado.accent}${estado.label.includes('Fondo completo')?'':', 0 0 32px '+estado.accent+'55'};${estado.label.includes('urgente')||estado.label.includes('agotado')?'animation:pulseLuz 1.4s ease-in-out infinite;':''}"></div>
+        </div>
+        <div>
+          <div style="font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted)">Estado del fondo</div>
+          <div style="font-size:15px;font-weight:900;color:${estado.color};line-height:1.2">${estado.label}</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;align-items:stretch">
+
+        <!-- Fondo Fijo Objetivo (editable) -->
+        <div style="text-align:center;background:#fff;padding:14px;border-radius:10px;border:1.5px solid #e5e7eb;position:relative">
+          <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">🎯 Fondo Fijo Objetivo</div>
           <div style="font-size:22px;font-weight:900;color:var(--dark);margin-top:2px">${fmt(asignado)}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">Límite autorizado</div>
+          ${canWrite()?`
+          <button onclick="editarFondoFijoCC(${f.id},${asignado})" title="Editar fondo fijo"
+            style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;border:1.5px solid #e5e7eb;background:#fff;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:all .15s"
+            onmouseover="this.style.background='var(--red-xs)';this.style.borderColor='var(--red)';this.style.color='var(--red)'"
+            onmouseout="this.style.background='#fff';this.style.borderColor='#e5e7eb';this.style.color=''">✏️</button>`:''}
         </div>
 
-        <!-- Saldo actual -->
-        <div style="text-align:center">
-          <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">💵 Saldo actual</div>
+        <!-- Saldo Disponible -->
+        <div style="text-align:center;background:#fff;padding:14px;border-radius:10px;border:2px solid ${estado.accent}">
+          <div style="font-size:10px;font-weight:800;color:${estado.color};text-transform:uppercase;letter-spacing:.6px">💵 Saldo Disponible</div>
           <div style="font-size:28px;font-weight:900;color:${estado.accent};margin-top:2px">${fmt(saldo)}</div>
-          <div style="margin-top:4px">
-            <div style="background:#e5e7eb;height:8px;border-radius:99px;overflow:hidden">
-              <div style="height:100%;width:${pct}%;background:${estado.accent};border-radius:99px;transition:width .5s"></div>
+          <div style="margin-top:6px">
+            <div style="background:#f3f4f6;height:8px;border-radius:99px;overflow:hidden">
+              <div style="height:100%;width:${pct}%;background:${estado.accent};border-radius:99px;transition:width .6s"></div>
             </div>
-            <div style="font-size:11px;color:${estado.accent};font-weight:700;margin-top:3px">${pct.toFixed(0)}% del fondo</div>
+            <div style="font-size:11px;color:${estado.accent};font-weight:800;margin-top:3px">${pct.toFixed(0)}% del fondo</div>
           </div>
         </div>
 
         <!-- Reembolso -->
         <div style="text-align:center;background:${estado.bg};padding:14px;border-radius:10px;border:2px solid ${estado.accent}">
-          <div style="font-size:10px;font-weight:800;color:${estado.color};text-transform:uppercase;letter-spacing:.6px">💰 Reembolso requerido</div>
+          <div style="font-size:10px;font-weight:800;color:${estado.color};text-transform:uppercase;letter-spacing:.6px">💰 Monto a Reembolsar</div>
           <div style="font-size:26px;font-weight:900;color:${estado.color};margin-top:2px">${fmt(reembolso)}</div>
-          <div style="font-size:10.5px;color:${estado.color};font-weight:700;margin-top:2px">${estado.label}</div>
+          <div style="font-size:10px;color:${estado.color};font-weight:700;margin-top:2px">Fondo Fijo − Saldo</div>
           ${reembolso > 0 && canWrite() ? `
           <button class="btn bsuc bsm" style="margin-top:8px;width:100%;font-size:11px" onclick="registrarReembolsoCC(${reembolso.toFixed(2)})">
-            💰 Registrar reembolso ${fmt(reembolso)}
-          </button>` : ''}
+            💰 Registrar reembolso
+          </button>` : reembolso === 0 && asignado > 0 ? `
+          <div style="margin-top:8px;font-size:11px;font-weight:800;color:#16a34a">✅ Fondo al 100%</div>` : ''}
         </div>
       </div>
     </div>
@@ -4802,6 +4822,34 @@ function renderDetalleFondoCC() {
     <div class="form-actions" style="margin-top:16px">
       <button class="btn bo" onclick="closeModal('modal-cc-detalle')">Cerrar</button>
     </div>`;
+}
+
+async function editarFondoFijoCC(fondoId, actual) {
+  const nuevo = window.prompt(`🎯 Fondo Fijo Objetivo\n\nCantidad total autorizada para esta caja chica.\n\nActual: $${parseFloat(actual).toFixed(2)}\n\nIngresa el nuevo monto:`, actual);
+  if (nuevo == null) return;
+  const val = parseFloat(String(nuevo).replace(/[^\d.]/g,''));
+  if (!(val >= 0)) return toast('Monto inválido.', 'warn');
+  try {
+    // Necesitamos preservar el resto de los datos, así que hacemos GET+PUT
+    const f = window._ccFondoActual;
+    await api(`/tesoreria/fondos/${fondoId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        nombre        : f.nombre,
+        responsable   : f.responsable,
+        departamento  : f.departamento,
+        fondo_asignado: val,
+        saldo_inicial : f.saldo_inicial,
+        moneda        : f.moneda,
+        activo        : f.activo,
+        notas         : f.notas
+      })
+    });
+    toast('Fondo fijo actualizado.');
+    openDetalleFondoCC(fondoId);
+    loadKpisCC();
+    loadFondosCC();
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 function registrarReembolsoCC(monto) {
