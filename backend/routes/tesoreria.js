@@ -134,7 +134,7 @@ router.delete('/fondos/:id', requireRol('admin'), async (req, res) => {
 // ══ MOVIMIENTOS ═══════════════════════════════════════════
 router.post('/movimientos', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { fondo_id, fecha, tipo, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, clave } = req.body;
+    const { fondo_id, fecha, tipo, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, clave, periodo_pago } = req.body;
     if (!fondo_id || !fecha || !tipo || !concepto || !monto)
       return res.status(400).json({ error: 'Fondo, fecha, tipo, concepto y monto son requeridos.' });
     if (!['entrada','salida'].includes(tipo))
@@ -166,11 +166,11 @@ router.post('/movimientos', requireRol('admin', 'capturista'), async (req, res) 
     const r = await query(
       `INSERT INTO fac_caja_chica_movimientos(
          fondo_id, fecha, tipo, categoria, concepto, monto,
-         beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, creado_por
-       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+         beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, periodo_pago, creado_por
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [fondo_id, fecha, tipo, categoria||null, concepto, m,
        beneficiario||null, forma_pago||'efectivo', referencia||null, comprobante||null,
-       autorizado_por||null, notas||null, req.usuario.id]
+       autorizado_por||null, notas||null, periodo_pago||null, req.usuario.id]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -178,7 +178,7 @@ router.post('/movimientos', requireRol('admin', 'capturista'), async (req, res) 
 
 router.put('/movimientos/:id', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { fecha, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, clave } = req.body;
+    const { fecha, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, clave, periodo_pago } = req.body;
     if (!fecha || !concepto || !monto)
       return res.status(400).json({ error: 'Fecha, concepto y monto requeridos.' });
     const m = parseFloat(monto);
@@ -211,10 +211,10 @@ router.put('/movimientos/:id', requireRol('admin', 'capturista'), async (req, re
       `UPDATE fac_caja_chica_movimientos SET
          fecha=$1, categoria=$2, concepto=$3, monto=$4,
          beneficiario=$5, forma_pago=$6, referencia=$7, comprobante=$8,
-         autorizado_por=$9, notas=$10, actualizado_en=NOW()
-       WHERE id=$11`,
+         autorizado_por=$9, notas=$10, periodo_pago=$11, actualizado_en=NOW()
+       WHERE id=$12`,
       [fecha, categoria||null, concepto, m, beneficiario||null, forma_pago||'efectivo',
-       referencia||null, comprobante||null, autorizado_por||null, notas||null, req.params.id]
+       referencia||null, comprobante||null, autorizado_por||null, notas||null, periodo_pago||null, req.params.id]
     );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
