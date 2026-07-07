@@ -5145,9 +5145,14 @@ function openMovCC(tipo, id) {
     <div style="background:var(--bg-alt);border-radius:10px;padding:14px;margin-bottom:14px">
       <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.6px;margin-bottom:10px">3. Auditoría y comprobante</div>
       <div class="fg" style="gap:12px">
+        ${es?`
+        <div class="fi full" style="background:#fef9c3;border:1.5px solid #fde68a;border-radius:8px;padding:10px 12px">
+          <label style="color:#854d0e"><strong>🧾 N° de cheque</strong> <span style="font-weight:400;color:#78350f;font-size:10.5px">(o folio de transferencia)</span></label>
+          <input id="cm-cheque" placeholder="Ej: 001234 o SPEI-88291" value="${mov.referencia||''}">
+        </div>`:''}
         <div class="fi">
           <label>Comprobante <span style="font-weight:400;color:var(--muted);font-size:10.5px">(N° ticket, factura o URL)</span></label>
-          <input id="cm-comp" placeholder="Ej: TICKET-4832, FAC-A1152 o enlace a comprobante" value="${mov.comprobante || mov.referencia || ''}">
+          <input id="cm-comp" placeholder="Ej: TICKET-4832, FAC-A1152 o enlace a comprobante" value="${mov.comprobante || (es ? '' : mov.referencia) || ''}">
         </div>
         <div class="fi">
           <label>Periodo de pago</label>
@@ -5230,9 +5235,12 @@ async function saveMovCC(tipo, id) {
     concepto    : $('cm-concepto').value.trim(),
     monto       : $('cm-monto').value,
     comprobante : $('cm-comp')?.value.trim() || '',
-    periodo_pago: $('cm-periodo')?.value.trim() || ''
+    periodo_pago: $('cm-periodo')?.value.trim() || '',
+    referencia  : tipo === 'entrada' ? ($('cm-cheque')?.value.trim() || '') : ''
   };
   if (!body.concepto || !body.monto) return toast('Concepto y monto son requeridos.', 'warn');
+  if (tipo === 'entrada' && !body.referencia)
+    return toast('N° de cheque o folio de transferencia es requerido para ingresos de efectivo.', 'warn');
 
   // Pedir clave del responsable (admin no la requiere)
   const clave = await pedirClaveFondoCC(f.id);
