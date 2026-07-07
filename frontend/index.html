@@ -4820,51 +4820,167 @@ function openMovCC(tipo, id) {
   if (!f) return;
   const mov = id ? (f.movimientos||[]).find(x=>x.id===id) : {};
   const hoy = new Date().toISOString().slice(0,10);
-  const categorias = ['Papelería','Comidas','Transporte','Servicios','Mantenimiento','Insumos','Reposición','Otros'];
+  const es = tipo === 'entrada';
+  const saldoActual = parseFloat(f.kpi?.saldo_actual) || 0;
+  // Categorías separadas por tipo
+  const catsIngreso = ['Reposición','Reembolso','Ajuste','Devolución','Otros ingresos'];
+  const catsGasto   = ['Papelería','Comidas','Transporte','Servicios','Mantenimiento','Insumos','Peajes/Estacionamiento','Regalos/Cortesías','Envíos/Mensajería','Suscripciones','Otros gastos'];
+  const cats = es ? catsIngreso : catsGasto;
+
+  // Colores de tema según tipo
+  const theme = es
+    ? { grad:'linear-gradient(135deg,#16a34a,#22c55e)', color:'#166534', bg:'#dcfce7', border:'#86efac', accent:'#16a34a', icon:'📥', label:'INGRESO / CARGA DE EFECTIVO' }
+    : { grad:'linear-gradient(135deg,#dc2626,#ef4444)', color:'#991b1b', bg:'#fee2e2', border:'#fca5a5', accent:'#dc2626', icon:'📤', label:'GASTO / EGRESO' };
+
   $('modal-cc-mov-body').innerHTML = `
-    <h4>${id?'Editar':'Nueva'} ${tipo==='entrada'?'Entrada':'Salida'} — ${f.nombre}</h4>
-    <div class="fg">
-      <div class="fi"><label>Fecha *</label>
-        <input type="date" id="cm-fecha" value="${(mov.fecha||hoy).toString().slice(0,10)}">
+    <!-- Header con gradiente según tipo -->
+    <div style="margin:-28px -28px 20px;padding:22px 28px;background:${theme.grad};color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">${id?'Editando':'Nuevo movimiento'}</div>
+      <div style="font-size:20px;font-weight:900;margin-top:4px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:24px">${theme.icon}</span> ${theme.label}
       </div>
-      <div class="fi"><label>Categoría</label>
-        <select id="cm-cat">
-          <option value="">— Sin categoría —</option>
-          ${categorias.map(c=>`<option ${mov.categoria===c?'selected':''}>${c}</option>`).join('')}
-        </select>
-      </div>
-      <div class="fi full"><label>Concepto *</label>
-        <input id="cm-concepto" placeholder="Descripción del movimiento" value="${mov.concepto||''}">
-      </div>
-      <div class="fi"><label>Monto *</label>
-        <input type="text" inputmode="decimal" id="cm-monto" oninput="ensureNum(this)" value="${mov.monto||''}" placeholder="0.00">
-      </div>
-      <div class="fi"><label>Beneficiario</label>
-        <input id="cm-benef" placeholder="A nombre de..." value="${mov.beneficiario||''}">
-      </div>
-      <div class="fi"><label>Forma de pago</label>
-        <select id="cm-forma">
-          ${['efectivo','transferencia','cheque','tarjeta','otro'].map(x=>`<option ${(mov.forma_pago||'efectivo')===x?'selected':''}>${x}</option>`).join('')}
-        </select>
-      </div>
-      <div class="fi"><label>Referencia / Folio</label>
-        <input id="cm-ref" placeholder="Ticket, folio..." value="${mov.referencia||''}">
-      </div>
-      <div class="fi"><label>Autorizado por</label>
-        <input id="cm-autoriz" value="${mov.autorizado_por||''}">
-      </div>
-      <div class="fi"><label>Comprobante (URL/archivo)</label>
-        <input id="cm-comp" placeholder="Enlace a comprobante" value="${mov.comprobante||''}">
-      </div>
-      <div class="fi full"><label>Notas</label>
-        <textarea id="cm-notas" rows="2">${mov.notas||''}</textarea>
+      <div style="font-size:12px;opacity:.9;margin-top:4px">Fondo: <strong>${f.nombre}</strong> · Saldo actual: <strong>${fmt(saldoActual)}</strong></div>
+    </div>
+
+    <!-- BLOQUE 1: Datos principales -->
+    <div style="background:var(--bg-alt);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.6px;margin-bottom:10px">1. Datos del movimiento</div>
+      <div class="fg" style="gap:12px">
+        <div class="fi">
+          <label>Fecha <span style="color:${theme.accent}">*</span></label>
+          <input type="date" id="cm-fecha" value="${(mov.fecha||hoy).toString().slice(0,10)}" max="${hoy}" onchange="validarMovCC()">
+        </div>
+        <div class="fi">
+          <label>Categoría</label>
+          <select id="cm-cat" onchange="validarMovCC()">
+            <option value="">— Sin categoría —</option>
+            ${cats.map(c=>`<option ${mov.categoria===c?'selected':''}>${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fi full">
+          <label>Concepto <span style="color:${theme.accent}">*</span> <span id="cm-conc-len" style="font-size:10px;color:var(--muted);float:right">0 / 300</span></label>
+          <input id="cm-concepto" placeholder="${es?'Ej: Transferencia para reponer fondo':'Ej: Compra papelería Office Depot'}" maxlength="300" value="${mov.concepto||''}" oninput="validarMovCC()">
+        </div>
       </div>
     </div>
+
+    <!-- BLOQUE 2: Monto e impacto -->
+    <div style="background:${theme.bg};border:2px solid ${theme.border};border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:${theme.color};letter-spacing:.6px;margin-bottom:10px">2. Monto e impacto en el saldo</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:end">
+        <div class="fi" style="margin:0">
+          <label style="color:${theme.color}">Monto <span>*</span></label>
+          <div style="position:relative">
+            <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:${theme.color};font-weight:800;font-size:16px;pointer-events:none">$</span>
+            <input type="text" inputmode="decimal" id="cm-monto"
+              oninput="ensureNum(this);validarMovCC()"
+              value="${mov.monto||''}" placeholder="0.00"
+              style="padding-left:24px;font-size:18px;font-weight:800;text-align:right;color:${theme.color};background:#fff;border:1.5px solid ${theme.border}">
+          </div>
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:800;color:${theme.color};text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">Saldo después</div>
+          <div id="cm-saldo-despues" style="font-size:22px;font-weight:900;color:${theme.color}">${fmt(saldoActual)}</div>
+        </div>
+      </div>
+      <div id="cm-validacion" style="margin-top:8px;font-size:11.5px;font-weight:600;min-height:16px"></div>
+    </div>
+
+    <!-- BLOQUE 3: Auditoría -->
+    <div style="background:var(--bg-alt);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.6px;margin-bottom:10px">3. Auditoría y comprobante</div>
+      <div class="fg" style="gap:12px">
+        <div class="fi">
+          <label>${es?'Origen del ingreso':'Beneficiario / Proveedor'}</label>
+          <input id="cm-benef" placeholder="${es?'Ej: Banco X, transferencia oficina':'Ej: Nombre del proveedor'}" value="${mov.beneficiario||''}">
+        </div>
+        <div class="fi">
+          <label>Forma de pago</label>
+          <select id="cm-forma">
+            ${['efectivo','transferencia','cheque','tarjeta','otro'].map(x=>`<option ${(mov.forma_pago||'efectivo')===x?'selected':''}>${x}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fi">
+          <label>N° comprobante / factura / ticket</label>
+          <input id="cm-ref" placeholder="Ej: TICKET-4832, FAC-A1152" value="${mov.referencia||''}">
+        </div>
+        <div class="fi">
+          <label>Autorizado por</label>
+          <input id="cm-autoriz" placeholder="Nombre de quien autoriza" value="${mov.autorizado_por||''}">
+        </div>
+        <div class="fi full">
+          <label>URL o ruta del comprobante digital</label>
+          <input id="cm-comp" placeholder="Enlace a foto/PDF del comprobante" value="${mov.comprobante||''}">
+        </div>
+        <div class="fi full">
+          <label>Notas adicionales</label>
+          <textarea id="cm-notas" rows="2" placeholder="Observaciones opcionales">${mov.notas||''}</textarea>
+        </div>
+      </div>
+    </div>
+
     <div class="form-actions">
       <button class="btn bo" onclick="closeModal('modal-cc-mov')">Cancelar</button>
-      <button class="btn bs" onclick="saveMovCC('${tipo}',${id||'null'})">💾 Guardar</button>
+      <button class="btn bs" id="cm-btn-save" onclick="saveMovCC('${tipo}',${id||'null'})">💾 Guardar ${es?'ingreso':'gasto'}</button>
     </div>`;
   openModal('modal-cc-mov');
+  // Guardar contexto para validación
+  window._cmCtx = { tipo, saldoActual, saldoEdit: id ? parseFloat(mov.monto)||0 : 0, es, theme };
+  validarMovCC();
+}
+
+function validarMovCC() {
+  const ctx = window._cmCtx || {};
+  const monto  = parseFloat($('cm-monto')?.value)||0;
+  const conc   = ($('cm-concepto')?.value||'').trim();
+  const fecha  = $('cm-fecha')?.value;
+  const es     = ctx.es;
+  const saldo  = ctx.saldoActual + ctx.saldoEdit;      // devolver el edit al saldo disponible
+  const nuevoSaldo = es ? saldo + monto : saldo - monto;
+  const valEl  = $('cm-validacion');
+  const btn    = $('cm-btn-save');
+  const saldoEl = $('cm-saldo-despues');
+
+  if (saldoEl) {
+    saldoEl.textContent = fmt(nuevoSaldo);
+    saldoEl.style.color = nuevoSaldo < 0 ? '#dc2626' : ctx.theme?.color || '#166534';
+  }
+
+  const conLen = $('cm-conc-len');
+  if (conLen) conLen.textContent = `${conc.length} / 300`;
+
+  const errs = [];
+  const warns = [];
+  const oks  = [];
+
+  if (!fecha) errs.push('Fecha requerida');
+  if (!conc)  errs.push('Concepto requerido');
+  else if (conc.length < 4) warns.push('El concepto es muy corto (mín. 4 caracteres recomendado)');
+  if (!(monto > 0)) errs.push('Monto debe ser mayor a 0');
+
+  if (!es && monto > saldo + 0.01)
+    errs.push(`Saldo insuficiente — máximo disponible ${fmt(saldo)}`);
+
+  if (!errs.length) {
+    if (es) oks.push(`✅ Al guardar, el saldo subirá a ${fmt(nuevoSaldo)}`);
+    else    oks.push(`✅ Al guardar, el saldo bajará a ${fmt(nuevoSaldo)}`);
+  }
+
+  if (valEl) {
+    if (errs.length) {
+      valEl.innerHTML = errs.map(e=>`<div style="color:#dc2626">⚠ ${e}</div>`).join('');
+    } else if (warns.length) {
+      valEl.innerHTML = warns.map(e=>`<div style="color:#d97706">💡 ${e}</div>`).join('') +
+                       oks.map(o=>`<div style="color:#16a34a">${o}</div>`).join('');
+    } else {
+      valEl.innerHTML = oks.map(o=>`<div style="color:#16a34a">${o}</div>`).join('');
+    }
+  }
+
+  if (btn) {
+    if (errs.length) { btn.disabled = true;  btn.style.opacity = '.5'; btn.style.cursor = 'not-allowed'; }
+    else             { btn.disabled = false; btn.style.opacity = '';   btn.style.cursor = ''; }
+  }
 }
 
 async function saveMovCC(tipo, id) {
