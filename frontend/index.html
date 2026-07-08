@@ -4393,7 +4393,7 @@ async function openSolicitudVac(empIdPredef) {
       <h4>Nueva solicitud de vacaciones</h4>
       <div class="fg">
         <div class="fi"><label>Colaborador *</label>
-          <select id="vs-emp">
+          <select id="vs-emp" onchange="previewDistribucionVac()">
             <option value="">— Seleccionar —</option>
             ${emps.map(e=>`<option value="${e.id}" ${empIdPredef==e.id?'selected':''}>${e.nombre} (${e.puesto||'sin puesto'}) — Pendientes: ${parseFloat(e.dias_pendientes).toFixed(1)}</option>`).join('')}
           </select>
@@ -4401,10 +4401,13 @@ async function openSolicitudVac(empIdPredef) {
         <div class="fi"><label>Fecha solicitud</label><input type="date" id="vs-solicitud" value="${today}"></div>
         <div class="fi"><label>Fecha inicio *</label><input type="date" id="vs-ini" onchange="recalcDiasSol()"></div>
         <div class="fi"><label>Fecha fin *</label><input type="date" id="vs-fin" onchange="recalcDiasSol()"></div>
-        <div class="fi"><label>Días solicitados</label><input type="number" step="0.5" id="vs-dias" value="0"></div>
+        <div class="fi"><label>Días solicitados</label><input type="number" step="0.5" id="vs-dias" value="0" oninput="previewDistribucionVac()"></div>
         <div class="fi"><label>Fecha regreso a laborar</label><input type="date" id="vs-regreso"></div>
-        <div class="fi full"><label>Periodos aplicados (texto libre)</label>
-          <input id="vs-periodos" placeholder="Ej: 6/periodo 9, 6/periodo 10">
+        <div class="fi full">
+          <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:8px;padding:10px 12px">
+            <div style="font-size:11px;font-weight:800;color:#1e40af;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📊 Distribución automática de días</div>
+            <div id="vs-dist-preview" style="font-size:12px;color:#1e3a8a">Los días se descuentan automáticamente de los periodos más antiguos primero (FIFO).</div>
+          </div>
         </div>
         <div class="fi full"><label>Observaciones</label>
           <textarea id="vs-obs" rows="2"></textarea>
@@ -4421,6 +4424,9 @@ async function openSolicitudVac(empIdPredef) {
         <button class="btn bo" onclick="closeModal('modal-vac-sol')">Cancelar</button>
         <button class="btn bs" onclick="guardarSolicitudVac()">💾 Guardar</button>
       </div>`;
+    // Limpiar caché y disparar preview si hay empleado predefinido
+    window._vacEmpCache = null;
+    if (empIdPredef) previewDistribucionVac();
   } catch(e) { $('modal-vac-sol-body').innerHTML = `<p class="empty">${e.message}</p>`; }
 }
 
@@ -4440,19 +4446,66 @@ function recalcDiasSol() {
     if (ret.getDay() === 0) ret.setDate(ret.getDate()+1);
     $('vs-regreso').value = ret.toISOString().slice(0,10);
   }
+  previewDistribucionVac();
+}
+
+// Muestra cómo se distribuirán los días entre periodos (FIFO)
+async function previewDistribucionVac() {
+  const empId  = $('vs-emp')?.value;
+  const dias   = parseFloat($('vs-dias')?.value) || 0;
+  const el     = $('vs-dist-preview');
+  if (!el) return;
+  if (!empId) {
+    el.innerHTML = 'Selecciona un colaborador para ver cómo se distribuirán los días.';
+    return;
+  }
+  if (dias <= 0) {
+    el.innerHTML = 'Los días se descuentan automáticamente de los periodos más antiguos primero (FIFO).';
+    return;
+  }
+  try {
+    // Cachear periodos por empleado en esta sesión del modal
+    if (!window._vacEmpCache || window._vacEmpCache.id != empId) {
+      window._vacEmpCache = await api(`/vacaciones/empleados/${empId}`);
+    }
+    const periodos = (window._vacEmpCache.periodos || [])
+      .map(p => ({
+        num: p.num_periodo,
+        pendientes: parseFloat(p.dias_correspondientes) - parseFloat(p.dias_tomados)
+      }))
+      .filter(p => p.pendientes > 0)
+      .sort((a,b) => a.num - b.num);
+    const asignaciones = [];
+    let faltan = dias;
+    for (const p of periodos) {
+      if (faltan <= 0) break;
+      const usar = Math.min(p.pendientes, faltan);
+      asignaciones.push({ num: p.num, dias: +usar.toFixed(1) });
+      faltan = +(faltan - usar).toFixed(2);
+    }
+    if (faltan > 0.001) {
+      el.innerHTML = `<span style="color:#dc2626;font-weight:700">⚠ Faltan ${faltan.toFixed(1)} día${faltan!==1?'s':''} — el colaborador no tiene periodos suficientes.</span>`;
+      return;
+    }
+    const chips = asignaciones.map(a =>
+      `<span style="display:inline-block;background:#dbeafe;color:#1e3a8a;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;margin:2px">P°${a.num}: ${a.dias} día${a.dias!==1?'s':''}</span>`
+    ).join('');
+    el.innerHTML = `Se descontará: ${chips}`;
+  } catch(e) {
+    el.innerHTML = `<span style="color:#dc2626">Error: ${e.message}</span>`;
+  }
 }
 
 async function guardarSolicitudVac() {
   const body = {
-    empleado_id       : $('vs-emp').value,
-    fecha_solicitud   : $('vs-solicitud').value,
-    fecha_inicio      : $('vs-ini').value,
-    fecha_fin         : $('vs-fin').value,
-    dias_solicitados  : $('vs-dias').value,
-    fecha_regreso     : $('vs-regreso').value,
-    periodos_aplicados: $('vs-periodos').value,
-    observaciones     : $('vs-obs').value,
-    estatus           : $('vs-est').value
+    empleado_id     : $('vs-emp').value,
+    fecha_solicitud : $('vs-solicitud').value,
+    fecha_inicio    : $('vs-ini').value,
+    fecha_fin       : $('vs-fin').value,
+    dias_solicitados: $('vs-dias').value,
+    fecha_regreso   : $('vs-regreso').value,
+    observaciones   : $('vs-obs').value,
+    estatus         : $('vs-est').value
   };
   if (!body.empleado_id || !body.fecha_inicio || !body.fecha_fin)
     return toast('Colaborador y fechas son requeridos.', 'warn');

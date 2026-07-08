@@ -1,5 +1,33 @@
 const router = require('express').Router();
 const { query, getClient } = require('../config/db');
+
+// Helper: distribuir días de solicitud entre periodos (FIFO, más antiguos primero)
+// Devuelve { asignaciones: [{periodo_id, num_periodo, dias}], resumen: "X días de P°Y + ..." }
+async function distribuirDiasFIFO(client, empleadoId, diasTotales) {
+  const r = await client.query(`
+    SELECT id, num_periodo,
+      dias_correspondientes - dias_tomados AS pendientes
+    FROM fac_vacaciones_periodos
+    WHERE empleado_id = $1
+      AND dias_correspondientes - dias_tomados > 0
+    ORDER BY num_periodo ASC
+  `, [empleadoId]);
+
+  const asignaciones = [];
+  let faltan = parseFloat(diasTotales);
+  for (const p of r.rows) {
+    if (faltan <= 0) break;
+    const pend = parseFloat(p.pendientes);
+    const usar = Math.min(pend, faltan);
+    asignaciones.push({ periodo_id: p.id, num_periodo: p.num_periodo, dias: +usar.toFixed(2) });
+    faltan = +(faltan - usar).toFixed(2);
+  }
+  const ok = faltan <= 0.001;
+  const resumen = asignaciones.length
+    ? asignaciones.map(a => `${a.dias} día${a.dias!==1?'s':''} del P°${a.num_periodo}`).join(', ')
+    : 'sin periodos disponibles';
+  return { ok, asignaciones, resumen, faltantes: faltan };
+}
 const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
@@ -150,24 +178,66 @@ router.put('/empleados/:id/periodos', requireRol('admin', 'capturista'), async (
 
 // ── CREAR SOLICITUD ──
 router.post('/solicitudes', requireRol('admin', 'capturista'), async (req, res) => {
+  const client = await getClient();
   try {
+    await client.query('BEGIN');
     const { empleado_id, fecha_solicitud, fecha_inicio, fecha_fin, dias_solicitados,
-            fecha_regreso, periodos_aplicados, observaciones, estatus } = req.body;
+            fecha_regreso, observaciones, estatus } = req.body;
     if (!empleado_id || !fecha_inicio || !fecha_fin)
       return res.status(400).json({ error: 'Empleado y fechas son requeridas.' });
+    const dias = parseFloat(dias_solicitados) || 0;
+    if (dias <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Los días solicitados deben ser mayor a 0.' });
+    }
 
-    const r = await query(
+    // Distribuir días FIFO entre periodos con pendientes
+    const est = estatus || 'aprobada';
+    let asignaciones = [];
+    let resumen = null;
+    if (est !== 'rechazada') {
+      const dist = await distribuirDiasFIFO(client, empleado_id, dias);
+      if (!dist.ok) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: `No hay días suficientes en los periodos. Faltan ${dist.faltantes.toFixed(1)} día${dist.faltantes!==1?'s':''}. Genera más periodos o ajusta los días.`
+        });
+      }
+      asignaciones = dist.asignaciones;
+      resumen = dist.resumen;
+    }
+
+    // Insertar solicitud
+    const r = await client.query(
       `INSERT INTO fac_vacaciones_solicitudes(
          empleado_id, fecha_solicitud, fecha_inicio, fecha_fin, dias_solicitados,
          fecha_regreso, periodos_aplicados, observaciones, estatus, creado_por
        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [empleado_id, fecha_solicitud || new Date(), fecha_inicio, fecha_fin,
-       parseFloat(dias_solicitados) || 0,
-       fecha_regreso || null, periodos_aplicados || null, observaciones || null,
-       estatus || 'aprobada', req.usuario.id]
+      [empleado_id, fecha_solicitud || new Date(), fecha_inicio, fecha_fin, dias,
+       fecha_regreso || null, resumen, observaciones || null, est, req.usuario.id]
     );
-    res.status(201).json(r.rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const solId = r.rows[0].id;
+
+    // Aplicar asignaciones: guardar y descontar de cada periodo
+    for (const a of asignaciones) {
+      await client.query(
+        `INSERT INTO fac_vacaciones_solicitud_periodos(solicitud_id, periodo_id, dias_aplicados)
+         VALUES($1, $2, $3)`,
+        [solId, a.periodo_id, a.dias]
+      );
+      await client.query(
+        `UPDATE fac_vacaciones_periodos SET dias_tomados = dias_tomados + $1, actualizado_en=NOW()
+         WHERE id = $2`,
+        [a.dias, a.periodo_id]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({ ...r.rows[0], asignaciones });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
 });
 
 // ── GET SOLICITUD ──
@@ -186,10 +256,29 @@ router.get('/solicitudes/:id', async (req, res) => {
 
 // ── ELIMINAR SOLICITUD ──
 router.delete('/solicitudes/:id', requireRol('admin'), async (req, res) => {
+  const client = await getClient();
   try {
-    await query(`DELETE FROM fac_vacaciones_solicitudes WHERE id=$1`, [req.params.id]);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    await client.query('BEGIN');
+    // Recuperar las asignaciones para revertirlas
+    const asig = await client.query(
+      `SELECT periodo_id, dias_aplicados FROM fac_vacaciones_solicitud_periodos WHERE solicitud_id=$1`,
+      [req.params.id]
+    );
+    for (const a of asig.rows) {
+      await client.query(
+        `UPDATE fac_vacaciones_periodos SET dias_tomados = GREATEST(0, dias_tomados - $1), actualizado_en=NOW()
+         WHERE id = $2`,
+        [parseFloat(a.dias_aplicados), a.periodo_id]
+      );
+    }
+    // ON DELETE CASCADE en fac_vacaciones_solicitud_periodos elimina las asignaciones
+    await client.query(`DELETE FROM fac_vacaciones_solicitudes WHERE id=$1`, [req.params.id]);
+    await client.query('COMMIT');
+    res.json({ ok: true, revertidos: asig.rows });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
 });
 
 module.exports = router;
