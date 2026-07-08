@@ -4441,7 +4441,11 @@ async function openSolicitudVac(empIdPredef) {
         <div class="fi"><label>Fecha solicitud</label><input type="date" id="vs-solicitud" value="${today}"></div>
         <div class="fi"><label>Fecha inicio *</label><input type="date" id="vs-ini" onchange="recalcDiasSol()"></div>
         <div class="fi"><label>Fecha fin *</label><input type="date" id="vs-fin" onchange="recalcDiasSol()"></div>
-        <div class="fi"><label>Días solicitados</label><input type="number" step="0.5" id="vs-dias" value="0" oninput="previewDistribucionVac()"></div>
+        <div class="fi">
+          <label>Días solicitados</label>
+          <input type="number" step="0.5" id="vs-dias" value="0" oninput="previewDistribucionVac()">
+          <div id="vs-domingos-info" style="font-size:10.5px;color:var(--muted);margin-top:3px"></div>
+        </div>
         <div class="fi"><label>Fecha regreso a laborar</label><input type="date" id="vs-regreso"></div>
         <div class="fi full">
           <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:8px;padding:10px 12px">
@@ -4475,11 +4479,24 @@ function recalcDiasSol() {
   if (!i || !f) return;
   const d1 = new Date(i+'T00:00:00'), d2 = new Date(f+'T00:00:00');
   // Contar días excluyendo domingos (día 0 en getDay)
-  let dias = 0;
+  let dias = 0, domingos = 0, totalDias = 0;
   for (let d = new Date(d1); d <= d2; d.setDate(d.getDate()+1)) {
-    if (d.getDay() !== 0) dias++;
+    totalDias++;
+    if (d.getDay() === 0) domingos++;
+    else dias++;
   }
   if ($('vs-dias') && dias > 0) $('vs-dias').value = dias;
+  // Mostrar info de domingos excluidos
+  const info = $('vs-domingos-info');
+  if (info) {
+    if (domingos > 0) {
+      info.innerHTML = `📅 <strong>${totalDias}</strong> días naturales · <strong style="color:#16a34a">${dias}</strong> hábiles · <strong style="color:#dc2626">−${domingos}</strong> domingo${domingos!==1?'s':''} excluido${domingos!==1?'s':''} (descanso obligatorio LFT)`;
+      info.style.color = 'var(--dark)';
+    } else {
+      info.innerHTML = `📅 ${totalDias} días naturales — sin domingos en el rango`;
+      info.style.color = 'var(--muted)';
+    }
+  }
   // Sugerir fecha de regreso: día siguiente al fin; si cae domingo, saltar al lunes
   if (!$('vs-regreso').value) {
     const ret = new Date(d2); ret.setDate(ret.getDate()+1);
