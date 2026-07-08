@@ -542,6 +542,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-cc-mov"><div class="modal modal-sm" id="modal-cc-mov-body"></div></div>
 <div class="overlay" id="modal-cc-informe"><div class="modal" style="width:min(1000px,96vw)" id="modal-cc-informe-body"></div></div>
 <div class="overlay" id="modal-cambiar-clave"><div class="modal modal-sm" id="modal-cambiar-clave-body"></div></div>
+<div class="overlay" id="modal-vac-editar-tomados"><div class="modal modal-sm" id="modal-vac-editar-tomados-body"></div></div>
 
 <script>
 // ══ CONFIG ══════════════════════════════════════
@@ -4405,35 +4406,67 @@ async function generarPeriodosVac(empId) {
   } catch(e) { toast(e.message, 'err'); }
 }
 
-async function editarDiasTomadosVac(periodoId, actual) {
-  const clave = window.prompt('🔐 Ingresa la clave de administrador para desbloquear la edición:');
-  if (clave == null) return;
-  if (!clave.trim()) return toast('Clave requerida.', 'warn');
-  const nuevo = window.prompt(`✏️ Nuevos días tomados (actual: ${actual}):`, actual);
-  if (nuevo == null) return;
-  const val = parseFloat(String(nuevo).replace(/[^\d.]/g,''));
-  if (!(val >= 0)) return toast('Valor inválido.', 'warn');
+function editarDiasTomadosVac(periodoId, actual) {
+  // Buscar el periodo actual para mostrar más contexto
+  const per = (window._vacEmp?.periodos||[]).find(p => p.id === periodoId);
+  const num = per?.num_periodo || '?';
+  const corresp = per?.dias_correspondientes || 0;
+  $('modal-vac-editar-tomados-body').innerHTML = `
+    <h4>🔒 Editar Días Tomados</h4>
+    <div style="background:#fef3c7;border:1.5px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#78350f">
+      <strong>⚠ Solo administrador.</strong> Este cambio sobrescribe manualmente el valor calculado automáticamente por las solicitudes vacacionales.
+    </div>
+    <div class="fi" style="margin-bottom:8px">
+      <label>Periodo</label>
+      <div style="padding:8px 10px;background:var(--bg-alt);border-radius:6px;font-weight:700;color:var(--dark)">P°${num} · ${corresp} días correspondientes</div>
+    </div>
+    <div class="fi" style="margin-bottom:10px">
+      <label>Días tomados actuales</label>
+      <div style="padding:8px 10px;background:var(--bg-alt);border-radius:6px;font-weight:700;color:var(--warning)">${actual}</div>
+    </div>
+    <div class="fi" style="margin-bottom:10px">
+      <label>Nuevo valor de días tomados *</label>
+      <input type="number" step="0.5" min="0" max="${corresp}" id="edt-nuevo" value="${actual}" autofocus style="font-size:16px;font-weight:700">
+    </div>
+    <div class="fi" style="margin-bottom:14px">
+      <label>🔐 Clave de administrador *</label>
+      <input type="password" id="edt-clave" placeholder="Ingresa la clave" autocomplete="off">
+    </div>
+    <div id="edt-msg" style="font-size:12px;font-weight:600;margin-bottom:10px;min-height:16px"></div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-vac-editar-tomados')">Cancelar</button>
+      <button class="btn bs" id="edt-btn" onclick="guardarDiasTomadosVac(${periodoId})">💾 Guardar</button>
+    </div>`;
+  openModal('modal-vac-editar-tomados');
+  setTimeout(() => $('edt-nuevo')?.focus(), 100);
+}
+
+async function guardarDiasTomadosVac(periodoId) {
+  const val   = parseFloat($('edt-nuevo')?.value);
+  const clave = ($('edt-clave')?.value || '').trim();
+  const msg   = $('edt-msg');
+  if (!(val >= 0)) { if (msg) msg.innerHTML = '<span style="color:#dc2626">⚠ Ingresa un número válido</span>'; return; }
+  if (!clave)      { if (msg) msg.innerHTML = '<span style="color:#dc2626">⚠ Clave requerida</span>'; return; }
   const empId = window._vacEmp?.id;
+  const btn = $('edt-btn'); if (btn) { btn.disabled = true; btn.textContent = '⏳ Guardando...'; }
   try {
     const resp = await api(`/vacaciones/periodos/${periodoId}/dias-tomados`, {
       method: 'PUT',
-      body: JSON.stringify({ dias_tomados: val, clave: clave.trim() })
+      body: JSON.stringify({ dias_tomados: val, clave })
     });
-    console.log('Update OK:', resp);
+    console.log('[vac] Update OK:', resp);
     toast(`✅ Días tomados actualizados a ${val}.`);
-    // Forzar refresh completo — invalidar caché de empleado y re-fetch
-    window._vacEmpCache = null;
+    closeModal('modal-vac-editar-tomados');
+    // Forzar refresh
     if (empId) {
-      // Fetch directo con cache-busting y actualizar la vista
       const emp = await api(`/vacaciones/empleados/${empId}?_t=${Date.now()}`);
       window._vacEmp = emp;
       renderVacEmpleado();
-      // También refresca la lista de fondos si está visible
-      if ($('vac-table')) loadVacEmpleados();
     }
   } catch(e) {
-    console.error('Error al actualizar días tomados:', e);
-    toast(e.message, 'err');
+    console.error('[vac] Error:', e);
+    if (msg) msg.innerHTML = `<span style="color:#dc2626">⚠ ${e.message}</span>`;
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Guardar'; }
   }
 }
 
