@@ -4413,15 +4413,28 @@ async function editarDiasTomadosVac(periodoId, actual) {
   if (nuevo == null) return;
   const val = parseFloat(String(nuevo).replace(/[^\d.]/g,''));
   if (!(val >= 0)) return toast('Valor inválido.', 'warn');
+  const empId = window._vacEmp?.id;
   try {
-    await api(`/vacaciones/periodos/${periodoId}/dias-tomados`, {
+    const resp = await api(`/vacaciones/periodos/${periodoId}/dias-tomados`, {
       method: 'PUT',
       body: JSON.stringify({ dias_tomados: val, clave: clave.trim() })
     });
-    toast('✅ Días tomados actualizados.');
-    // Refrescar la vista del empleado
-    if (window._vacEmp?.id) openVacEmpleado(window._vacEmp.id);
-  } catch(e) { toast(e.message, 'err'); }
+    console.log('Update OK:', resp);
+    toast(`✅ Días tomados actualizados a ${val}.`);
+    // Forzar refresh completo — invalidar caché de empleado y re-fetch
+    window._vacEmpCache = null;
+    if (empId) {
+      // Fetch directo con cache-busting y actualizar la vista
+      const emp = await api(`/vacaciones/empleados/${empId}?_t=${Date.now()}`);
+      window._vacEmp = emp;
+      renderVacEmpleado();
+      // También refresca la lista de fondos si está visible
+      if ($('vac-table')) loadVacEmpleados();
+    }
+  } catch(e) {
+    console.error('Error al actualizar días tomados:', e);
+    toast(e.message, 'err');
+  }
 }
 
 async function guardarPeriodosVac(empId) {
