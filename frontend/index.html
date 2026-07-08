@@ -553,7 +553,14 @@ let _charts = {};
 // ══ UTILIDADES ══════════════════════════════════
 const $ = id => document.getElementById(id);
 const fmt = n => isNaN(n) ? '$0.00' : '$' + parseFloat(n).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2});
-const fmtDate = d => d ? d.slice(0,10) : '—';
+const fmtDate = d => {
+  if (!d) return '—';
+  try {
+    if (typeof d === 'string') return d.slice(0,10);
+    if (d instanceof Date) return d.toISOString().slice(0,10);
+    return String(d).slice(0,10);
+  } catch { return '—'; }
+};
 const meses = ['','Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
 function api(url, opts = {}) {
@@ -4253,8 +4260,17 @@ async function openVacEmpleado(id) {
   try {
     const e = await api(`/vacaciones/empleados/${id}`);
     window._vacEmp = e;
-    renderVacEmpleado();
-  } catch(err) { $('modal-vac-emp-body').innerHTML = `<p class="empty">${err.message}</p>`; }
+    try {
+      renderVacEmpleado();
+    } catch(renderErr) {
+      console.error('Error renderizando vacaciones:', renderErr);
+      $('modal-vac-emp-body').innerHTML = `
+        <h4>Error al renderizar</h4>
+        <p style="color:var(--danger)">Detalle: ${renderErr.message}</p>
+        <p style="font-size:11px;color:var(--muted)">Revisa la consola del navegador (F12) para más info.</p>
+        <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-vac-emp')">Cerrar</button></div>`;
+    }
+  } catch(err) { $('modal-vac-emp-body').innerHTML = `<p class="empty">Error al cargar: ${err.message}</p>`; }
 }
 
 function renderVacEmpleado() {
