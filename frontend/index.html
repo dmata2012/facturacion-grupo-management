@@ -4330,14 +4330,20 @@ function periodoFila(p, i, fechaIngreso) {
   const num = parseInt(p.num_periodo)||0;
   // Calcular año ganado y vencimiento (LFT: vence 6 meses después)
   let fechaGanado = '—', fechaVence = '—', vencido = false;
-  if (fechaIngreso && num > 0) {
-    const ing = new Date(fechaIngreso + 'T00:00:00');
-    const gan = new Date(ing); gan.setFullYear(gan.getFullYear() + num);
-    const ven = new Date(gan); ven.setMonth(ven.getMonth() + 6);
-    fechaGanado = gan.toISOString().slice(0,10);
-    fechaVence  = ven.toISOString().slice(0,10);
-    vencido = new Date() > ven && dp > 0;
-  }
+  try {
+    // Normalizar fecha_ingreso a YYYY-MM-DD (soporta timestamp completo o solo fecha)
+    const iso = fechaIngreso ? String(fechaIngreso).slice(0,10) : '';
+    if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) && num > 0) {
+      const ing = new Date(iso + 'T00:00:00');
+      if (!isNaN(ing.getTime())) {
+        const gan = new Date(ing); gan.setFullYear(gan.getFullYear() + num);
+        const ven = new Date(gan); ven.setMonth(ven.getMonth() + 6);
+        fechaGanado = gan.toISOString().slice(0,10);
+        fechaVence  = ven.toISOString().slice(0,10);
+        vencido = new Date() > ven && dp > 0;
+      }
+    }
+  } catch(err) { /* fechas quedan como '—' */ }
   return `<tr id="vp-row-${i}">
     <td><input type="number" value="${num}" id="vp-${i}-n" style="width:70px" title="1 periodo = 1 año laborado"></td>
     <td id="vp-${i}-fg" style="font-size:11px;color:var(--muted)">${fechaGanado}</td>
