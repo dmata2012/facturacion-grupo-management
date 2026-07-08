@@ -4446,7 +4446,7 @@ async function openSolicitudVac(empIdPredef) {
           <input type="number" step="0.5" id="vs-dias" value="0" oninput="previewDistribucionVac()">
           <div id="vs-domingos-info" style="font-size:10.5px;color:var(--muted);margin-top:3px"></div>
         </div>
-        <div class="fi"><label>Fecha regreso a laborar</label><input type="date" id="vs-regreso"></div>
+        <div class="fi"><label>Fecha regreso a laborar</label><input type="date" id="vs-regreso" onchange="ajustarFechaRegreso()"></div>
         <div class="fi full">
           <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:8px;padding:10px 12px">
             <div style="font-size:11px;font-weight:800;color:#1e40af;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📊 Distribución automática de días</div>
@@ -4474,6 +4474,18 @@ async function openSolicitudVac(empIdPredef) {
   } catch(e) { $('modal-vac-sol-body').innerHTML = `<p class="empty">${e.message}</p>`; }
 }
 
+function ajustarFechaRegreso() {
+  const v = $('vs-regreso')?.value;
+  if (!v) return;
+  const d = new Date(v+'T00:00:00');
+  if (isNaN(d.getTime())) return;
+  if (d.getDay() === 0) { // domingo — avanza al lunes
+    d.setDate(d.getDate()+1);
+    $('vs-regreso').value = d.toISOString().slice(0,10);
+    toast('El domingo es descanso obligatorio. Fecha de regreso ajustada al lunes.', 'warn');
+  }
+}
+
 function recalcDiasSol() {
   const i = $('vs-ini').value, f = $('vs-fin').value;
   if (!i || !f) return;
@@ -4497,12 +4509,10 @@ function recalcDiasSol() {
       info.style.color = 'var(--muted)';
     }
   }
-  // Sugerir fecha de regreso: día siguiente al fin; si cae domingo, saltar al lunes
-  if (!$('vs-regreso').value) {
-    const ret = new Date(d2); ret.setDate(ret.getDate()+1);
-    if (ret.getDay() === 0) ret.setDate(ret.getDate()+1);
-    $('vs-regreso').value = ret.toISOString().slice(0,10);
-  }
+  // Fecha de regreso: día siguiente al fin; si cae domingo, saltar al lunes (siempre actualizar)
+  const ret = new Date(d2); ret.setDate(ret.getDate()+1);
+  if (ret.getDay() === 0) ret.setDate(ret.getDate()+1);
+  $('vs-regreso').value = ret.toISOString().slice(0,10);
   previewDistribucionVac();
 }
 
