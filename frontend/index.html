@@ -4277,7 +4277,10 @@ function renderVacEmpleado() {
     </div>
 
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-      <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--muted);letter-spacing:.5px">Periodos vacacionales</div>
+      <div>
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--muted);letter-spacing:.5px">Periodos vacacionales</div>
+        <div style="font-size:10.5px;color:var(--muted);margin-top:2px">📌 Un periodo = un año laborado. Vence 6 meses después según LFT.</div>
+      </div>
       ${canWrite()?`<div style="display:flex;gap:6px">
         <button class="btn bo bsm" onclick="generarPeriodosVac(${e.id})">⚙ Generar por antigüedad</button>
         <button class="btn bo bsm" onclick="agregarPeriodoFila()">+ Agregar</button>
@@ -4285,10 +4288,10 @@ function renderVacEmpleado() {
     </div>
     <div class="tscroll" style="margin-bottom:14px"><table id="vac-per-table">
       <thead><tr>
-        <th>N° Periodo</th><th>Días correspondientes</th><th>Días tomados</th><th>Días pendientes</th><th>Notas</th><th></th>
+        <th>N° Periodo</th><th>Año ganado</th><th>Vence LFT</th><th>Días correspondientes</th><th>Días tomados</th><th>Días pendientes</th><th>Notas</th><th></th>
       </tr></thead>
       <tbody id="vac-per-body">
-        ${periodos.length?periodos.map((p,i)=>periodoFila(p,i)).join(''):'<tr><td colspan="6" class="empty" style="text-align:center;padding:14px">Sin periodos. Usa "Generar por antigüedad" o "Agregar".</td></tr>'}
+        ${periodos.length?periodos.map((p,i)=>periodoFila(p,i,e.fecha_ingreso)).join(''):'<tr><td colspan="8" class="empty" style="text-align:center;padding:14px">Sin periodos. Usa "Generar por antigüedad" o "Agregar".</td></tr>'}
       </tbody>
     </table></div>
     ${canWrite()?`<div style="margin-bottom:14px;display:flex;gap:8px">
@@ -4320,12 +4323,25 @@ function renderVacEmpleado() {
     </div>`;
 }
 
-function periodoFila(p, i) {
+function periodoFila(p, i, fechaIngreso) {
   const dc = parseFloat(p.dias_correspondientes||0);
   const dt = parseFloat(p.dias_tomados||0);
   const dp = dc - dt;
+  const num = parseInt(p.num_periodo)||0;
+  // Calcular año ganado y vencimiento (LFT: vence 6 meses después)
+  let fechaGanado = '—', fechaVence = '—', vencido = false;
+  if (fechaIngreso && num > 0) {
+    const ing = new Date(fechaIngreso + 'T00:00:00');
+    const gan = new Date(ing); gan.setFullYear(gan.getFullYear() + num);
+    const ven = new Date(gan); ven.setMonth(ven.getMonth() + 6);
+    fechaGanado = gan.toISOString().slice(0,10);
+    fechaVence  = ven.toISOString().slice(0,10);
+    vencido = new Date() > ven && dp > 0;
+  }
   return `<tr id="vp-row-${i}">
-    <td><input type="number" value="${p.num_periodo||0}" id="vp-${i}-n" style="width:70px"></td>
+    <td><input type="number" value="${num}" id="vp-${i}-n" style="width:70px" title="1 periodo = 1 año laborado"></td>
+    <td id="vp-${i}-fg" style="font-size:11px;color:var(--muted)">${fechaGanado}</td>
+    <td id="vp-${i}-fv" style="font-size:11px;color:${vencido?'var(--danger)':'var(--muted)'};font-weight:${vencido?'700':'400'}">${fechaVence}${vencido?' ⚠':''}</td>
     <td><input type="number" step="0.5" value="${dc}" id="vp-${i}-dc" style="width:90px" oninput="recalcPeriodo(${i})"></td>
     <td id="vp-${i}-dt" title="Días tomados por solicitudes registradas (no editable)" style="font-weight:600;color:var(--warning);background:#fef3c7;padding:6px 8px;border-radius:6px;text-align:center">${dt.toFixed(1)}</td>
     <td id="vp-${i}-dp" style="font-weight:700;color:${dp>0?'var(--success)':'var(--muted)'}">${dp.toFixed(1)}</td>
@@ -4345,10 +4361,11 @@ function recalcPeriodo(i) {
 function agregarPeriodoFila() {
   const tbody = $('vac-per-body');
   if (!tbody) return;
-  // Si está vacío, limpiamos el mensaje
   if (tbody.querySelector('.empty')) tbody.innerHTML = '';
   const i = tbody.querySelectorAll('tr').length;
-  tbody.insertAdjacentHTML('beforeend', periodoFila({num_periodo:i+1,dias_correspondientes:12,dias_tomados:0,notas:''}, i));
+  const fechaIng = window._vacEmp?.fecha_ingreso;
+  tbody.insertAdjacentHTML('beforeend',
+    periodoFila({num_periodo:i+1,dias_correspondientes:12,dias_tomados:0,notas:''}, i, fechaIng));
 }
 
 function quitarPeriodoFila(i) {
