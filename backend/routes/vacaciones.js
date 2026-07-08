@@ -151,23 +151,62 @@ router.post('/empleados/:id/generar-periodos', requireRol('admin', 'capturista')
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── GUARDAR PERIODOS (replace) ──
+// ── GUARDAR PERIODOS (upsert selectivo, preserva dias_tomados y solicitudes) ──
 router.put('/empleados/:id/periodos', requireRol('admin', 'capturista'), async (req, res) => {
   const client = await getClient();
   try {
     await client.query('BEGIN');
-    const { periodos } = req.body; // [{num_periodo, dias_correspondientes, dias_tomados, notas}]
-    await client.query(`DELETE FROM fac_vacaciones_periodos WHERE empleado_id=$1`, [req.params.id]);
+    const { periodos } = req.body; // [{num_periodo, dias_correspondientes, notas}]
+    const empId = req.params.id;
+
+    // Traer los periodos existentes
+    const existentes = await client.query(
+      `SELECT id, num_periodo, dias_tomados FROM fac_vacaciones_periodos WHERE empleado_id=$1`,
+      [empId]
+    );
+    const porNum = new Map(existentes.rows.map(r => [r.num_periodo, r]));
+    const numsEnviados = new Set();
+
     for (const p of (periodos || [])) {
-      await client.query(
-        `INSERT INTO fac_vacaciones_periodos(empleado_id, num_periodo, dias_correspondientes, dias_tomados, notas)
-         VALUES($1,$2,$3,$4,$5)`,
-        [req.params.id, parseInt(p.num_periodo) || 0,
-         parseFloat(p.dias_correspondientes) || 0,
-         parseFloat(p.dias_tomados) || 0,
-         p.notas || null]
-      );
+      const num = parseInt(p.num_periodo) || 0;
+      if (num <= 0) continue;
+      numsEnviados.add(num);
+      const dc  = parseFloat(p.dias_correspondientes) || 0;
+      const not = p.notas || null;
+      if (porNum.has(num)) {
+        // UPDATE — solo dias_correspondientes y notas (dias_tomados se preserva)
+        await client.query(
+          `UPDATE fac_vacaciones_periodos
+             SET dias_correspondientes=$1, notas=$2, actualizado_en=NOW()
+           WHERE id=$3`,
+          [dc, not, porNum.get(num).id]
+        );
+      } else {
+        // INSERT nuevo periodo (dias_tomados=0)
+        await client.query(
+          `INSERT INTO fac_vacaciones_periodos(empleado_id, num_periodo, dias_correspondientes, dias_tomados, notas)
+           VALUES($1,$2,$3,0,$4)`,
+          [empId, num, dc, not]
+        );
+      }
     }
+
+    // DELETE periodos que ya no se enviaron (solo si no tienen solicitudes asociadas)
+    for (const [num, per] of porNum) {
+      if (numsEnviados.has(num)) continue;
+      const uso = await client.query(
+        `SELECT COUNT(*)::int AS n FROM fac_vacaciones_solicitud_periodos WHERE periodo_id=$1`,
+        [per.id]
+      );
+      if (uso.rows[0].n > 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: `No se puede eliminar el periodo ${num}° porque tiene solicitudes vacacionales aplicadas. Elimina las solicitudes primero.`
+        });
+      }
+      await client.query(`DELETE FROM fac_vacaciones_periodos WHERE id=$1`, [per.id]);
+    }
+
     await client.query('COMMIT');
     res.json({ ok: true });
   } catch (e) {

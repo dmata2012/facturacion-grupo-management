@@ -4327,7 +4327,7 @@ function periodoFila(p, i) {
   return `<tr id="vp-row-${i}">
     <td><input type="number" value="${p.num_periodo||0}" id="vp-${i}-n" style="width:70px"></td>
     <td><input type="number" step="0.5" value="${dc}" id="vp-${i}-dc" style="width:90px" oninput="recalcPeriodo(${i})"></td>
-    <td><input type="number" step="0.5" value="${dt}" id="vp-${i}-dt" style="width:90px" oninput="recalcPeriodo(${i})"></td>
+    <td id="vp-${i}-dt" title="Días tomados por solicitudes registradas (no editable)" style="font-weight:600;color:var(--warning);background:#fef3c7;padding:6px 8px;border-radius:6px;text-align:center">${dt.toFixed(1)}</td>
     <td id="vp-${i}-dp" style="font-weight:700;color:${dp>0?'var(--success)':'var(--muted)'}">${dp.toFixed(1)}</td>
     <td><input value="${p.notas||''}" id="vp-${i}-notas" placeholder="Notas" style="width:140px"></td>
     <td><button class="btn bd bsm" onclick="quitarPeriodoFila(${i})">✕</button></td>
@@ -4336,7 +4336,8 @@ function periodoFila(p, i) {
 
 function recalcPeriodo(i) {
   const dc = parseFloat($(`vp-${i}-dc`)?.value)||0;
-  const dt = parseFloat($(`vp-${i}-dt`)?.value)||0;
+  const dtEl = $(`vp-${i}-dt`);
+  const dt = dtEl ? (parseFloat(dtEl.textContent)||0) : 0;
   const el = $(`vp-${i}-dp`);
   if (el) { el.textContent = (dc-dt).toFixed(1); el.style.color = (dc-dt)>0?'var(--success)':'var(--muted)'; }
 }
@@ -4372,7 +4373,7 @@ async function guardarPeriodosVac(empId) {
     periodos.push({
       num_periodo: parseInt(n.value)||0,
       dias_correspondientes: parseFloat($(`vp-${i}-dc`)?.value)||0,
-      dias_tomados: parseFloat($(`vp-${i}-dt`)?.value)||0,
+      // dias_tomados NO se envía: se preserva del valor derivado de solicitudes
       notas: $(`vp-${i}-notas`)?.value || ''
     });
   });
