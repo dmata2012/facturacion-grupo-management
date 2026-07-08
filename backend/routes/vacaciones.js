@@ -151,6 +151,25 @@ router.post('/empleados/:id/generar-periodos', requireRol('admin', 'capturista')
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── EDITAR dias_tomados de un periodo (requiere clave admin) ──
+router.put('/periodos/:id/dias-tomados', requireRol('admin'), async (req, res) => {
+  try {
+    const { dias_tomados, clave } = req.body;
+    const claveCorrecta = process.env.VAC_UNLOCK_KEY || 'admin2026';
+    if (!clave || String(clave).trim() !== claveCorrecta) {
+      return res.status(403).json({ error: 'Clave de administrador incorrecta.' });
+    }
+    const val = parseFloat(dias_tomados);
+    if (!(val >= 0)) return res.status(400).json({ error: 'Días tomados debe ser mayor o igual a 0.' });
+    const r = await query(
+      `UPDATE fac_vacaciones_periodos SET dias_tomados=$1, actualizado_en=NOW() WHERE id=$2 RETURNING id`,
+      [val, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Periodo no encontrado.' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── GUARDAR PERIODOS (upsert selectivo, preserva dias_tomados y solicitudes) ──
 router.put('/empleados/:id/periodos', requireRol('admin', 'capturista'), async (req, res) => {
   const client = await getClient();

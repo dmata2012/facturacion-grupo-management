@@ -4365,7 +4365,10 @@ function periodoFila(p, i, fechaIngreso) {
     <td id="vp-${i}-fg" style="font-size:11px;color:var(--muted)">${fechaGanado}</td>
     <td id="vp-${i}-fv" style="font-size:11px;color:${vencido?'var(--danger)':'var(--muted)'};font-weight:${vencido?'700':'400'}">${fechaVence}${vencido?' ⚠':''}</td>
     <td><input type="number" step="0.5" value="${dc}" id="vp-${i}-dc" style="width:90px" oninput="recalcPeriodo(${i})"></td>
-    <td id="vp-${i}-dt" title="Días tomados por solicitudes registradas (no editable)" style="font-weight:600;color:var(--warning);background:#fef3c7;padding:6px 8px;border-radius:6px;text-align:center">${dt.toFixed(1)}</td>
+    <td id="vp-${i}-dt-cell" style="font-weight:600;color:var(--warning);background:#fef3c7;padding:6px 8px;border-radius:6px;text-align:center;white-space:nowrap">
+      <span id="vp-${i}-dt" title="Días tomados por solicitudes registradas">${dt.toFixed(1)}</span>
+      ${canAdmin() && p.id ? `<button onclick="editarDiasTomadosVac(${p.id},${dt})" title="Editar con clave admin" style="margin-left:4px;background:transparent;border:none;cursor:pointer;font-size:10px;padding:0 2px;opacity:.6" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">🔒</button>`:''}
+    </td>
     <td id="vp-${i}-dp" style="font-weight:700;color:${dp>0?'var(--success)':'var(--muted)'}">${dp.toFixed(1)}</td>
     <td><input value="${p.notas||''}" id="vp-${i}-notas" placeholder="Notas" style="width:140px"></td>
     <td><button class="btn bd bsm" onclick="quitarPeriodoFila(${i})">✕</button></td>
@@ -4399,6 +4402,25 @@ async function generarPeriodosVac(empId) {
     const r = await api(`/vacaciones/empleados/${empId}/generar-periodos`, { method:'POST' });
     toast(r.mensaje || `${r.periodos_creados} periodos creados.`);
     openVacEmpleado(empId);
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function editarDiasTomadosVac(periodoId, actual) {
+  const clave = window.prompt('🔐 Ingresa la clave de administrador para desbloquear la edición:');
+  if (clave == null) return;
+  if (!clave.trim()) return toast('Clave requerida.', 'warn');
+  const nuevo = window.prompt(`✏️ Nuevos días tomados (actual: ${actual}):`, actual);
+  if (nuevo == null) return;
+  const val = parseFloat(String(nuevo).replace(/[^\d.]/g,''));
+  if (!(val >= 0)) return toast('Valor inválido.', 'warn');
+  try {
+    await api(`/vacaciones/periodos/${periodoId}/dias-tomados`, {
+      method: 'PUT',
+      body: JSON.stringify({ dias_tomados: val, clave: clave.trim() })
+    });
+    toast('✅ Días tomados actualizados.');
+    // Refrescar la vista del empleado
+    if (window._vacEmp?.id) openVacEmpleado(window._vacEmp.id);
   } catch(e) { toast(e.message, 'err'); }
 }
 
