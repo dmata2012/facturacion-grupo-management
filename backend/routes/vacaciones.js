@@ -221,7 +221,7 @@ router.post('/solicitudes', requireRol('admin', 'capturista'), async (req, res) 
   try {
     await client.query('BEGIN');
     const { empleado_id, fecha_solicitud, fecha_inicio, fecha_fin, dias_solicitados,
-            fecha_regreso, observaciones, estatus } = req.body;
+            fecha_regreso, observaciones, estatus, distribucion } = req.body;
     if (!empleado_id || !fecha_inicio || !fecha_fin)
       return res.status(400).json({ error: 'Empleado y fechas son requeridas.' });
     const dias = parseFloat(dias_solicitados) || 0;
@@ -230,20 +230,51 @@ router.post('/solicitudes', requireRol('admin', 'capturista'), async (req, res) 
       return res.status(400).json({ error: 'Los días solicitados deben ser mayor a 0.' });
     }
 
-    // Distribuir días FIFO entre periodos con pendientes
+    // Distribuir días — manual si viene distribucion, o FIFO automática
     const est = estatus || 'aprobada';
     let asignaciones = [];
     let resumen = null;
     if (est !== 'rechazada') {
-      const dist = await distribuirDiasFIFO(client, empleado_id, dias);
-      if (!dist.ok) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({
-          error: `No hay días suficientes en los periodos. Faltan ${dist.faltantes.toFixed(1)} día${dist.faltantes!==1?'s':''}. Genera más periodos o ajusta los días.`
-        });
+      if (Array.isArray(distribucion) && distribucion.length) {
+        // Distribución MANUAL: validar que cada periodo pertenece al empleado y tiene pendientes suficientes
+        let sumaSolicitada = 0;
+        for (const d of distribucion) {
+          const usar = parseFloat(d.dias) || 0;
+          if (usar <= 0) continue;
+          const p = await client.query(
+            `SELECT id, num_periodo, dias_correspondientes - dias_tomados AS pendientes
+             FROM fac_vacaciones_periodos WHERE id=$1 AND empleado_id=$2`,
+            [d.periodo_id, empleado_id]
+          );
+          if (!p.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: `Periodo ${d.periodo_id} no encontrado para este empleado.` });
+          }
+          const pend = parseFloat(p.rows[0].pendientes);
+          if (usar > pend + 0.01) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: `Periodo ${p.rows[0].num_periodo}° solo tiene ${pend.toFixed(1)} días pendientes, no se pueden aplicar ${usar}.` });
+          }
+          asignaciones.push({ periodo_id: p.rows[0].id, num_periodo: p.rows[0].num_periodo, dias: +usar.toFixed(2) });
+          sumaSolicitada += usar;
+        }
+        if (Math.abs(sumaSolicitada - dias) > 0.01) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: `La distribución (${sumaSolicitada.toFixed(1)}) no coincide con los días solicitados (${dias.toFixed(1)}).` });
+        }
+        resumen = asignaciones.map(a => `${a.dias} día${a.dias!==1?'s':''} del P°${a.num_periodo}`).join(', ');
+      } else {
+        // Distribución AUTOMÁTICA (FIFO)
+        const dist = await distribuirDiasFIFO(client, empleado_id, dias);
+        if (!dist.ok) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            error: `No hay días suficientes en los periodos. Faltan ${dist.faltantes.toFixed(1)} día${dist.faltantes!==1?'s':''}. Genera más periodos o ajusta los días.`
+          });
+        }
+        asignaciones = dist.asignaciones;
+        resumen = dist.resumen;
       }
-      asignaciones = dist.asignaciones;
-      resumen = dist.resumen;
     }
 
     // Insertar solicitud

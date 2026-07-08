@@ -4448,9 +4448,20 @@ async function openSolicitudVac(empIdPredef) {
         </div>
         <div class="fi"><label>Fecha regreso a laborar</label><input type="date" id="vs-regreso" onchange="ajustarFechaRegreso()"></div>
         <div class="fi full">
-          <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:8px;padding:10px 12px">
-            <div style="font-size:11px;font-weight:800;color:#1e40af;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📊 Distribución automática de días</div>
+          <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:8px;padding:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+              <div style="font-size:11px;font-weight:800;color:#1e40af;text-transform:uppercase;letter-spacing:.5px">📊 Distribución de días</div>
+              <div style="display:flex;gap:12px;font-size:11px">
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+                  <input type="radio" name="vs-modo" value="auto" checked onchange="cambiarModoDistribucion()"> Automático (FIFO)
+                </label>
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+                  <input type="radio" name="vs-modo" value="manual" onchange="cambiarModoDistribucion()"> Manual
+                </label>
+              </div>
+            </div>
             <div id="vs-dist-preview" style="font-size:12px;color:#1e3a8a">Los días se descuentan automáticamente de los periodos más antiguos primero (FIFO).</div>
+            <div id="vs-dist-manual" style="display:none;margin-top:8px"></div>
           </div>
         </div>
         <div class="fi full"><label>Observaciones</label>
@@ -4516,6 +4527,89 @@ function recalcDiasSol() {
   previewDistribucionVac();
 }
 
+// Cambia entre modo automático (FIFO) y manual
+async function cambiarModoDistribucion() {
+  const modo = document.querySelector('input[name="vs-modo"]:checked')?.value || 'auto';
+  const auto = $('vs-dist-preview'), man = $('vs-dist-manual');
+  if (modo === 'auto') {
+    if (auto) auto.style.display = '';
+    if (man)  man.style.display = 'none';
+    previewDistribucionVac();
+  } else {
+    if (auto) auto.style.display = 'none';
+    if (man)  man.style.display = 'block';
+    await renderDistribucionManual();
+  }
+}
+
+async function renderDistribucionManual() {
+  const empId = $('vs-emp')?.value;
+  const el = $('vs-dist-manual');
+  if (!el) return;
+  if (!empId) {
+    el.innerHTML = '<div style="font-size:12px;color:#1e3a8a">Selecciona un colaborador primero.</div>';
+    return;
+  }
+  try {
+    if (!window._vacEmpCache || window._vacEmpCache.id != empId) {
+      window._vacEmpCache = await api(`/vacaciones/empleados/${empId}`);
+    }
+    const periodos = (window._vacEmpCache.periodos || [])
+      .map(p => ({
+        id: p.id,
+        num: p.num_periodo,
+        pendientes: parseFloat(p.dias_correspondientes) - parseFloat(p.dias_tomados)
+      }))
+      .filter(p => p.pendientes > 0)
+      .sort((a,b) => a.num - b.num);
+
+    if (!periodos.length) {
+      el.innerHTML = '<div style="color:#dc2626;font-weight:700;font-size:12px">⚠ El colaborador no tiene periodos con días pendientes.</div>';
+      return;
+    }
+
+    el.innerHTML = `
+      <div style="font-size:11px;color:#1e3a8a;margin-bottom:6px">Ingresa cuántos días descontar de cada periodo:</div>
+      <div style="background:#fff;border-radius:6px;padding:8px 10px">
+        ${periodos.map(p => `
+          <div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #e5e7eb">
+            <div style="flex:1;font-size:12px;font-weight:700;color:#1e40af">P°${p.num}</div>
+            <div style="font-size:11px;color:var(--muted)">Pendientes: <strong style="color:#166534">${p.pendientes.toFixed(1)}</strong></div>
+            <input type="number" step="0.5" min="0" max="${p.pendientes}" value="0"
+              id="vs-man-${p.id}" data-periodo="${p.id}" data-num="${p.num}" data-pend="${p.pendientes}"
+              oninput="validarDistribucionManual()"
+              style="width:80px;text-align:right;font-size:13px;font-weight:600">
+          </div>`).join('')}
+        <div id="vs-man-total" style="padding:8px 0 4px;font-size:12px;font-weight:800;color:#1e3a8a;text-align:right"></div>
+        <div id="vs-man-msg" style="font-size:11px;font-weight:700;text-align:right;min-height:16px"></div>
+      </div>`;
+    validarDistribucionManual();
+  } catch(e) {
+    el.innerHTML = `<div style="color:#dc2626;font-size:12px">Error: ${e.message}</div>`;
+  }
+}
+
+function validarDistribucionManual() {
+  const inputs = document.querySelectorAll('[id^="vs-man-"][data-periodo]');
+  const solicitados = parseFloat($('vs-dias')?.value) || 0;
+  let suma = 0;
+  let excedidos = [];
+  inputs.forEach(inp => {
+    const v = parseFloat(inp.value) || 0;
+    const pend = parseFloat(inp.dataset.pend) || 0;
+    if (v > pend + 0.01) excedidos.push(`P°${inp.dataset.num}`);
+    suma += v;
+  });
+  const tot = $('vs-man-total'), msg = $('vs-man-msg');
+  if (tot) tot.innerHTML = `Total distribuido: <span style="color:${Math.abs(suma-solicitados)<0.01?'#16a34a':'#dc2626'}">${suma.toFixed(1)}</span> / ${solicitados.toFixed(1)} solicitados`;
+  if (msg) {
+    if (excedidos.length) msg.innerHTML = `<span style="color:#dc2626">⚠ ${excedidos.join(', ')} exceden pendientes</span>`;
+    else if (Math.abs(suma-solicitados) < 0.01) msg.innerHTML = '<span style="color:#16a34a">✓ Coincide con los días solicitados</span>';
+    else if (suma < solicitados) msg.innerHTML = `<span style="color:#d97706">Faltan ${(solicitados-suma).toFixed(1)} días por distribuir</span>`;
+    else msg.innerHTML = `<span style="color:#dc2626">Excede por ${(suma-solicitados).toFixed(1)} días</span>`;
+  }
+}
+
 // Muestra cómo se distribuirán los días entre periodos (FIFO)
 async function previewDistribucionVac() {
   const empId  = $('vs-emp')?.value;
@@ -4564,6 +4658,7 @@ async function previewDistribucionVac() {
 }
 
 async function guardarSolicitudVac() {
+  const modo = document.querySelector('input[name="vs-modo"]:checked')?.value || 'auto';
   const body = {
     empleado_id     : $('vs-emp').value,
     fecha_solicitud : $('vs-solicitud').value,
@@ -4574,6 +4669,26 @@ async function guardarSolicitudVac() {
     observaciones   : $('vs-obs').value,
     estatus         : $('vs-est').value
   };
+  // Si el modo es manual, incluir la distribución explícita
+  if (modo === 'manual') {
+    const distribucion = [];
+    let suma = 0;
+    document.querySelectorAll('[id^="vs-man-"][data-periodo]').forEach(inp => {
+      const dias = parseFloat(inp.value) || 0;
+      if (dias > 0) {
+        distribucion.push({ periodo_id: parseInt(inp.dataset.periodo), dias });
+        suma += dias;
+      }
+    });
+    const solicitados = parseFloat(body.dias_solicitados) || 0;
+    if (Math.abs(suma - solicitados) > 0.01) {
+      return toast(`La distribución (${suma.toFixed(1)} días) no coincide con los días solicitados (${solicitados.toFixed(1)}).`, 'warn');
+    }
+    if (!distribucion.length) {
+      return toast('Ingresa al menos un día en algún periodo.', 'warn');
+    }
+    body.distribucion = distribucion;
+  }
   if (!body.empleado_id || !body.fecha_inicio || !body.fecha_fin)
     return toast('Colaborador y fechas son requeridos.', 'warn');
   try {
