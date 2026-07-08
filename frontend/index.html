@@ -4433,7 +4433,7 @@ async function openSolicitudVac(empIdPredef) {
       <h4>Nueva solicitud de vacaciones</h4>
       <div class="fg">
         <div class="fi"><label>Colaborador *</label>
-          <select id="vs-emp" onchange="previewDistribucionVac()">
+          <select id="vs-emp" onchange="cambiarModoDistribucion()">
             <option value="">— Seleccionar —</option>
             ${emps.map(e=>`<option value="${e.id}" ${empIdPredef==e.id?'selected':''}>${e.nombre} (${e.puesto||'sin puesto'}) — Pendientes: ${parseFloat(e.dias_pendientes).toFixed(1)}</option>`).join('')}
           </select>
@@ -4443,7 +4443,7 @@ async function openSolicitudVac(empIdPredef) {
         <div class="fi"><label>Fecha fin *</label><input type="date" id="vs-fin" onchange="recalcDiasSol()"></div>
         <div class="fi">
           <label>Días solicitados</label>
-          <input type="number" step="0.5" id="vs-dias" value="0" oninput="previewDistribucionVac()">
+          <input type="number" step="0.5" id="vs-dias" value="0" oninput="onCambioDias()">
           <div id="vs-domingos-info" style="font-size:10.5px;color:var(--muted);margin-top:3px"></div>
         </div>
         <div class="fi"><label>Fecha regreso a laborar</label><input type="date" id="vs-regreso" onchange="ajustarFechaRegreso()"></div>
@@ -4453,15 +4453,15 @@ async function openSolicitudVac(empIdPredef) {
               <div style="font-size:11px;font-weight:800;color:#1e40af;text-transform:uppercase;letter-spacing:.5px">📊 Distribución de días</div>
               <div style="display:flex;gap:12px;font-size:11px">
                 <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
-                  <input type="radio" name="vs-modo" value="auto" checked onchange="cambiarModoDistribucion()"> Automático (FIFO)
+                  <input type="radio" name="vs-modo" value="manual" checked onchange="cambiarModoDistribucion()"> Manual
                 </label>
                 <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
-                  <input type="radio" name="vs-modo" value="manual" onchange="cambiarModoDistribucion()"> Manual
+                  <input type="radio" name="vs-modo" value="auto" onchange="cambiarModoDistribucion()"> Automático (FIFO)
                 </label>
               </div>
             </div>
-            <div id="vs-dist-preview" style="font-size:12px;color:#1e3a8a">Los días se descuentan automáticamente de los periodos más antiguos primero (FIFO).</div>
-            <div id="vs-dist-manual" style="display:none;margin-top:8px"></div>
+            <div id="vs-dist-preview" style="display:none;font-size:12px;color:#1e3a8a">Los días se descuentan automáticamente de los periodos más antiguos primero (FIFO).</div>
+            <div id="vs-dist-manual" style="margin-top:8px"></div>
           </div>
         </div>
         <div class="fi full"><label>Observaciones</label>
@@ -4479,9 +4479,9 @@ async function openSolicitudVac(empIdPredef) {
         <button class="btn bo" onclick="closeModal('modal-vac-sol')">Cancelar</button>
         <button class="btn bs" onclick="guardarSolicitudVac()">💾 Guardar</button>
       </div>`;
-    // Limpiar caché y disparar preview si hay empleado predefinido
+    // Limpiar caché y disparar render manual si hay empleado predefinido
     window._vacEmpCache = null;
-    if (empIdPredef) previewDistribucionVac();
+    if (empIdPredef) renderDistribucionManual();
   } catch(e) { $('modal-vac-sol-body').innerHTML = `<p class="empty">${e.message}</p>`; }
 }
 
@@ -4527,6 +4527,18 @@ function recalcDiasSol() {
   previewDistribucionVac();
 }
 
+// Se llama cuando cambian los días solicitados — no re-renderiza tabla manual, solo revalida
+function onCambioDias() {
+  const modo = document.querySelector('input[name="vs-modo"]:checked')?.value || 'manual';
+  if (modo === 'auto') {
+    previewDistribucionVac();
+  } else if ($('vs-man-total')) {
+    validarDistribucionManual();
+  } else {
+    renderDistribucionManual();
+  }
+}
+
 // Cambia entre modo automático (FIFO) y manual
 async function cambiarModoDistribucion() {
   const modo = document.querySelector('input[name="vs-modo"]:checked')?.value || 'auto';
@@ -4569,19 +4581,36 @@ async function renderDistribucionManual() {
     }
 
     el.innerHTML = `
-      <div style="font-size:11px;color:#1e3a8a;margin-bottom:6px">Ingresa cuántos días descontar de cada periodo:</div>
-      <div style="background:#fff;border-radius:6px;padding:8px 10px">
-        ${periodos.map(p => `
-          <div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #e5e7eb">
-            <div style="flex:1;font-size:12px;font-weight:700;color:#1e40af">P°${p.num}</div>
-            <div style="font-size:11px;color:var(--muted)">Pendientes: <strong style="color:#166534">${p.pendientes.toFixed(1)}</strong></div>
-            <input type="number" step="0.5" min="0" max="${p.pendientes}" value="0"
-              id="vs-man-${p.id}" data-periodo="${p.id}" data-num="${p.num}" data-pend="${p.pendientes}"
-              oninput="validarDistribucionManual()"
-              style="width:80px;text-align:right;font-size:13px;font-weight:600">
-          </div>`).join('')}
-        <div id="vs-man-total" style="padding:8px 0 4px;font-size:12px;font-weight:800;color:#1e3a8a;text-align:right"></div>
-        <div id="vs-man-msg" style="font-size:11px;font-weight:700;text-align:right;min-height:16px"></div>
+      <div style="font-size:11px;color:#1e3a8a;margin-bottom:6px">Elige de qué periodo(s) descontar los días. El sistema muestra cuántos quedarán en cada uno:</div>
+      <div style="background:#fff;border-radius:8px;padding:4px">
+        <table style="width:100%;font-size:12px">
+          <thead>
+            <tr style="background:#f8fafc">
+              <th style="text-align:left;padding:8px;font-size:10px;font-weight:800;color:#1e40af;text-transform:uppercase;letter-spacing:.5px">Periodo</th>
+              <th style="text-align:center;padding:8px;font-size:10px;font-weight:800;color:#166534;text-transform:uppercase;letter-spacing:.5px">Días pendientes</th>
+              <th style="text-align:center;padding:8px;font-size:10px;font-weight:800;color:#b91c1c;text-transform:uppercase;letter-spacing:.5px">Descontar</th>
+              <th style="text-align:center;padding:8px;font-size:10px;font-weight:800;color:#6b21a8;text-transform:uppercase;letter-spacing:.5px">Quedarán</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${periodos.map(p => `
+              <tr id="vs-row-${p.id}" style="border-bottom:1px solid #e5e7eb">
+                <td style="padding:8px;font-weight:800;color:#1e40af;font-size:13px">P°${p.num}</td>
+                <td style="text-align:center;padding:8px;font-weight:700;color:#166534">${p.pendientes.toFixed(1)}</td>
+                <td style="text-align:center;padding:8px">
+                  <input type="number" step="0.5" min="0" max="${p.pendientes}" value="0"
+                    id="vs-man-${p.id}" data-periodo="${p.id}" data-num="${p.num}" data-pend="${p.pendientes}"
+                    oninput="validarDistribucionManual()"
+                    style="width:80px;text-align:right;font-size:13px;font-weight:800;padding:6px 8px;border:1.5px solid #fca5a5;border-radius:6px;background:#fff;color:#991b1b">
+                </td>
+                <td id="vs-queda-${p.id}" style="text-align:center;padding:8px;font-weight:800;font-size:13px;color:#6b21a8">${p.pendientes.toFixed(1)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+        <div style="padding:10px;border-top:2px solid #bfdbfe;background:#f0f9ff;border-radius:0 0 6px 6px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div id="vs-man-total" style="font-size:12px;font-weight:800;color:#1e3a8a"></div>
+          <div id="vs-man-msg" style="font-size:12px;font-weight:800;min-height:16px"></div>
+        </div>
       </div>`;
     validarDistribucionManual();
   } catch(e) {
@@ -4597,16 +4626,29 @@ function validarDistribucionManual() {
   inputs.forEach(inp => {
     const v = parseFloat(inp.value) || 0;
     const pend = parseFloat(inp.dataset.pend) || 0;
-    if (v > pend + 0.01) excedidos.push(`P°${inp.dataset.num}`);
+    const num = inp.dataset.num;
+    const periodoId = inp.dataset.periodo;
+    // Actualizar "Quedarán" en vivo
+    const queda = pend - v;
+    const qEl = $(`vs-queda-${periodoId}`);
+    if (qEl) {
+      qEl.textContent = queda.toFixed(1);
+      if (v > pend + 0.01)     { qEl.style.color = '#dc2626'; qEl.textContent += ' ⚠'; }
+      else if (queda === 0)    { qEl.style.color = '#166534'; qEl.textContent = '0.0 ✓'; }
+      else if (v > 0)          { qEl.style.color = '#6b21a8'; }
+      else                     { qEl.style.color = '#6b21a8'; }
+    }
+    if (v > pend + 0.01) excedidos.push(`P°${num}`);
     suma += v;
   });
   const tot = $('vs-man-total'), msg = $('vs-man-msg');
-  if (tot) tot.innerHTML = `Total distribuido: <span style="color:${Math.abs(suma-solicitados)<0.01?'#16a34a':'#dc2626'}">${suma.toFixed(1)}</span> / ${solicitados.toFixed(1)} solicitados`;
+  if (tot) tot.innerHTML = `Total distribuido: <span style="color:${Math.abs(suma-solicitados)<0.01?'#16a34a':'#dc2626'};font-size:14px">${suma.toFixed(1)}</span> / ${solicitados.toFixed(1)} solicitados`;
   if (msg) {
     if (excedidos.length) msg.innerHTML = `<span style="color:#dc2626">⚠ ${excedidos.join(', ')} exceden pendientes</span>`;
-    else if (Math.abs(suma-solicitados) < 0.01) msg.innerHTML = '<span style="color:#16a34a">✓ Coincide con los días solicitados</span>';
-    else if (suma < solicitados) msg.innerHTML = `<span style="color:#d97706">Faltan ${(solicitados-suma).toFixed(1)} días por distribuir</span>`;
-    else msg.innerHTML = `<span style="color:#dc2626">Excede por ${(suma-solicitados).toFixed(1)} días</span>`;
+    else if (Math.abs(suma-solicitados) < 0.01 && suma > 0) msg.innerHTML = '<span style="color:#16a34a">✓ Coincide con los días solicitados</span>';
+    else if (suma < solicitados) msg.innerHTML = `<span style="color:#d97706">Faltan ${(solicitados-suma).toFixed(1)} día${(solicitados-suma)!==1?'s':''} por distribuir</span>`;
+    else if (suma > solicitados) msg.innerHTML = `<span style="color:#dc2626">Excede por ${(suma-solicitados).toFixed(1)} días</span>`;
+    else msg.innerHTML = '';
   }
 }
 
