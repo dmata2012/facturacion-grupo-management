@@ -4832,7 +4832,15 @@ async function imprimirSolicitudVac(id) {
     const totTom = periodos.reduce((a,p)=>a+parseFloat(p.dias_tomados||0),0);
     const totPend = totDias - totTom;
     const fmtDateLg = d => d ? new Date(d).toLocaleDateString('es-MX',{year:'numeric',month:'long',day:'numeric'}) : '—';
-    const fmtDateRet = d => d ? new Date(d).toLocaleDateString('es-MX',{weekday:'long',year:'numeric',month:'long',day:'numeric'}) : '—';
+    const fmtDateRet = d => {
+      if (!d) return '—';
+      // Normalizar y avanzar automáticamente si cae en domingo (descanso obligatorio)
+      const iso = String(d).slice(0,10);
+      const dt = new Date(iso + 'T00:00:00');
+      if (isNaN(dt.getTime())) return '—';
+      if (dt.getDay() === 0) dt.setDate(dt.getDate() + 1);
+      return dt.toLocaleDateString('es-MX', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+    };
 
     $('modal-vac-print-body').innerHTML = `
       <div id="print-vac" style="font-family:Arial,sans-serif;padding:14px;background:#fff;color:#000">
