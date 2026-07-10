@@ -4881,7 +4881,10 @@ async function imprimirSolicitudVac(id) {
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
           <table style="border-collapse:collapse;font-size:12px;width:100%">
-            <thead><tr><th colspan="2" style="border:1px solid #888;padding:4px;background:#e5e7eb">PERIODO VACACIONAL</th></tr></thead>
+            <thead><tr>
+              <th style="border:1px solid #888;padding:4px;background:#e5e7eb;text-align:left">PERIODO VACACIONAL</th>
+              <th style="border:1px solid #888;padding:4px;background:#e5e7eb;text-align:center">DÍAS (TOMADOS)</th>
+            </tr></thead>
             <tbody>${periodos.map(p=>`<tr>
               <td style="border:1px solid #888;padding:3px 6px">${p.num_periodo}° Periodo (${parseFloat(p.dias_correspondientes).toFixed(0)} días)</td>
               <td style="border:1px solid #888;padding:3px 6px;text-align:right">${parseFloat(p.dias_tomados).toFixed(0)}</td>
