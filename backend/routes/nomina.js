@@ -14,11 +14,13 @@ router.get('/empleados', async (req, res) => {
 
 router.post('/empleados', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { nombre, puesto, departamento, salario_base, fecha_ingreso, notas } = req.body;
+    const { numero_colaborador, nombre, puesto, departamento, salario_base, fecha_ingreso, notas } = req.body;
     if (!nombre) return res.status(400).json({ error: 'Nombre requerido.' });
     const r = await query(
-      `INSERT INTO fac_empleados(nombre,puesto,departamento,salario_base,fecha_ingreso,notas) VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [nombre, puesto, departamento, parseFloat(salario_base) || 0, fecha_ingreso || null, notas]
+      `INSERT INTO fac_empleados(numero_colaborador,nombre,puesto,departamento,salario_base,fecha_ingreso,notas)
+       VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [(numero_colaborador||'').toString().trim() || null,
+       nombre, puesto, departamento, parseFloat(salario_base) || 0, fecha_ingreso || null, notas]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -26,10 +28,12 @@ router.post('/empleados', requireRol('admin', 'capturista'), async (req, res) =>
 
 router.put('/empleados/:id', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { nombre, puesto, departamento, salario_base, fecha_ingreso, activo, notas } = req.body;
+    const { numero_colaborador, nombre, puesto, departamento, salario_base, fecha_ingreso, activo, notas } = req.body;
     await query(
-      `UPDATE fac_empleados SET nombre=$1,puesto=$2,departamento=$3,salario_base=$4,fecha_ingreso=$5,activo=$6,notas=$7,actualizado_en=NOW() WHERE id=$8`,
-      [nombre, puesto, departamento, parseFloat(salario_base) || 0, fecha_ingreso || null, activo, notas, req.params.id]
+      `UPDATE fac_empleados SET numero_colaborador=$1,nombre=$2,puesto=$3,departamento=$4,salario_base=$5,fecha_ingreso=$6,activo=$7,notas=$8,actualizado_en=NOW()
+       WHERE id=$9`,
+      [(numero_colaborador||'').toString().trim() || null,
+       nombre, puesto, departamento, parseFloat(salario_base) || 0, fecha_ingreso || null, activo, notas, req.params.id]
     );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }

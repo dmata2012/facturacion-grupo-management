@@ -2992,6 +2992,7 @@ async function loadEmpleados() {
 function openEmpleado(id=null) {
   $('modal-empleado-body').innerHTML = `
   <h4>${id?'Editar':'Nuevo'} Empleado</h4>
+  <div class="fi" style="margin-bottom:10px"><label>N° Colaborador</label><input id="em-num" placeholder="Ej: 001, EMP-105"></div>
   <div class="fi" style="margin-bottom:10px"><label>Nombre *</label><input id="em-nombre"></div>
   <div class="fi" style="margin-bottom:10px"><label>Puesto</label><input id="em-puesto"></div>
   <div class="fi" style="margin-bottom:10px"><label>Departamento</label><input id="em-depto"></div>
@@ -3002,6 +3003,7 @@ function openEmpleado(id=null) {
     <button class="btn bs" onclick="saveEmpleado(${id||null})">Guardar</button>
   </div>`;
   if(id) api(`/nomina/empleados`).then(d=>{ const e=d.find(x=>x.id==id); if(!e)return;
+    $('em-num').value=e.numero_colaborador||'';
     $('em-nombre').value=e.nombre; $('em-puesto').value=e.puesto||'';
     $('em-depto').value=e.departamento||''; $('em-sal').value=e.salario_base;
     $('em-ingreso').value=e.fecha_ingreso?fmtDate(e.fecha_ingreso):'';
@@ -3010,7 +3012,12 @@ function openEmpleado(id=null) {
 }
 
 async function saveEmpleado(id) {
-  const body = { nombre:$('em-nombre').value, puesto:$('em-puesto').value, departamento:$('em-depto').value, salario_base:$('em-sal').value, fecha_ingreso:$('em-ingreso').value, activo:true };
+  const body = {
+    numero_colaborador: $('em-num').value,
+    nombre:$('em-nombre').value, puesto:$('em-puesto').value,
+    departamento:$('em-depto').value, salario_base:$('em-sal').value,
+    fecha_ingreso:$('em-ingreso').value, activo:true
+  };
   if (!body.nombre) return toast('Nombre requerido.','err');
   try {
     if(id) await api(`/nomina/empleados/${id}`,{method:'PUT',body:JSON.stringify(body)});
@@ -4285,7 +4292,7 @@ function renderVacEmpleado() {
   $('modal-vac-emp-body').innerHTML = `
     <h4>${e.nombre}</h4>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-size:12px;margin-bottom:14px;padding:10px;background:var(--bg-alt);border-radius:8px">
-      <div><strong>N° Colaborador:</strong> ${e.id}</div>
+      <div><strong>N° Colaborador:</strong> ${e.numero_colaborador || e.id}</div>
       <div><strong>Puesto:</strong> ${e.puesto||'—'}</div>
       <div><strong>Departamento:</strong> ${e.departamento||'—'}</div>
       <div><strong>Fecha ingreso:</strong> ${e.fecha_ingreso?fmtDate(e.fecha_ingreso):'—'}</div>
@@ -4865,7 +4872,7 @@ async function imprimirSolicitudVac(id) {
         <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">
           <tr>
             <td style="border:1px solid #888;padding:4px;font-weight:700;background:#f3f4f6">N° COLABORADOR</td>
-            <td style="border:1px solid #888;padding:4px">${emp.id}</td>
+            <td style="border:1px solid #888;padding:4px">${emp.numero_colaborador || emp.id}</td>
             <td style="border:1px solid #888;padding:4px;font-weight:700;background:#f3f4f6">NOMBRE COMPLETO</td>
             <td style="border:1px solid #888;padding:4px">${emp.nombre}</td>
           </tr>
