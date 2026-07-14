@@ -543,6 +543,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-cc-informe"><div class="modal" style="width:min(1000px,96vw)" id="modal-cc-informe-body"></div></div>
 <div class="overlay" id="modal-cambiar-clave"><div class="modal modal-sm" id="modal-cambiar-clave-body"></div></div>
 <div class="overlay" id="modal-vac-editar-tomados"><div class="modal modal-sm" id="modal-vac-editar-tomados-body"></div></div>
+<div class="overlay" id="modal-cc-permisos"><div class="modal" id="modal-cc-permisos-body"></div></div>
 
 <script>
 // ══ CONFIG ══════════════════════════════════════
@@ -5172,6 +5173,7 @@ function renderDetalleFondoCC() {
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${canWrite()?`<button class="btn bo bsm" onclick="openFondoCC(${f.id})">✏️ Editar fondo</button>`:''}
+        ${canAdmin()?`<button class="btn bo bsm" onclick="openPermisosCC(${f.id})">👥 Permisos</button>`:''}
         <button class="btn bg bsm" onclick="openInformeReembolsoCC()">📋 Generar informe</button>
         ${canWrite()?`<button class="btn bsuc bsm" onclick="openMovCC('entrada')">+ Entrada de efectivo</button>`:''}
         ${canWrite()?`<button class="btn bd bsm" onclick="openMovCC('salida')">− Gasto / Salida</button>`:''}
@@ -5487,6 +5489,79 @@ function enviarInformeEmail() {
   if (!txt) return;
   const subj = `Solicitud de reembolso - Caja chica ${f.nombre}`;
   window.location.href = `mailto:?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(txt)}`;
+}
+
+async function openPermisosCC(fondoId) {
+  $('modal-cc-permisos-body').innerHTML = '<h4>👥 Permisos de acceso</h4><p class="empty">Cargando...</p>';
+  openModal('modal-cc-permisos');
+  try {
+    const [asignados, disponibles] = await Promise.all([
+      api(`/tesoreria/fondos/${fondoId}/permisos`),
+      api('/tesoreria/usuarios-disponibles')
+    ]);
+    const asignadosSet = new Set(asignados.map(u => u.usuario_id));
+    const f = window._ccFondoActual;
+    $('modal-cc-permisos-body').innerHTML = `
+      <h4>👥 Permisos de acceso — ${f?.nombre || 'Caja Chica'}</h4>
+      <div class="ibox info" style="margin-bottom:12px;font-size:12px">
+        Marca los usuarios que podrán <strong>ver y operar</strong> esta caja chica.
+        Los administradores siempre tienen acceso a todas.
+      </div>
+      <input id="ccp-buscar" placeholder="🔍 Buscar usuario..." style="width:100%;margin-bottom:10px" oninput="filtrarUsuariosCCP()">
+      ${disponibles.length ? `
+      <div style="max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+        ${disponibles.map(u => `
+        <label class="ccp-row" data-nombre="${(u.nombre||'').toLowerCase()}" data-email="${(u.email||'').toLowerCase()}"
+               style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s"
+               onmouseover="this.style.background='var(--bg-alt)'" onmouseout="this.style.background=''">
+          <input type="checkbox" id="ccp-u-${u.id}" ${asignadosSet.has(u.id)?'checked':''} style="width:18px;height:18px;cursor:pointer">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:700;font-size:13px;color:var(--dark)">${u.nombre}</div>
+            <div style="font-size:11px;color:var(--muted)">${u.email} · <span style="text-transform:uppercase;letter-spacing:.5px;font-weight:700">${u.rol}</span></div>
+          </div>
+        </label>`).join('')}
+      </div>` : '<p class="empty">No hay usuarios disponibles para asignar (solo admins registrados).</p>'}
+      <div style="margin-top:10px;font-size:11px;color:var(--muted)">
+        Actualmente con acceso: <strong id="ccp-count" style="color:var(--dark)">${asignados.length}</strong>
+      </div>
+      <div class="form-actions" style="margin-top:14px">
+        <button class="btn bo" onclick="closeModal('modal-cc-permisos')">Cancelar</button>
+        <button class="btn bs" onclick="guardarPermisosCC(${fondoId})">💾 Guardar permisos</button>
+      </div>`;
+    // Actualizar contador cuando cambian los checkboxes
+    document.querySelectorAll('[id^="ccp-u-"]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const n = document.querySelectorAll('[id^="ccp-u-"]:checked').length;
+        if ($('ccp-count')) $('ccp-count').textContent = n;
+      });
+    });
+  } catch(e) {
+    $('modal-cc-permisos-body').innerHTML = `<p class="empty">${e.message}</p>`;
+  }
+}
+
+function filtrarUsuariosCCP() {
+  const q = ($('ccp-buscar')?.value || '').toLowerCase().trim();
+  document.querySelectorAll('.ccp-row').forEach(row => {
+    if (!q) { row.style.display = 'flex'; return; }
+    const match = (row.dataset.nombre||'').includes(q) || (row.dataset.email||'').includes(q);
+    row.style.display = match ? 'flex' : 'none';
+  });
+}
+
+async function guardarPermisosCC(fondoId) {
+  const ids = [...document.querySelectorAll('[id^="ccp-u-"]:checked')]
+    .map(cb => parseInt(cb.id.replace('ccp-u-','')))
+    .filter(n => !isNaN(n));
+  try {
+    await api(`/tesoreria/fondos/${fondoId}/permisos`, {
+      method: 'PUT',
+      body: JSON.stringify({ usuario_ids: ids })
+    });
+    toast(`✅ Permisos actualizados — ${ids.length} usuario${ids.length!==1?'s':''} con acceso.`);
+    closeModal('modal-cc-permisos');
+    loadFondosCC();
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 async function editarFondoFijoCC(fondoId, actual) {

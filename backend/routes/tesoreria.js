@@ -4,6 +4,16 @@ const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
 
+// Helper: verificar si usuario tiene acceso a un fondo (admin = siempre; otros = permiso explícito)
+async function tienePermisoFondo(fondoId, usuario) {
+  if (usuario.rol === 'admin') return true;
+  const r = await query(
+    `SELECT 1 FROM fac_caja_chica_permisos WHERE fondo_id=$1 AND usuario_id=$2 LIMIT 1`,
+    [fondoId, usuario.id]
+  );
+  return r.rows.length > 0;
+}
+
 // ══ FONDOS DE CAJA CHICA ══════════════════════════════════
 router.get('/fondos', async (req, res) => {
   try {
@@ -11,6 +21,12 @@ router.get('/fondos', async (req, res) => {
     let where = 'WHERE 1=1';
     const params = [];
     if (activo !== undefined) { params.push(activo === 'true'); where += ` AND f.activo=$${params.length}`; }
+
+    // Si NO es admin, filtrar solo fondos donde tenga permiso
+    if (req.usuario.rol !== 'admin') {
+      params.push(req.usuario.id);
+      where += ` AND EXISTS (SELECT 1 FROM fac_caja_chica_permisos p WHERE p.fondo_id=f.id AND p.usuario_id=$${params.length})`;
+    }
 
     const r = await query(`
       SELECT f.*,
@@ -34,8 +50,53 @@ router.get('/fondos', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── LISTAR PERMISOS DE UN FONDO (solo admin) ──
+router.get('/fondos/:id/permisos', requireRol('admin'), async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT p.usuario_id, u.nombre, u.email, u.rol
+      FROM fac_caja_chica_permisos p
+      JOIN fac_usuarios u ON u.id = p.usuario_id
+      WHERE p.fondo_id=$1
+      ORDER BY u.nombre
+    `, [req.params.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── ACTUALIZAR PERMISOS DE UN FONDO (solo admin) ──
+router.put('/fondos/:id/permisos', requireRol('admin'), async (req, res) => {
+  try {
+    const { usuario_ids } = req.body;
+    if (!Array.isArray(usuario_ids)) return res.status(400).json({ error: 'usuario_ids debe ser un arreglo.' });
+    await query(`DELETE FROM fac_caja_chica_permisos WHERE fondo_id=$1`, [req.params.id]);
+    for (const uid of usuario_ids) {
+      await query(
+        `INSERT INTO fac_caja_chica_permisos(fondo_id, usuario_id) VALUES($1,$2) ON CONFLICT DO NOTHING`,
+        [req.params.id, uid]
+      );
+    }
+    res.json({ ok: true, count: usuario_ids.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── USUARIOS DISPONIBLES PARA ASIGNAR (solo admin) ──
+router.get('/usuarios-disponibles', requireRol('admin'), async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT id, nombre, email, rol FROM fac_usuarios
+      WHERE activo=TRUE AND rol != 'admin'
+      ORDER BY nombre
+    `);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/fondos/:id', async (req, res) => {
   try {
+    if (!(await tienePermisoFondo(req.params.id, req.usuario))) {
+      return res.status(403).json({ error: 'No tienes acceso a esta caja chica.' });
+    }
     const r = await query(`SELECT * FROM fac_caja_chica_fondos WHERE id=$1`, [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Fondo no encontrado.' });
 
@@ -142,6 +203,11 @@ router.post('/movimientos', requireRol('admin', 'capturista', 'tesoreria'), asyn
     const m = parseFloat(monto);
     if (!(m > 0)) return res.status(400).json({ error: 'El monto debe ser mayor a 0.' });
 
+    // Verificar permiso de acceso al fondo
+    if (!(await tienePermisoFondo(fondo_id, req.usuario))) {
+      return res.status(403).json({ error: 'No tienes acceso a esta caja chica.' });
+    }
+
     // Validar clave del responsable
     const chk = await validarClaveFondo(fondo_id, clave, req.usuario);
     if (!chk.ok) return res.status(chk.code||403).json({ error: chk.error });
@@ -189,6 +255,11 @@ router.put('/movimientos/:id', requireRol('admin', 'capturista', 'tesoreria'), a
     if (!cur.rows.length) return res.status(404).json({ error: 'Movimiento no encontrado.' });
     const { fondo_id, tipo } = cur.rows[0];
 
+    // Verificar permiso de acceso al fondo
+    if (!(await tienePermisoFondo(fondo_id, req.usuario))) {
+      return res.status(403).json({ error: 'No tienes acceso a esta caja chica.' });
+    }
+
     // Validar clave del responsable
     const chk = await validarClaveFondo(fondo_id, clave, req.usuario);
     if (!chk.ok) return res.status(chk.code||403).json({ error: chk.error });
@@ -225,6 +296,9 @@ router.delete('/movimientos/:id', requireRol('admin', 'capturista', 'tesoreria')
     const clave = req.query.clave || req.body?.clave;
     const cur = await query(`SELECT fondo_id FROM fac_caja_chica_movimientos WHERE id=$1`, [req.params.id]);
     if (!cur.rows.length) return res.status(404).json({ error: 'Movimiento no encontrado.' });
+    if (!(await tienePermisoFondo(cur.rows[0].fondo_id, req.usuario))) {
+      return res.status(403).json({ error: 'No tienes acceso a esta caja chica.' });
+    }
     const chk = await validarClaveFondo(cur.rows[0].fondo_id, clave, req.usuario);
     if (!chk.ok) return res.status(chk.code||403).json({ error: chk.error });
     await query(`DELETE FROM fac_caja_chica_movimientos WHERE id=$1`, [req.params.id]);
@@ -235,6 +309,12 @@ router.delete('/movimientos/:id', requireRol('admin', 'capturista', 'tesoreria')
 // ══ KPIs GLOBALES ═════════════════════════════════════════
 router.get('/kpi', async (req, res) => {
   try {
+    const params = [];
+    let permFilter = '';
+    if (req.usuario.rol !== 'admin') {
+      params.push(req.usuario.id);
+      permFilter = ` AND EXISTS (SELECT 1 FROM fac_caja_chica_permisos p WHERE p.fondo_id=f.id AND p.usuario_id=$${params.length})`;
+    }
     const r = await query(`
       SELECT
         COUNT(*)::int AS fondos_activos,
@@ -248,8 +328,8 @@ router.get('/kpi', async (req, res) => {
           COALESCE((SELECT SUM(monto) FROM fac_caja_chica_movimientos WHERE fondo_id=f.id AND tipo='salida'
             AND fecha >= DATE_TRUNC('month', CURRENT_DATE)),0)
         ),0) AS gastos_mes
-      FROM fac_caja_chica_fondos f WHERE f.activo = TRUE
-    `);
+      FROM fac_caja_chica_fondos f WHERE f.activo = TRUE ${permFilter}
+    `, params);
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
