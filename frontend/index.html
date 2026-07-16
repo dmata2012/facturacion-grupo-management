@@ -5016,7 +5016,7 @@ async function loadFondosCC() {
              onmouseout="this.style.transform='';this.style.boxShadow='0 2px 12px rgba(0,0,0,.04)'">
           <div style="background:${grad};color:#fff;padding:14px 16px;position:relative;min-height:80px">
             ${f.icono ? (
-              /^https?:\/\//.test(f.icono)
+              /^(https?:|data:)/.test(f.icono)
                 ? `<img src="${f.icono}" alt="" style="position:absolute;top:10px;right:12px;width:56px;height:56px;object-fit:cover;border-radius:50%;border:2.5px solid rgba(255,255,255,.9);background:#fff;box-shadow:0 3px 10px rgba(0,0,0,.25)">`
                 : `<div style="position:absolute;top:10px;right:12px;width:56px;height:56px;display:flex;align-items:center;justify-content:center;font-size:32px;background:rgba(255,255,255,.18);border-radius:50%;border:2.5px solid rgba(255,255,255,.5);backdrop-filter:blur(4px)">${f.icono}</div>`
             ) : ''}
