@@ -5175,6 +5175,7 @@ function renderDetalleFondoCC() {
         ${canWrite()?`<button class="btn bo bsm" onclick="openFondoCC(${f.id})">✏️ Editar fondo</button>`:''}
         ${canAdmin()?`<button class="btn bo bsm" onclick="openPermisosCC(${f.id})">👥 Permisos</button>`:''}
         <button class="btn bg bsm" onclick="openInformeReembolsoCC()">📋 Generar informe</button>
+        ${canAdmin()?`<button class="btn bd bsm" onclick="eliminarCajaCC(${f.id},'${(f.nombre||'').replace(/'/g,"\\'")}')" title="Eliminar caja permanentemente">🗑 Eliminar caja</button>`:''}
         ${canWrite()?`<button class="btn bsuc bsm" onclick="openMovCC('entrada')">+ Entrada de efectivo</button>`:''}
         ${canWrite()?`<button class="btn bd bsm" onclick="openMovCC('salida')">− Gasto / Salida</button>`:''}
       </div>
@@ -5489,6 +5490,36 @@ function enviarInformeEmail() {
   if (!txt) return;
   const subj = `Solicitud de reembolso - Caja chica ${f.nombre}`;
   window.location.href = `mailto:?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(txt)}`;
+}
+
+async function eliminarCajaCC(fondoId, nombre) {
+  const f = window._ccFondoActual;
+  const kpi = f?.kpi || {};
+  const nMov = (parseInt(kpi.n_entradas)||0) + (parseInt(kpi.n_salidas)||0);
+  const totSalidas = parseFloat(kpi.total_salidas||0);
+
+  const msg = `⚠️ ELIMINAR CAJA "${nombre}"\n\n` +
+              `Esto BORRARÁ PERMANENTEMENTE:\n` +
+              `  • El fondo\n` +
+              `  • ${nMov} movimientos (entradas y salidas)\n` +
+              `  • Todos los permisos asignados\n` +
+              `  • Historial completo (no reversible)\n\n` +
+              `Para confirmar, escribe exactamente:  ${nombre}`;
+  const conf = window.prompt(msg);
+  if (conf == null) return;
+  if (String(conf).trim() !== nombre) {
+    return toast(`Nombre no coincide. Escribiste: "${conf}"`, 'err');
+  }
+  try {
+    await api(`/tesoreria/fondos/${fondoId}/completo`, {
+      method: 'DELETE',
+      body: JSON.stringify({ confirmacion_nombre: nombre })
+    });
+    toast(`✅ Caja "${nombre}" eliminada permanentemente.`);
+    closeModal('modal-cc-detalle');
+    loadFondosCC();
+    loadKpisCC();
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 async function openPermisosCC(fondoId) {

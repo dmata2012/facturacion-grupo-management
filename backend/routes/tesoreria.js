@@ -185,10 +185,28 @@ async function validarClaveFondo(fondoId, claveRecibida, usuario) {
   return { ok: true };
 }
 
+// DELETE /fondos/:id  — desactivar (soft delete, se conserva historial)
 router.delete('/fondos/:id', requireRol('admin'), async (req, res) => {
   try {
     await query(`UPDATE fac_caja_chica_fondos SET activo=FALSE, actualizado_en=NOW() WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /fondos/:id/completo  — eliminación total (fondo + movimientos + permisos)
+// Requiere admin + confirmación por nombre en el body
+router.delete('/fondos/:id/completo', requireRol('admin'), async (req, res) => {
+  try {
+    const { confirmacion_nombre } = req.body;
+    const r = await query(`SELECT nombre FROM fac_caja_chica_fondos WHERE id=$1`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Fondo no encontrado.' });
+    const nombreReal = r.rows[0].nombre;
+    if (!confirmacion_nombre || String(confirmacion_nombre).trim() !== nombreReal) {
+      return res.status(400).json({ error: `Debes escribir exactamente "${nombreReal}" para confirmar.` });
+    }
+    // ON DELETE CASCADE en movimientos y permisos → se eliminan solos
+    const del = await query(`DELETE FROM fac_caja_chica_fondos WHERE id=$1 RETURNING nombre`, [req.params.id]);
+    res.json({ ok: true, nombre: del.rows[0].nombre });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
