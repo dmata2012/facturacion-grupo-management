@@ -5059,6 +5059,44 @@ async function loadFondosCC() {
   } catch(e) { $('cc-body').innerHTML = `<p class="empty">${e.message}</p>`; }
 }
 
+function onIconoCCFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) return toast('Solo se aceptan imágenes.', 'warn');
+  if (file.size > 500 * 1024) return toast('La imagen es muy grande. Máximo 500KB.', 'warn');
+  const reader = new FileReader();
+  reader.onload = e => {
+    if ($('cf-icono')) $('cf-icono').value = e.target.result;
+    actualizarPreviewIconoCC();
+  };
+  reader.readAsDataURL(file);
+}
+
+function actualizarPreviewIconoCC() {
+  const v = $('cf-icono')?.value || '';
+  const prev = $('cf-icono-preview');
+  if (!prev) return;
+  if (!v) {
+    prev.innerHTML = '—';
+    prev.style.color = '#94a3b8';
+    prev.style.fontSize = '26px';
+    return;
+  }
+  if (/^(https?:|data:)/.test(v)) {
+    prev.innerHTML = `<img src="${v}" style="width:100%;height:100%;object-fit:cover">`;
+  } else {
+    prev.innerHTML = v;
+    prev.style.color = '';
+    prev.style.fontSize = '26px';
+  }
+}
+
+function quitarIconoCC() {
+  if ($('cf-icono')) $('cf-icono').value = '';
+  if ($('cf-icono-file')) $('cf-icono-file').value = '';
+  actualizarPreviewIconoCC();
+}
+
 function openFondoCC(id) {
   const f = id ? (window._ccFondos||[]).find(x=>x.id===id) : {};
   $('modal-cc-fondo-body').innerHTML = `
@@ -5080,9 +5118,21 @@ function openFondoCC(id) {
         <input type="text" inputmode="decimal" id="cf-sini" oninput="ensureNum(this)" value="${f.saldo_inicial||''}" placeholder="0.00">
       </div>
       <div class="fi full" style="background:#e0f2fe;border:1.5px solid #bae6fd;border-radius:8px;padding:10px 12px">
-        <label style="color:#0369a1"><strong>🎨 Icono / Imagen</strong> <span style="font-weight:400;color:#0c4a6e;font-size:11px">(emoji o URL de imagen)</span></label>
-        <input id="cf-icono" placeholder="Ej: 🏗️ · 🏢 · 💼 · https://.../imagen.png" value="${f.icono||''}">
-        <div style="font-size:10.5px;color:#0c4a6e;margin-top:4px">Aparece en la esquina superior derecha de la tarjeta. Sugerencias: 🏗️ construcción · 🏢 oficina · 💼 gerencia · 🏪 sucursal · 🚗 transporte · 💰 tesorería</div>
+        <label style="color:#0369a1"><strong>🎨 Icono / Imagen (opcional)</strong></label>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <div id="cf-icono-preview" style="width:56px;height:56px;border-radius:50%;background:#fff;border:2px solid #bae6fd;display:flex;align-items:center;justify-content:center;font-size:26px;color:#94a3b8;flex-shrink:0;overflow:hidden">
+            ${f.icono ? (/^(https?:|data:)/.test(f.icono) ? `<img src="${f.icono}" style="width:100%;height:100%;object-fit:cover">` : f.icono) : '—'}
+          </div>
+          <div style="flex:1">
+            <label class="btn bo bsm" style="cursor:pointer;display:inline-block;margin-bottom:4px">
+              📷 Subir imagen desde PC
+              <input type="file" id="cf-icono-file" accept="image/*" style="display:none" onchange="onIconoCCFile(this)">
+            </label>
+            ${f.icono ? `<button class="btn bd bsm" onclick="quitarIconoCC()" style="margin-left:6px">✕ Quitar</button>` : ''}
+          </div>
+        </div>
+        <input id="cf-icono" placeholder="O pega un emoji (🏗️ 🏢 💼 🏪) o una URL http..." value="${f.icono||''}" oninput="actualizarPreviewIconoCC()">
+        <div style="font-size:10.5px;color:#0c4a6e;margin-top:4px">Si no quieres icono, deja en blanco. Máx recomendado: 200KB.</div>
       </div>
       <div class="fi full" style="background:#fef9c3;border:1.5px solid #fde68a;border-radius:8px;padding:10px 12px">
         <label style="color:#854d0e"><strong>🔐 Clave del responsable</strong> <span style="font-weight:400;color:#78350f;font-size:11px">(requerida para registrar movimientos)</span></label>
