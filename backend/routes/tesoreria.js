@@ -131,13 +131,13 @@ router.get('/fondos/:id', async (req, res) => {
 
 router.post('/fondos', requireRol('admin', 'capturista', 'tesoreria'), async (req, res) => {
   try {
-    const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, notas, clave_movimientos } = req.body;
+    const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, notas, clave_movimientos, icono } = req.body;
     if (!nombre) return res.status(400).json({ error: 'Nombre requerido.' });
     const r = await query(
-      `INSERT INTO fac_caja_chica_fondos(nombre,responsable,departamento,fondo_asignado,saldo_inicial,moneda,notas,clave_movimientos,creado_por)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      `INSERT INTO fac_caja_chica_fondos(nombre,responsable,departamento,fondo_asignado,saldo_inicial,moneda,notas,clave_movimientos,icono,creado_por)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [nombre, responsable, departamento, parseFloat(fondo_asignado)||0, parseFloat(saldo_inicial)||0,
-       moneda||'MXN', notas, (clave_movimientos||'').trim() || null, req.usuario.id]
+       moneda||'MXN', notas, (clave_movimientos||'').trim() || null, (icono||'').trim() || null, req.usuario.id]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -145,27 +145,28 @@ router.post('/fondos', requireRol('admin', 'capturista', 'tesoreria'), async (re
 
 router.put('/fondos/:id', requireRol('admin', 'capturista', 'tesoreria'), async (req, res) => {
   try {
-    const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, activo, notas, clave_movimientos } = req.body;
+    const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, activo, notas, clave_movimientos, icono } = req.body;
     // Si clave_movimientos NO viene en el body, conservar la existente
     if (clave_movimientos === undefined) {
       await query(
         `UPDATE fac_caja_chica_fondos SET
            nombre=$1, responsable=$2, departamento=$3,
            fondo_asignado=$4, saldo_inicial=$5, moneda=$6,
-           activo=$7, notas=$8, actualizado_en=NOW()
-         WHERE id=$9`,
+           activo=$7, notas=$8, icono=$9, actualizado_en=NOW()
+         WHERE id=$10`,
         [nombre, responsable, departamento, parseFloat(fondo_asignado)||0, parseFloat(saldo_inicial)||0,
-         moneda||'MXN', activo !== false, notas, req.params.id]
+         moneda||'MXN', activo !== false, notas, (icono||'').trim() || null, req.params.id]
       );
     } else {
       await query(
         `UPDATE fac_caja_chica_fondos SET
            nombre=$1, responsable=$2, departamento=$3,
            fondo_asignado=$4, saldo_inicial=$5, moneda=$6,
-           activo=$7, notas=$8, clave_movimientos=$9, actualizado_en=NOW()
-         WHERE id=$10`,
+           activo=$7, notas=$8, clave_movimientos=$9, icono=$10, actualizado_en=NOW()
+         WHERE id=$11`,
         [nombre, responsable, departamento, parseFloat(fondo_asignado)||0, parseFloat(saldo_inicial)||0,
-         moneda||'MXN', activo !== false, notas, (clave_movimientos||'').trim() || null, req.params.id]
+         moneda||'MXN', activo !== false, notas, (clave_movimientos||'').trim() || null,
+         (icono||'').trim() || null, req.params.id]
       );
     }
     res.json({ ok: true });
