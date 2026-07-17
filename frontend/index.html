@@ -5372,57 +5372,67 @@ function renderDetalleFondoCC() {
 function openInformeReembolsoCC() {
   const f = window._ccFondoActual;
   if (!f) return;
-  // Solo gastos (salidas), ordenados por fecha desc
-  const salidas = (f.movimientos||[]).filter(m => m.tipo === 'salida');
-  if (!salidas.length) {
-    toast('No hay gastos registrados para incluir en el informe.', 'warn');
+  const mov = f.movimientos || [];
+  if (!mov.length) {
+    toast('No hay movimientos registrados para incluir en el informe.', 'warn');
     return;
   }
-  // Inicialmente todos seleccionados
-  window._ccInformeSel = new Set(salidas.map(m => m.id));
+  // Estado del filtro
+  window._ccInformeFiltro = { desde:'', hasta:'', tipo:'salida' };
+  window._ccInformeSel    = new Set();
 
   $('modal-cc-informe-body').innerHTML = `
     <div style="margin:-28px -28px 20px;padding:22px 28px;background:linear-gradient(135deg,#0891b2,#06b6d4);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
       <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Generador de informe</div>
-      <div style="font-size:20px;font-weight:900;margin-top:4px">📋 Solicitud de reembolso — ${f.nombre}</div>
-      <div style="font-size:12px;opacity:.9;margin-top:4px">Selecciona los gastos que deseas justificar en tu solicitud</div>
+      <div style="font-size:20px;font-weight:900;margin-top:4px">📋 Reporte de movimientos — ${f.nombre}</div>
+      <div style="font-size:12px;opacity:.9;margin-top:4px">Filtra por fechas y tipo, luego marca los movimientos a incluir</div>
+    </div>
+
+    <!-- FILTROS -->
+    <div style="background:var(--bg-alt);border-radius:10px;padding:12px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.5px;margin-bottom:8px">🔍 Filtros del reporte</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end">
+        <div class="fi" style="margin:0">
+          <label style="font-size:10px">Desde</label>
+          <input type="date" id="cci-desde" onchange="aplicarFiltroInformeCC()">
+        </div>
+        <div class="fi" style="margin:0">
+          <label style="font-size:10px">Hasta</label>
+          <input type="date" id="cci-hasta" onchange="aplicarFiltroInformeCC()">
+        </div>
+        <div class="fi" style="margin:0">
+          <label style="font-size:10px">Tipo de movimiento</label>
+          <select id="cci-tipo" onchange="aplicarFiltroInformeCC()">
+            <option value="salida" selected>📤 Solo gastos / salidas</option>
+            <option value="entrada">📥 Solo entradas / ingresos</option>
+            <option value="todos">🔄 Todos (entradas y salidas)</option>
+          </select>
+        </div>
+        <button class="btn bo bsm" onclick="limpiarFiltroInformeCC()" style="height:36px">✕ Limpiar</button>
+      </div>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start">
-      <!-- IZQUIERDA: Lista interactiva de comprobantes -->
+      <!-- IZQUIERDA: Lista interactiva -->
       <div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.5px">Comprobantes disponibles</div>
+          <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.5px">Movimientos disponibles</div>
           <div style="display:flex;gap:4px">
             <button class="btn bo bsm" style="font-size:10px;padding:4px 8px" onclick="toggleTodosInforme(true)">☑ Todos</button>
             <button class="btn bo bsm" style="font-size:10px;padding:4px 8px" onclick="toggleTodosInforme(false)">☐ Ninguno</button>
           </div>
         </div>
-        <div style="max-height:420px;overflow-y:auto;border:1px solid var(--border);border-radius:10px">
-          ${salidas.map(m => `
-          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s"
-                 onmouseover="this.style.background='var(--bg-alt)'"
-                 onmouseout="this.style.background=''">
-            <input type="checkbox" id="cci-${m.id}" checked onchange="toggleItemInforme(${m.id},this.checked)" style="margin-top:2px;width:16px;height:16px;cursor:pointer">
-            <div style="flex:1;min-width:0">
-              <div style="display:flex;justify-content:space-between;gap:10px">
-                <div style="font-size:12px;font-weight:700;color:var(--dark);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.concepto||''}</div>
-                <div style="font-size:13px;font-weight:800;color:#991b1b;white-space:nowrap">${fmt(m.monto)}</div>
-              </div>
-              <div style="font-size:11px;color:var(--muted);margin-top:2px">
-                ${fmtDate(m.fecha)} ${m.categoria?' · '+m.categoria:''}${m.beneficiario?' · '+m.beneficiario:''}
-              </div>
-              ${m.referencia?`<div style="font-size:10px;color:var(--muted);margin-top:2px">🧾 Ref: ${m.referencia}</div>`:''}
-            </div>
-          </label>`).join('')}
-        </div>
-        <div style="margin-top:10px;padding:10px;background:var(--bg-alt);border-radius:8px;display:flex;justify-content:space-between;align-items:center">
-          <span style="font-size:11px;color:var(--muted);font-weight:700">Seleccionados: <strong id="cci-count" style="color:var(--dark)">${salidas.length}</strong> de ${salidas.length}</span>
-          <span style="font-size:14px;font-weight:900;color:#991b1b">Total: <span id="cci-total">${fmt(salidas.reduce((a,m)=>a+parseFloat(m.monto),0))}</span></span>
+        <div id="cci-lista" style="max-height:420px;overflow-y:auto;border:1px solid var(--border);border-radius:10px"></div>
+        <div style="margin-top:10px;padding:10px;background:var(--bg-alt);border-radius:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+          <span style="font-size:11px;color:var(--muted);font-weight:700">Seleccionados: <strong id="cci-count" style="color:var(--dark)">0</strong> de <span id="cci-disponibles">0</span></span>
+          <div style="font-size:11px;color:var(--muted)">
+            <span style="color:#166534">Entradas: <strong id="cci-tot-ent">$0.00</strong></span> ·
+            <span style="color:#991b1b">Salidas: <strong id="cci-tot-sal">$0.00</strong></span>
+          </div>
         </div>
       </div>
 
-      <!-- DERECHA: Preview del informe -->
+      <!-- DERECHA: Preview -->
       <div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
           <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.5px">Vista previa del informe</div>
@@ -5441,6 +5451,63 @@ function openInformeReembolsoCC() {
       <button class="btn bo" onclick="closeModal('modal-cc-informe')">Cerrar</button>
     </div>`;
   openModal('modal-cc-informe');
+  aplicarFiltroInformeCC();
+}
+
+function limpiarFiltroInformeCC() {
+  if ($('cci-desde')) $('cci-desde').value = '';
+  if ($('cci-hasta')) $('cci-hasta').value = '';
+  if ($('cci-tipo'))  $('cci-tipo').value  = 'salida';
+  aplicarFiltroInformeCC();
+}
+
+function movimientosFiltradosCC() {
+  const f = window._ccFondoActual;
+  const desde = $('cci-desde')?.value || '';
+  const hasta = $('cci-hasta')?.value || '';
+  const tipo  = $('cci-tipo')?.value || 'salida';
+  return (f.movimientos||[]).filter(m => {
+    if (tipo !== 'todos' && m.tipo !== tipo) return false;
+    const fmov = String(m.fecha).slice(0,10);
+    if (desde && fmov < desde) return false;
+    if (hasta && fmov > hasta) return false;
+    return true;
+  }).sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
+}
+
+function aplicarFiltroInformeCC() {
+  const filtrados = movimientosFiltradosCC();
+  // Re-inicializar selección: todos marcados
+  window._ccInformeSel = new Set(filtrados.map(m => m.id));
+
+  const contenedor = $('cci-lista');
+  if (!contenedor) return;
+  if (!filtrados.length) {
+    contenedor.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:var(--muted)">Sin movimientos que coincidan con los filtros.</div>';
+  } else {
+    contenedor.innerHTML = filtrados.map(m => {
+      const esEntrada = m.tipo === 'entrada';
+      return `
+      <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s"
+             onmouseover="this.style.background='var(--bg-alt)'"
+             onmouseout="this.style.background=''">
+        <input type="checkbox" id="cci-${m.id}" checked onchange="toggleItemInforme(${m.id},this.checked)" style="margin-top:2px;width:16px;height:16px;cursor:pointer">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+            <div style="font-size:12px;font-weight:700;color:var(--dark);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              <span style="display:inline-block;padding:1px 6px;border-radius:10px;font-size:9.5px;font-weight:800;background:${esEntrada?'#dcfce7':'#fee2e2'};color:${esEntrada?'#166534':'#991b1b'};margin-right:4px;vertical-align:middle">${esEntrada?'📥 ENT':'📤 SAL'}</span>
+              ${m.concepto||''}
+            </div>
+            <div style="font-size:13px;font-weight:800;color:${esEntrada?'#166534':'#991b1b'};white-space:nowrap">${esEntrada?'+':'−'}${fmt(m.monto)}</div>
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">
+            ${fmtDate(m.fecha)}${m.categoria?' · '+m.categoria:''}${m.beneficiario?' · '+m.beneficiario:''}
+          </div>
+          ${m.referencia?`<div style="font-size:10px;color:var(--muted);margin-top:2px">🧾 Ref: ${m.referencia}</div>`:''}
+        </div>
+      </label>`;
+    }).join('');
+  }
   regenerarInformeCC();
 }
 
@@ -5451,51 +5518,73 @@ function toggleItemInforme(id, checked) {
 }
 
 function toggleTodosInforme(marcar) {
-  const f = window._ccFondoActual;
-  const salidas = (f.movimientos||[]).filter(m => m.tipo === 'salida');
-  window._ccInformeSel = new Set(marcar ? salidas.map(m=>m.id) : []);
-  salidas.forEach(m => { const cb = $(`cci-${m.id}`); if (cb) cb.checked = marcar; });
+  const filtrados = movimientosFiltradosCC();
+  window._ccInformeSel = new Set(marcar ? filtrados.map(m=>m.id) : []);
+  filtrados.forEach(m => { const cb = $(`cci-${m.id}`); if (cb) cb.checked = marcar; });
   regenerarInformeCC();
 }
 
 function regenerarInformeCC() {
   const f = window._ccFondoActual;
   const sel = window._ccInformeSel || new Set();
-  const salidas = (f.movimientos||[]).filter(m => m.tipo === 'salida');
-  const seleccionados = salidas.filter(m => sel.has(m.id))
-                               .sort((a,b) => new Date(a.fecha) - new Date(b.fecha));
-  const total = seleccionados.reduce((a,m)=>a+parseFloat(m.monto), 0);
+  const filtrados = movimientosFiltradosCC();
+  const seleccionados = filtrados.filter(m => sel.has(m.id))
+                                  .sort((a,b) => new Date(a.fecha) - new Date(b.fecha));
+  const tipoFiltro  = $('cci-tipo')?.value || 'salida';
+  const desdeFiltro = $('cci-desde')?.value || '';
+  const hastaFiltro = $('cci-hasta')?.value || '';
+
+  const totEntradas = seleccionados.filter(m => m.tipo==='entrada').reduce((a,m)=>a+parseFloat(m.monto),0);
+  const totSalidas  = seleccionados.filter(m => m.tipo==='salida').reduce((a,m)=>a+parseFloat(m.monto),0);
+  const totalNeto   = totEntradas - totSalidas;
+  const totalAbs    = tipoFiltro === 'entrada' ? totEntradas : tipoFiltro === 'salida' ? totSalidas : Math.abs(totalNeto);
   const saldoActual = parseFloat(f.kpi?.saldo_actual)   || 0;
   const asignado    = parseFloat(f.fondo_asignado)      || 0;
-  const saldoProy   = saldoActual + total; // Después del reembolso vuelve a subir
   const hoy = new Date().toLocaleDateString('es-MX', { day:'2-digit', month:'long', year:'numeric' });
   const me = ME?.nombre || '';
 
   // Actualizar contadores
-  if ($('cci-count')) $('cci-count').textContent = seleccionados.length;
-  if ($('cci-total')) $('cci-total').textContent = fmt(total);
+  if ($('cci-count'))        $('cci-count').textContent        = seleccionados.length;
+  if ($('cci-disponibles'))  $('cci-disponibles').textContent  = filtrados.length;
+  if ($('cci-tot-ent'))      $('cci-tot-ent').textContent      = fmt(totEntradas);
+  if ($('cci-tot-sal'))      $('cci-tot-sal').textContent      = fmt(totSalidas);
 
-  // Construir informe en texto plano estructurado
+  // Determinar título según tipo
+  const titulo = tipoFiltro === 'entrada' ? 'REPORTE DE INGRESOS - CAJA CHICA'
+               : tipoFiltro === 'salida'  ? 'SOLICITUD DE REEMBOLSO - CAJA CHICA'
+               : 'REPORTE DE MOVIMIENTOS - CAJA CHICA';
+
   const LINE = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
   let txt = '';
-  txt += `🧾 *SOLICITUD DE REEMBOLSO - CAJA CHICA*\n`;
+  txt += `🧾 *${titulo}*\n`;
   txt += `${LINE}\n`;
   txt += `📌 Fondo:        ${f.nombre}\n`;
   if (f.departamento) txt += `🏢 Departamento: ${f.departamento}\n`;
   if (f.responsable)  txt += `👤 Responsable:  ${f.responsable}\n`;
   txt += `📅 Fecha:        ${hoy}\n`;
+  // Info del filtro aplicado
+  if (desdeFiltro || hastaFiltro) {
+    const d1 = desdeFiltro ? new Date(desdeFiltro+'T00:00:00').toLocaleDateString('es-MX') : '—';
+    const d2 = hastaFiltro ? new Date(hastaFiltro+'T00:00:00').toLocaleDateString('es-MX') : 'hoy';
+    txt += `🗓  Período:      ${d1} al ${d2}\n`;
+  }
+  txt += `📋 Tipo:         ${tipoFiltro === 'entrada' ? 'Ingresos' : tipoFiltro === 'salida' ? 'Gastos / Salidas' : 'Todos los movimientos'}\n`;
   txt += `${LINE}\n\n`;
 
   if (!seleccionados.length) {
-    txt += 'Sin comprobantes seleccionados.\n';
+    txt += 'Sin movimientos seleccionados.\n';
   } else {
-    txt += `📋 *DESGLOSE DE GASTOS (${seleccionados.length})*\n\n`;
+    const tituloDesglose = tipoFiltro === 'entrada' ? 'INGRESOS' : tipoFiltro === 'salida' ? 'GASTOS' : 'MOVIMIENTOS';
+    txt += `📋 *DESGLOSE DE ${tituloDesglose} (${seleccionados.length})*\n\n`;
     seleccionados.forEach((m, i) => {
-      txt += `${(i+1).toString().padStart(2,' ')}. ${fmtDate(m.fecha)}  -  ${fmt(m.monto)}\n`;
+      const signo = m.tipo === 'entrada' ? '+' : '−';
+      const tipoTxt = tipoFiltro === 'todos' ? ` [${m.tipo === 'entrada' ? 'ENT' : 'SAL'}]` : '';
+      txt += `${(i+1).toString().padStart(2,' ')}.${tipoTxt} ${fmtDate(m.fecha)}  ${signo}${fmt(m.monto)}\n`;
       txt += `    ${m.concepto||''}\n`;
       if (m.categoria)    txt += `    🏷  Categoría: ${m.categoria}\n`;
-      if (m.beneficiario) txt += `    👤 Proveedor: ${m.beneficiario}\n`;
+      if (m.beneficiario) txt += `    👤 Proveedor/Origen: ${m.beneficiario}\n`;
       if (m.referencia)   txt += `    🧾 Ref: ${m.referencia}\n`;
+      if (m.periodo_pago) txt += `    📅 Periodo: ${m.periodo_pago}\n`;
       if (m.forma_pago && m.forma_pago!=='efectivo') txt += `    💳 Pago: ${m.forma_pago}\n`;
       if (m.autorizado_por) txt += `    ✅ Autorizó: ${m.autorizado_por}\n`;
       txt += `\n`;
@@ -5503,19 +5592,29 @@ function regenerarInformeCC() {
   }
 
   txt += `${LINE}\n`;
-  txt += `💰 *TOTAL A REEMBOLSAR: ${fmt(total)}*\n`;
+  if (tipoFiltro === 'todos') {
+    txt += `📥 Total entradas:  ${fmt(totEntradas)}\n`;
+    txt += `📤 Total salidas:   ${fmt(totSalidas)}\n`;
+    txt += `💰 *Neto:           ${fmt(totalNeto)}*\n`;
+  } else {
+    const label = tipoFiltro === 'entrada' ? 'TOTAL INGRESOS' : 'TOTAL A REEMBOLSAR';
+    txt += `💰 *${label}: ${fmt(totalAbs)}*\n`;
+  }
   txt += `${LINE}\n\n`;
 
   txt += `📊 *RESUMEN FINANCIERO*\n`;
   txt += `${LINE}\n`;
   txt += `🎯 Fondo Fijo:        ${fmt(asignado)}\n`;
   txt += `💵 Saldo actual:      ${fmt(saldoActual)}\n`;
-  txt += `💰 Reembolso pedido:  ${fmt(total)}\n`;
-  txt += `📈 Saldo proyectado:  ${fmt(saldoProy)}\n`;
-  if (asignado > 0) {
-    const faltaDespues = Math.max(0, asignado - saldoProy);
-    if (faltaDespues < 0.01) txt += `✅ Fondo quedará al 100%\n`;
-    else txt += `⚠  Aún faltará: ${fmt(faltaDespues)} para completar el fondo\n`;
+  if (tipoFiltro === 'salida') {
+    const saldoProy = saldoActual + totalAbs;
+    txt += `💰 Reembolso pedido:  ${fmt(totalAbs)}\n`;
+    txt += `📈 Saldo proyectado:  ${fmt(saldoProy)}\n`;
+    if (asignado > 0) {
+      const faltaDespues = Math.max(0, asignado - saldoProy);
+      if (faltaDespues < 0.01) txt += `✅ Fondo quedará al 100%\n`;
+      else txt += `⚠  Aún faltará: ${fmt(faltaDespues)} para completar el fondo\n`;
+    }
   }
   txt += `${LINE}\n\n`;
 
