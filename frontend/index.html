@@ -496,6 +496,7 @@ canvas{max-height:230px}
       <a href="#" onclick="nav('nomina')"    id="nav-nomina"><span class="ni">👥</span> Nómina</a>
       <a href="#" onclick="nav('empleados')" id="nav-empleados"><span class="ni">👤</span> Empleados</a>
       <a href="#" onclick="nav('vacaciones')" id="nav-vacaciones"><span class="ni">🌴</span> Vacaciones</a>
+      <a href="#" onclick="nav('checador')"   id="nav-checador"><span class="ni">🕐</span> Reloj Checador</a>
       <div class="nav-section">Tesorería</div>
       <a href="#" onclick="nav('cajaChica')" id="nav-cajaChica"><span class="ni">💵</span> Caja Chica</a>
       <div class="nav-section">Análisis</div>
@@ -818,14 +819,14 @@ function nav(page) {
     dashboard:'Dashboard', facturas:'Facturas', cobranza:'Cobranza',
     estadoCuenta:'Estado de Cuenta', clientes:'Clientes',
     receptoras:'Empresas Emisoras', nomina:'Nómina', empleados:'Empleados',
-    vacaciones:'Vacaciones', cajaChica:'Caja Chica',
+    vacaciones:'Vacaciones', checador:'Reloj Checador', cajaChica:'Caja Chica',
     reportes:'Reportes', estadisticas:'Estadísticas', usuarios:'Usuarios',
     catalogo:'Conceptos de Desglose'
   };
   const mt = $('mt-title');
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
-    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, cajaChica, reportes, estadisticas, usuarios, catalogo
+    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo
   };
   if (pages[page]) pages[page]();
 }
@@ -3992,6 +3993,283 @@ async function cargarDetalleEst(tipo) {
   } catch(e) {
     if ($('ed-body')) $('ed-body').innerHTML = `<p class="empty">Error: ${e.message}</p>`;
   }
+}
+
+// ══ RELOJ CHECADOR ═══════════════════════════
+async function checador() {
+  $('content').innerHTML = `
+    <div class="page-header">
+      <div class="page-header-left">
+        <div class="page-title">🕐 Reloj Checador</div>
+        <div class="page-sub">Registro de entradas y salidas del personal</div>
+      </div>
+      ${canAdmin()?`<button class="btn bo bsm" onclick="openConfigPINs()">⚙ Configurar PINs</button>`:''}
+    </div>
+    <div class="tabs">
+      <div class="tab active" onclick="showTab(this,'ch-tab-marcar')">✋ Marcar entrada/salida</div>
+      <div class="tab" onclick="showTab(this,'ch-tab-hoy');cargarChecadorHoy()">📅 Registros de hoy</div>
+      <div class="tab" onclick="showTab(this,'ch-tab-reporte');cargarChecadorReporte()">📊 Reporte por periodo</div>
+    </div>
+
+    <!-- PESTAÑA MARCAR -->
+    <div class="tab-panel active" id="ch-tab-marcar">
+      <div class="card" style="max-width:640px;margin:0 auto">
+        <div id="ch-reloj" style="text-align:center;font-family:'Consolas',monospace;font-size:52px;font-weight:900;color:var(--red);letter-spacing:2px;margin-bottom:6px"></div>
+        <div id="ch-fecha" style="text-align:center;font-size:14px;color:var(--muted);margin-bottom:20px;text-transform:capitalize"></div>
+        <div class="fi" style="margin-bottom:12px">
+          <label>Colaborador *</label>
+          <select id="ch-emp" style="font-size:15px;padding:12px">
+            <option value="">— Seleccionar tu nombre —</option>
+          </select>
+        </div>
+        <div class="fi" style="margin-bottom:14px">
+          <label>🔐 PIN (si se te ha asignado uno)</label>
+          <input type="password" id="ch-pin" placeholder="****" maxlength="10" inputmode="numeric" autocomplete="off"
+                 style="font-size:20px;text-align:center;letter-spacing:6px;padding:12px;font-weight:800">
+        </div>
+        <div class="fi" style="margin-bottom:14px">
+          <label>Notas (opcional)</label>
+          <input id="ch-notas" placeholder="Ej: Salida temprana por cita médica">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <button onclick="marcarChecador('entrada')" style="padding:18px;font-size:16px;font-weight:800;border-radius:12px;border:2px solid #16a34a;background:#dcfce7;color:#166534;cursor:pointer;transition:all .18s"
+            onmouseover="this.style.background='#16a34a';this.style.color='#fff'"
+            onmouseout="this.style.background='#dcfce7';this.style.color='#166534'">
+            📥 REGISTRAR<br>ENTRADA
+          </button>
+          <button onclick="marcarChecador('salida')" style="padding:18px;font-size:16px;font-weight:800;border-radius:12px;border:2px solid #dc2626;background:#fee2e2;color:#991b1b;cursor:pointer;transition:all .18s"
+            onmouseover="this.style.background='#dc2626';this.style.color='#fff'"
+            onmouseout="this.style.background='#fee2e2';this.style.color='#991b1b'">
+            📤 REGISTRAR<br>SALIDA
+          </button>
+        </div>
+        <div id="ch-msg" style="margin-top:14px;text-align:center;font-size:13px;font-weight:700;min-height:20px"></div>
+      </div>
+    </div>
+
+    <!-- PESTAÑA HOY -->
+    <div class="tab-panel" id="ch-tab-hoy">
+      <div class="card">
+        <div class="filters">
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d)">FECHA</label>
+          <input type="date" id="chd-fecha" value="${new Date().toISOString().slice(0,10)}" onchange="cargarChecadorHoy()">
+        </div>
+        <div id="chd-tabla"><p class="empty">Cargando...</p></div>
+      </div>
+    </div>
+
+    <!-- PESTAÑA REPORTE -->
+    <div class="tab-panel" id="ch-tab-reporte">
+      <div class="card">
+        <div class="filters">
+          <select id="chr-emp" onchange="cargarChecadorReporte()">
+            <option value="">Todos los colaboradores</option>
+          </select>
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d)">DESDE</label>
+          <input type="date" id="chr-desde" onchange="cargarChecadorReporte()">
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d)">HASTA</label>
+          <input type="date" id="chr-hasta" onchange="cargarChecadorReporte()">
+        </div>
+        <div id="chr-body"><p class="empty">Selecciona filtros para ver el reporte.</p></div>
+      </div>
+    </div>`;
+
+  // Cargar empleados
+  try {
+    const emps = await api('/checador/empleados');
+    window._chEmps = emps;
+    ['ch-emp','chr-emp'].forEach((sid,i) => {
+      const sel = $(sid);
+      if (!sel) return;
+      const prefix = i===0 ? '' : '<option value="">Todos los colaboradores</option>';
+      sel.innerHTML = (i===0 ? '<option value="">— Seleccionar tu nombre —</option>' : prefix) +
+        emps.map(e => `<option value="${e.id}">${e.numero_colaborador ? '['+e.numero_colaborador+'] ' : ''}${e.nombre}${e.tiene_pin?' 🔐':''}</option>`).join('');
+    });
+  } catch(e) {}
+
+  // Reloj en vivo
+  const dibujarReloj = () => {
+    const d = new Date();
+    if ($('ch-reloj')) $('ch-reloj').textContent = d.toLocaleTimeString('es-MX', { hour12:false });
+    if ($('ch-fecha')) $('ch-fecha').textContent = d.toLocaleDateString('es-MX', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+  };
+  dibujarReloj();
+  if (window._chTimer) clearInterval(window._chTimer);
+  window._chTimer = setInterval(dibujarReloj, 1000);
+}
+
+async function marcarChecador(tipo) {
+  const empleado_id = $('ch-emp')?.value;
+  const pin         = $('ch-pin')?.value || '';
+  const notas       = $('ch-notas')?.value || '';
+  const msg         = $('ch-msg');
+  if (!empleado_id) { if (msg) msg.innerHTML = '<span style="color:#dc2626">⚠ Selecciona tu nombre</span>'; return; }
+  try {
+    const r = await api(`/checador/${tipo}`, { method:'POST', body: JSON.stringify({ empleado_id, pin, notas }) });
+    let extra = '';
+    if (tipo === 'entrada' && r.retardo_minutos > 0) extra = ` (${r.retardo_minutos} min de retardo)`;
+    if (tipo === 'salida'  && r.minutos_trabajados) extra = ` (${Math.floor(r.minutos_trabajados/60)}h ${r.minutos_trabajados%60}m trabajados)`;
+    if (msg) msg.innerHTML = `<span style="color:#16a34a;font-size:15px">✅ ${r.empleado} — ${tipo==='entrada'?'Entrada':'Salida'} a las ${r.hora?.slice(0,5)}${extra}</span>`;
+    if ($('ch-pin'))   $('ch-pin').value = '';
+    if ($('ch-notas')) $('ch-notas').value = '';
+  } catch(e) {
+    if (msg) msg.innerHTML = `<span style="color:#dc2626">⚠ ${e.message}</span>`;
+  }
+}
+
+const fmtMin = m => {
+  if (!m) return '—';
+  const h = Math.floor(m/60), r = m%60;
+  return `${h}h ${r.toString().padStart(2,'0')}m`;
+};
+
+async function cargarChecadorHoy() {
+  const fecha = $('chd-fecha')?.value || new Date().toISOString().slice(0,10);
+  try {
+    const d = await api(`/checador/hoy?fecha=${fecha}`);
+    if (!d.registros.length) {
+      $('chd-tabla').innerHTML = '<p class="empty">Sin registros para esta fecha.</p>';
+      return;
+    }
+    $('chd-tabla').innerHTML = `
+      <div class="tscroll"><table>
+        <thead><tr><th>N°</th><th>Colaborador</th><th>Puesto</th>
+        <th>Entrada</th><th>Retardo</th><th>Salida</th><th>Trabajado</th><th>Notas</th>${canAdmin()?'<th></th>':''}</tr></thead>
+        <tbody>${d.registros.map(r => `<tr>
+          <td>${r.numero_colaborador||r.empleado_id}</td>
+          <td style="font-weight:700">${r.nombre}</td>
+          <td>${r.puesto||'—'}</td>
+          <td style="font-weight:700;color:#166534">${r.hora_entrada?r.hora_entrada.toString().slice(0,5):'—'}</td>
+          <td style="color:${(r.minutos_retardo||0)>0?'#dc2626':'var(--muted)'};font-weight:${(r.minutos_retardo||0)>0?'700':'400'}">${(r.minutos_retardo||0)>0?fmtMin(r.minutos_retardo):'—'}</td>
+          <td style="font-weight:700;color:${r.hora_salida?'#991b1b':'var(--muted)'}">${r.hora_salida?r.hora_salida.toString().slice(0,5):'—'}</td>
+          <td style="font-weight:800">${fmtMin(r.minutos_trabajados)}</td>
+          <td style="font-size:11px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.notas||''}">${r.notas||'—'}</td>
+          ${canAdmin()?`<td><button class="btn bg bsm" onclick="editarChecador(${r.id})">✏️</button> <button class="btn bd bsm" onclick="eliminarChecador(${r.id})">🗑</button></td>`:''}
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+  } catch(e) { $('chd-tabla').innerHTML = `<p class="empty">${e.message}</p>`; }
+}
+
+async function cargarChecadorReporte() {
+  const empId = $('chr-emp')?.value || '';
+  const desde = $('chr-desde')?.value || '';
+  const hasta = $('chr-hasta')?.value || '';
+  let url = '/checador/reporte?';
+  if (empId) url += `empleado_id=${empId}&`;
+  if (desde) url += `desde=${desde}&`;
+  if (hasta) url += `hasta=${hasta}&`;
+  try {
+    const d = await api(url);
+    const t = d.totales;
+    $('chr-body').innerHTML = `
+      <div class="kpi-grid" style="margin-bottom:14px">
+        <div class="kpi primary">
+          <div class="kpi-icon">📅</div>
+          <div class="label">Días registrados</div>
+          <div class="value">${t.total_dias}</div>
+        </div>
+        <div class="kpi success">
+          <div class="kpi-icon">⏱</div>
+          <div class="label">Horas totales</div>
+          <div class="value">${fmtMin(t.total_minutos)}</div>
+        </div>
+        <div class="kpi warning">
+          <div class="kpi-icon">⚠️</div>
+          <div class="label">Total retardos</div>
+          <div class="value">${fmtMin(t.total_retardo)}</div>
+        </div>
+        <div class="kpi danger">
+          <div class="kpi-icon">❗</div>
+          <div class="label">Sin salida</div>
+          <div class="value">${t.sin_salida}</div>
+          <div class="sub">Días sin cierre</div>
+        </div>
+      </div>
+      ${d.registros.length?`
+      <div class="tscroll"><table>
+        <thead><tr><th>Fecha</th><th>N°</th><th>Colaborador</th>
+        <th>Entrada</th><th>Retardo</th><th>Salida</th><th>Trabajado</th><th>Notas</th>${canAdmin()?'<th></th>':''}</tr></thead>
+        <tbody>${d.registros.map(r => `<tr>
+          <td>${fmtDate(r.fecha)}</td>
+          <td>${r.numero_colaborador||r.empleado_id}</td>
+          <td style="font-weight:600">${r.nombre}</td>
+          <td style="color:#166534;font-weight:600">${r.hora_entrada?r.hora_entrada.toString().slice(0,5):'—'}</td>
+          <td style="color:${(r.minutos_retardo||0)>0?'#dc2626':'var(--muted)'}">${(r.minutos_retardo||0)>0?fmtMin(r.minutos_retardo):'—'}</td>
+          <td style="color:${r.hora_salida?'#991b1b':'var(--muted)'};font-weight:600">${r.hora_salida?r.hora_salida.toString().slice(0,5):'—'}</td>
+          <td style="font-weight:700">${fmtMin(r.minutos_trabajados)}</td>
+          <td style="font-size:11px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.notas||''}">${r.notas||'—'}</td>
+          ${canAdmin()?`<td><button class="btn bg bsm" onclick="editarChecador(${r.id})">✏️</button></td>`:''}
+        </tr>`).join('')}</tbody>
+      </table></div>`:'<p class="empty">Sin registros para estos filtros.</p>'}`;
+  } catch(e) { $('chr-body').innerHTML = `<p class="empty">${e.message}</p>`; }
+}
+
+async function editarChecador(id) {
+  // Buscar el registro en cache
+  let reg;
+  try { reg = (await api('/checador/reporte')).registros.find(r=>r.id===id); } catch {}
+  if (!reg) return toast('Registro no encontrado.', 'err');
+  const he = window.prompt('Hora entrada (HH:MM):', reg.hora_entrada?reg.hora_entrada.toString().slice(0,5):'');
+  if (he == null) return;
+  const hs = window.prompt('Hora salida (HH:MM):', reg.hora_salida?reg.hora_salida.toString().slice(0,5):'');
+  if (hs == null) return;
+  const notas = window.prompt('Notas:', reg.notas || '');
+  if (notas == null) return;
+  try {
+    await api(`/checador/${id}`, { method:'PUT', body: JSON.stringify({ hora_entrada:he, hora_salida:hs, notas, minutos_retardo:reg.minutos_retardo||0 }) });
+    toast('Registro actualizado.');
+    cargarChecadorHoy(); cargarChecadorReporte();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarChecador(id) {
+  if (!await confirm2('¿Eliminar este registro?')) return;
+  try {
+    await api(`/checador/${id}`, { method:'DELETE' });
+    toast('Registro eliminado.');
+    cargarChecadorHoy();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function openConfigPINs() {
+  try {
+    const emps = await api('/checador/empleados');
+    const detalle = await Promise.all(emps.map(async e => {
+      const full = await api(`/nomina/empleados`);
+      return full.find(x => x.id === e.id) || e;
+    }));
+    $('modal-cambiar-clave-body').innerHTML = `
+      <button onclick="closeModal('modal-cambiar-clave')" style="position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;border:2px solid var(--border);background:#fff;cursor:pointer;font-size:14px;font-weight:800;color:var(--muted)">✕</button>
+      <h4>⚙ Configurar PINs del Checador</h4>
+      <div class="ibox info" style="margin-bottom:12px;font-size:12px">Asigna un PIN de 4-6 dígitos a cada colaborador y su hora esperada de entrada.</div>
+      <div style="max-height:400px;overflow-y:auto">
+        <table style="width:100%;font-size:12px">
+          <thead><tr><th style="text-align:left">Colaborador</th><th>Hora entrada</th><th>PIN</th><th></th></tr></thead>
+          <tbody>${detalle.map(e => `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:6px">
+              <div style="font-weight:700">${e.nombre}</div>
+              <div style="font-size:10px;color:var(--muted)">${e.puesto||''}</div>
+            </td>
+            <td style="padding:6px"><input type="time" id="cpin-hora-${e.id}" value="${e.hora_entrada_esperada?e.hora_entrada_esperada.toString().slice(0,5):'09:00'}" style="width:100px"></td>
+            <td style="padding:6px"><input type="text" id="cpin-${e.id}" placeholder="****" maxlength="10" value="${e.pin_checador||''}" style="width:100px;text-align:center;letter-spacing:3px;font-weight:800"></td>
+            <td style="padding:6px"><button class="btn bs bsm" onclick="guardarPINEmp(${e.id})">💾</button></td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-cambiar-clave')">Cerrar</button></div>`;
+    // reuse modal-cambiar-clave overlay
+    $('modal-cambiar-clave').querySelector('.modal').style.width = 'min(700px,96vw)';
+    openModal('modal-cambiar-clave');
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function guardarPINEmp(empId) {
+  const pin  = $(`cpin-${empId}`)?.value || '';
+  const hora = $(`cpin-hora-${empId}`)?.value || '09:00';
+  try {
+    await api(`/checador/empleado/${empId}/pin`, { method:'PUT', body: JSON.stringify({ pin, hora_entrada_esperada: hora }) });
+    toast('PIN actualizado.');
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 // ══ VACACIONES ══════════════════════════════

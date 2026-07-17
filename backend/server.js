@@ -52,6 +52,7 @@ app.use('/api/pagos',     require('./routes/pagos'));
 app.use('/api/nomina',    require('./routes/nomina'));
 app.use('/api/vacaciones', require('./routes/vacaciones'));
 app.use('/api/tesoreria',  require('./routes/tesoreria'));
+app.use('/api/checador',   require('./routes/checador'));
 app.use('/api/conceptos',  require('./routes/conceptos'));
 app.use('/api/receptoras', require('./routes/receptoras'));
 app.use('/api/dashboard', require('./routes/dashboard'));

@@ -1,0 +1,225 @@
+const router = require('express').Router();
+const { query } = require('../config/db');
+const { verificarToken, requireRol } = require('../middleware/auth');
+
+router.use(verificarToken);
+
+// GET /api/checador/hoy — registros del día
+router.get('/hoy', async (req, res) => {
+  try {
+    const { fecha } = req.query;
+    const f = fecha || new Date().toISOString().slice(0,10);
+    const r = await query(`
+      SELECT r.*, e.nombre, e.puesto, e.departamento, e.numero_colaborador, e.hora_entrada_esperada
+      FROM fac_reloj_checador r
+      JOIN fac_empleados e ON e.id = r.empleado_id
+      WHERE r.fecha = $1
+      ORDER BY r.hora_entrada NULLS LAST, e.nombre
+    `, [f]);
+    res.json({ fecha: f, registros: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/checador/reporte — reporte por rango + empleado
+router.get('/reporte', async (req, res) => {
+  try {
+    const { empleado_id, desde, hasta } = req.query;
+    const params = [];
+    let where = 'WHERE 1=1';
+    if (empleado_id) { params.push(empleado_id); where += ` AND r.empleado_id=$${params.length}`; }
+    if (desde) { params.push(desde); where += ` AND r.fecha>=$${params.length}`; }
+    if (hasta) { params.push(hasta); where += ` AND r.fecha<=$${params.length}`; }
+
+    const r = await query(`
+      SELECT r.*, e.nombre, e.puesto, e.departamento, e.numero_colaborador
+      FROM fac_reloj_checador r
+      JOIN fac_empleados e ON e.id = r.empleado_id
+      ${where}
+      ORDER BY r.fecha DESC, e.nombre
+    `, params);
+
+    // Totales
+    const totales = r.rows.reduce((acc, x) => {
+      acc.total_dias++;
+      acc.total_minutos    += parseInt(x.minutos_trabajados||0);
+      acc.total_retardo    += parseInt(x.minutos_retardo||0);
+      if (x.hora_entrada && !x.hora_salida) acc.sin_salida++;
+      return acc;
+    }, { total_dias:0, total_minutos:0, total_retardo:0, sin_salida:0 });
+
+    res.json({ registros: r.rows, totales });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/checador/empleados — lista de empleados con PIN configurado
+router.get('/empleados', async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT id, nombre, puesto, departamento, numero_colaborador,
+        (pin_checador IS NOT NULL AND pin_checador != '') AS tiene_pin,
+        hora_entrada_esperada
+      FROM fac_empleados WHERE activo=TRUE ORDER BY nombre
+    `);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/checador/entrada — registrar entrada (empleado + PIN)
+router.post('/entrada', async (req, res) => {
+  try {
+    const { empleado_id, pin, notas } = req.body;
+    if (!empleado_id) return res.status(400).json({ error: 'Empleado requerido.' });
+
+    const emp = await query(
+      `SELECT id, nombre, pin_checador, hora_entrada_esperada FROM fac_empleados WHERE id=$1 AND activo=TRUE`,
+      [empleado_id]
+    );
+    if (!emp.rows.length) return res.status(404).json({ error: 'Empleado no encontrado.' });
+
+    // Validar PIN (si está configurado)
+    const pinCorrecto = emp.rows[0].pin_checador;
+    if (pinCorrecto && String(pin || '').trim() !== pinCorrecto) {
+      return res.status(403).json({ error: 'PIN incorrecto.' });
+    }
+
+    const hoy = new Date().toISOString().slice(0,10);
+    const ahora = new Date();
+    const horaAhora = ahora.toTimeString().slice(0,8); // HH:MM:SS
+
+    // Calcular retardo (minutos)
+    let minutosRetardo = 0;
+    if (emp.rows[0].hora_entrada_esperada) {
+      const esperada = emp.rows[0].hora_entrada_esperada.toString().slice(0,5).split(':');
+      const min_esperado = parseInt(esperada[0])*60 + parseInt(esperada[1]);
+      const min_actual   = ahora.getHours()*60 + ahora.getMinutes();
+      minutosRetardo = Math.max(0, min_actual - min_esperado);
+    }
+
+    // Ver si ya existe registro para hoy
+    const ya = await query(
+      `SELECT id, hora_entrada FROM fac_reloj_checador WHERE empleado_id=$1 AND fecha=$2`,
+      [empleado_id, hoy]
+    );
+    if (ya.rows.length && ya.rows[0].hora_entrada) {
+      return res.status(400).json({
+        error: `Ya registraste tu entrada hoy a las ${ya.rows[0].hora_entrada.toString().slice(0,5)}.`
+      });
+    }
+
+    if (ya.rows.length) {
+      await query(
+        `UPDATE fac_reloj_checador SET hora_entrada=$1, minutos_retardo=$2, notas=$3, actualizado_en=NOW()
+         WHERE id=$4`,
+        [horaAhora, minutosRetardo, notas||null, ya.rows[0].id]
+      );
+    } else {
+      await query(
+        `INSERT INTO fac_reloj_checador(empleado_id, fecha, hora_entrada, minutos_retardo, notas, creado_por)
+         VALUES($1,$2,$3,$4,$5,$6)`,
+        [empleado_id, hoy, horaAhora, minutosRetardo, notas||null, req.usuario.id]
+      );
+    }
+
+    res.json({
+      ok: true, empleado: emp.rows[0].nombre, hora: horaAhora,
+      retardo_minutos: minutosRetardo
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/checador/salida — registrar salida
+router.post('/salida', async (req, res) => {
+  try {
+    const { empleado_id, pin, notas } = req.body;
+    if (!empleado_id) return res.status(400).json({ error: 'Empleado requerido.' });
+
+    const emp = await query(
+      `SELECT id, nombre, pin_checador FROM fac_empleados WHERE id=$1 AND activo=TRUE`, [empleado_id]);
+    if (!emp.rows.length) return res.status(404).json({ error: 'Empleado no encontrado.' });
+
+    const pinCorrecto = emp.rows[0].pin_checador;
+    if (pinCorrecto && String(pin || '').trim() !== pinCorrecto) {
+      return res.status(403).json({ error: 'PIN incorrecto.' });
+    }
+
+    const hoy = new Date().toISOString().slice(0,10);
+    const horaAhora = new Date().toTimeString().slice(0,8);
+
+    const reg = await query(
+      `SELECT id, hora_entrada, hora_salida FROM fac_reloj_checador WHERE empleado_id=$1 AND fecha=$2`,
+      [empleado_id, hoy]
+    );
+    if (!reg.rows.length || !reg.rows[0].hora_entrada) {
+      return res.status(400).json({ error: 'Primero debes registrar tu entrada.' });
+    }
+    if (reg.rows[0].hora_salida) {
+      return res.status(400).json({
+        error: `Ya registraste tu salida hoy a las ${reg.rows[0].hora_salida.toString().slice(0,5)}.`
+      });
+    }
+
+    // Calcular minutos trabajados
+    const [eh,em] = reg.rows[0].hora_entrada.toString().slice(0,5).split(':').map(Number);
+    const ahoraDt = new Date();
+    const minEntr = eh*60 + em;
+    const minSal  = ahoraDt.getHours()*60 + ahoraDt.getMinutes();
+    const minTrab = Math.max(0, minSal - minEntr);
+
+    await query(
+      `UPDATE fac_reloj_checador SET
+         hora_salida=$1, minutos_trabajados=$2,
+         notas=COALESCE(NULLIF($3,''), notas), actualizado_en=NOW()
+       WHERE id=$4`,
+      [horaAhora, minTrab, notas||'', reg.rows[0].id]
+    );
+
+    res.json({
+      ok: true, empleado: emp.rows[0].nombre, hora: horaAhora,
+      minutos_trabajados: minTrab
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/checador/:id — editar registro (admin)
+router.put('/:id', requireRol('admin'), async (req, res) => {
+  try {
+    const { hora_entrada, hora_salida, minutos_retardo, notas } = req.body;
+    // Recalcular minutos trabajados si vienen ambas horas
+    let minTrab = null;
+    if (hora_entrada && hora_salida) {
+      const [eh,em] = hora_entrada.split(':').map(Number);
+      const [sh,sm] = hora_salida.split(':').map(Number);
+      minTrab = Math.max(0, (sh*60+sm) - (eh*60+em));
+    }
+    await query(
+      `UPDATE fac_reloj_checador SET
+         hora_entrada=$1, hora_salida=$2,
+         minutos_trabajados=$3, minutos_retardo=$4, notas=$5, actualizado_en=NOW()
+       WHERE id=$6`,
+      [hora_entrada||null, hora_salida||null, minTrab, parseInt(minutos_retardo)||0, notas||null, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/checador/:id — admin
+router.delete('/:id', requireRol('admin'), async (req, res) => {
+  try {
+    await query(`DELETE FROM fac_reloj_checador WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/checador/empleado/:id/pin — configurar PIN de un empleado (admin)
+router.put('/empleado/:id/pin', requireRol('admin'), async (req, res) => {
+  try {
+    const { pin, hora_entrada_esperada } = req.body;
+    await query(
+      `UPDATE fac_empleados SET pin_checador=$1, hora_entrada_esperada=$2, actualizado_en=NOW() WHERE id=$3`,
+      [(pin||'').trim() || null, hora_entrada_esperada || '09:00', req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+module.exports = router;
