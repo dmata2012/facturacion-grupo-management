@@ -538,7 +538,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-vac-sol"><div class="modal" id="modal-vac-sol-body"></div></div>
 <div class="overlay" id="modal-vac-print"><div class="modal" style="width:min(800px,98vw);background:#fff" id="modal-vac-print-body"></div></div>
 <div class="overlay" id="modal-cc-fondo"><div class="modal modal-sm" id="modal-cc-fondo-body"></div></div>
-<div class="overlay" id="modal-cc-detalle"><div class="modal" style="width:min(960px,96vw)" id="modal-cc-detalle-body"></div></div>
+<div class="overlay" id="modal-cc-detalle"><div class="modal" style="width:min(960px,96vw);position:relative" id="modal-cc-detalle-body"></div></div>
 <div class="overlay" id="modal-cc-mov"><div class="modal modal-sm" id="modal-cc-mov-body"></div></div>
 <div class="overlay" id="modal-cc-informe"><div class="modal" style="width:min(1000px,96vw)" id="modal-cc-informe-body"></div></div>
 <div class="overlay" id="modal-cambiar-clave"><div class="modal modal-sm" id="modal-cambiar-clave-body"></div></div>
@@ -5229,7 +5229,11 @@ function renderDetalleFondoCC() {
   });
 
   $('modal-cc-detalle-body').innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+    <button onclick="closeModal('modal-cc-detalle')" title="Cerrar"
+      style="position:absolute;top:14px;right:14px;width:36px;height:36px;border-radius:50%;border:2px solid var(--border);background:#fff;cursor:pointer;font-size:18px;font-weight:800;color:var(--muted);display:flex;align-items:center;justify-content:center;transition:all .15s;z-index:10"
+      onmouseover="this.style.background='var(--red-xs)';this.style.borderColor='var(--red)';this.style.color='var(--red)'"
+      onmouseout="this.style.background='#fff';this.style.borderColor='var(--border)';this.style.color='var(--muted)'">✕</button>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:14px;padding-right:44px">
       <div>
         <h4 style="margin:0;padding:0;border:none">${f.nombre}</h4>
         <div style="font-size:12px;color:var(--muted);margin-top:2px">${f.departamento||''}${f.responsable?' · Responsable: '+f.responsable:''}</div>
