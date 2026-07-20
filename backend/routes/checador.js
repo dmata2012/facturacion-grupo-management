@@ -4,7 +4,7 @@ const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
 
-// GET /api/checador/hoy — registros del día
+// GET /api/checador/hoy — registros del día + colaboradores en vacaciones
 router.get('/hoy', async (req, res) => {
   try {
     const { fecha } = req.query;
@@ -16,11 +16,21 @@ router.get('/hoy', async (req, res) => {
       WHERE r.fecha = $1
       ORDER BY r.hora_entrada NULLS LAST, e.nombre
     `, [f]);
-    res.json({ fecha: f, registros: r.rows });
+    // Colaboradores en vacaciones esa fecha
+    const vac = await query(`
+      SELECT s.empleado_id, e.nombre, e.puesto, e.departamento, e.numero_colaborador,
+             s.fecha_inicio, s.fecha_fin, s.dias_solicitados
+      FROM fac_vacaciones_solicitudes s
+      JOIN fac_empleados e ON e.id = s.empleado_id
+      WHERE s.estatus = 'aprobada'
+        AND $1::date BETWEEN s.fecha_inicio AND s.fecha_fin
+      ORDER BY e.nombre
+    `, [f]);
+    res.json({ fecha: f, registros: r.rows, vacaciones: vac.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /api/checador/reporte — reporte por rango + empleado
+// GET /api/checador/reporte — reporte por rango + empleado (marca días de vacaciones)
 router.get('/reporte', async (req, res) => {
   try {
     const { empleado_id, desde, hasta } = req.query;
@@ -30,8 +40,15 @@ router.get('/reporte', async (req, res) => {
     if (desde) { params.push(desde); where += ` AND r.fecha>=$${params.length}`; }
     if (hasta) { params.push(hasta); where += ` AND r.fecha<=$${params.length}`; }
 
+    // Marca en_vacaciones si la fecha del registro cae dentro de una solicitud aprobada
     const r = await query(`
-      SELECT r.*, e.nombre, e.puesto, e.departamento, e.numero_colaborador
+      SELECT r.*, e.nombre, e.puesto, e.departamento, e.numero_colaborador,
+        EXISTS (
+          SELECT 1 FROM fac_vacaciones_solicitudes s
+          WHERE s.empleado_id = r.empleado_id
+            AND s.estatus = 'aprobada'
+            AND r.fecha BETWEEN s.fecha_inicio AND s.fecha_fin
+        ) AS en_vacaciones
       FROM fac_reloj_checador r
       JOIN fac_empleados e ON e.id = r.empleado_id
       ${where}
@@ -44,8 +61,9 @@ router.get('/reporte', async (req, res) => {
       acc.total_minutos    += parseInt(x.minutos_trabajados||0);
       acc.total_retardo    += parseInt(x.minutos_retardo||0);
       if (x.hora_entrada && !x.hora_salida) acc.sin_salida++;
+      if (x.en_vacaciones) acc.dias_vacaciones++;
       return acc;
-    }, { total_dias:0, total_minutos:0, total_retardo:0, sin_salida:0 });
+    }, { total_dias:0, total_minutos:0, total_retardo:0, sin_salida:0, dias_vacaciones:0 });
 
     res.json({ registros: r.rows, totales });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -91,9 +109,18 @@ router.post('/entrada', async (req, res) => {
     const diasDescanso = new Set(String(emp.rows[0].dias_descanso||'').split(',').filter(x=>x!=='').map(x=>parseInt(x)));
     const esDescanso = diasDescanso.has(diaSemana);
 
-    // Calcular retardo (minutos) — NO aplica en días de descanso
+    // Verificar si hoy está dentro de una solicitud de vacaciones aprobada
+    const vac = await query(
+      `SELECT id, fecha_inicio, fecha_fin FROM fac_vacaciones_solicitudes
+       WHERE empleado_id=$1 AND estatus='aprobada' AND $2::date BETWEEN fecha_inicio AND fecha_fin
+       LIMIT 1`,
+      [empleado_id, hoy]
+    );
+    const enVacaciones = vac.rows.length > 0;
+
+    // Calcular retardo (minutos) — NO aplica en descanso ni vacaciones
     let minutosRetardo = 0;
-    if (!esDescanso && emp.rows[0].hora_entrada_esperada) {
+    if (!esDescanso && !enVacaciones && emp.rows[0].hora_entrada_esperada) {
       const esperada = emp.rows[0].hora_entrada_esperada.toString().slice(0,5).split(':');
       const min_esperado = parseInt(esperada[0])*60 + parseInt(esperada[1]);
       const min_actual   = ahora.getHours()*60 + ahora.getMinutes();
@@ -127,7 +154,9 @@ router.post('/entrada', async (req, res) => {
 
     res.json({
       ok: true, empleado: emp.rows[0].nombre, hora: horaAhora,
-      retardo_minutos: minutosRetardo, es_descanso: esDescanso
+      retardo_minutos: minutosRetardo,
+      es_descanso: esDescanso,
+      en_vacaciones: enVacaciones
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -4107,8 +4107,9 @@ async function marcarChecador(tipo) {
   try {
     const r = await api(`/checador/${tipo}`, { method:'POST', body: JSON.stringify({ empleado_id, pin, notas }) });
     let extra = '';
-    if (tipo === 'entrada' && r.retardo_minutos > 0) extra = ` (${r.retardo_minutos} min de retardo)`;
-    if (tipo === 'entrada' && r.es_descanso)         extra = ` — 🌴 hoy es día de descanso`;
+    if (tipo === 'entrada' && r.en_vacaciones)       extra = ` — 🏖 estás en vacaciones aprobadas`;
+    else if (tipo === 'entrada' && r.es_descanso)    extra = ` — 🌴 hoy es día de descanso`;
+    else if (tipo === 'entrada' && r.retardo_minutos > 0) extra = ` (${r.retardo_minutos} min de retardo)`;
     if (tipo === 'salida'  && r.minutos_trabajados)  extra = ` (${Math.floor(r.minutos_trabajados/60)}h ${r.minutos_trabajados%60}m trabajados)`;
     if (msg) msg.innerHTML = `<span style="color:#16a34a;font-size:15px">✅ ${r.empleado} — ${tipo==='entrada'?'Entrada':'Salida'} a las ${r.hora?.slice(0,5)}${extra}</span>`;
     if ($('ch-pin'))   $('ch-pin').value = '';
@@ -4128,11 +4129,19 @@ async function cargarChecadorHoy() {
   const fecha = $('chd-fecha')?.value || new Date().toISOString().slice(0,10);
   try {
     const d = await api(`/checador/hoy?fecha=${fecha}`);
-    if (!d.registros.length) {
-      $('chd-tabla').innerHTML = '<p class="empty">Sin registros para esta fecha.</p>';
+    const vac = d.vacaciones || [];
+    const vacHtml = vac.length ? `
+      <div class="ibox info" style="margin-bottom:12px">
+        <strong>🏖 ${vac.length} colaborador${vac.length!==1?'es':''} en vacaciones esta fecha:</strong>
+        <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">
+          ${vac.map(v=>`<span style="background:#dbeafe;color:#1e3a8a;padding:4px 10px;border-radius:20px;font-size:11.5px;font-weight:700" title="Del ${fmtDate(v.fecha_inicio)} al ${fmtDate(v.fecha_fin)} · ${v.dias_solicitados} días">${v.numero_colaborador?'['+v.numero_colaborador+'] ':''}${v.nombre}${v.puesto?' · '+v.puesto:''}</span>`).join('')}
+        </div>
+      </div>` : '';
+    if (!d.registros.length && !vac.length) {
+      $('chd-tabla').innerHTML = '<p class="empty">Sin registros ni colaboradores en vacaciones para esta fecha.</p>';
       return;
     }
-    $('chd-tabla').innerHTML = `
+    $('chd-tabla').innerHTML = vacHtml + (d.registros.length ? `
       <div class="tscroll"><table>
         <thead><tr><th>N°</th><th>Colaborador</th><th>Puesto</th>
         <th>Entrada</th><th>Retardo</th><th>Salida</th><th>Trabajado</th><th>Notas</th>${canAdmin()?'<th></th>':''}</tr></thead>
@@ -4147,7 +4156,7 @@ async function cargarChecadorHoy() {
           <td style="font-size:11px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.notas||''}">${r.notas||'—'}</td>
           ${canAdmin()?`<td><button class="btn bg bsm" onclick="editarChecador(${r.id})">✏️</button> <button class="btn bd bsm" onclick="eliminarChecador(${r.id})">🗑</button></td>`:''}
         </tr>`).join('')}</tbody>
-      </table></div>`;
+      </table></div>` : '<p class="empty">Sin registros del checador para esta fecha.</p>');
   } catch(e) { $('chd-tabla').innerHTML = `<p class="empty">${e.message}</p>`; }
 }
 
@@ -4185,12 +4194,18 @@ async function cargarChecadorReporte() {
           <div class="value">${t.sin_salida}</div>
           <div class="sub">Días sin cierre</div>
         </div>
+        <div class="kpi primary">
+          <div class="kpi-icon">🏖</div>
+          <div class="label">Días en vacaciones</div>
+          <div class="value">${t.dias_vacaciones||0}</div>
+          <div class="sub">Solicitudes aprobadas</div>
+        </div>
       </div>
       ${d.registros.length?`
       <div class="tscroll"><table>
         <thead><tr><th>Fecha</th><th>N°</th><th>Colaborador</th>
-        <th>Entrada</th><th>Retardo</th><th>Salida</th><th>Trabajado</th><th>Notas</th>${canAdmin()?'<th></th>':''}</tr></thead>
-        <tbody>${d.registros.map(r => `<tr>
+        <th>Entrada</th><th>Retardo</th><th>Salida</th><th>Trabajado</th><th>Estado</th><th>Notas</th>${canAdmin()?'<th></th>':''}</tr></thead>
+        <tbody>${d.registros.map(r => `<tr style="${r.en_vacaciones?'background:#eff6ff':''}">
           <td>${fmtDate(r.fecha)}</td>
           <td>${r.numero_colaborador||r.empleado_id}</td>
           <td style="font-weight:600">${r.nombre}</td>
@@ -4198,6 +4213,7 @@ async function cargarChecadorReporte() {
           <td style="color:${(r.minutos_retardo||0)>0?'#dc2626':'var(--muted)'}">${(r.minutos_retardo||0)>0?fmtMin(r.minutos_retardo):'—'}</td>
           <td style="color:${r.hora_salida?'#991b1b':'var(--muted)'};font-weight:600">${r.hora_salida?r.hora_salida.toString().slice(0,5):'—'}</td>
           <td style="font-weight:700">${fmtMin(r.minutos_trabajados)}</td>
+          <td>${r.en_vacaciones?'<span style="background:#dbeafe;color:#1e3a8a;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:800">🏖 VACACIONES</span>':'—'}</td>
           <td style="font-size:11px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.notas||''}">${r.notas||'—'}</td>
           ${canAdmin()?`<td><button class="btn bg bsm" onclick="editarChecador(${r.id})">✏️</button></td>`:''}
         </tr>`).join('')}</tbody>
