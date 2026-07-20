@@ -4108,7 +4108,8 @@ async function marcarChecador(tipo) {
     const r = await api(`/checador/${tipo}`, { method:'POST', body: JSON.stringify({ empleado_id, pin, notas }) });
     let extra = '';
     if (tipo === 'entrada' && r.retardo_minutos > 0) extra = ` (${r.retardo_minutos} min de retardo)`;
-    if (tipo === 'salida'  && r.minutos_trabajados) extra = ` (${Math.floor(r.minutos_trabajados/60)}h ${r.minutos_trabajados%60}m trabajados)`;
+    if (tipo === 'entrada' && r.es_descanso)         extra = ` — 🌴 hoy es día de descanso`;
+    if (tipo === 'salida'  && r.minutos_trabajados)  extra = ` (${Math.floor(r.minutos_trabajados/60)}h ${r.minutos_trabajados%60}m trabajados)`;
     if (msg) msg.innerHTML = `<span style="color:#16a34a;font-size:15px">✅ ${r.empleado} — ${tipo==='entrada'?'Entrada':'Salida'} a las ${r.hora?.slice(0,5)}${extra}</span>`;
     if ($('ch-pin'))   $('ch-pin').value = '';
     if ($('ch-notas')) $('ch-notas').value = '';
@@ -4234,41 +4235,85 @@ async function eliminarChecador(id) {
 async function openConfigPINs() {
   try {
     const emps = await api('/checador/empleados');
-    const detalle = await Promise.all(emps.map(async e => {
-      const full = await api(`/nomina/empleados`);
-      return full.find(x => x.id === e.id) || e;
-    }));
+    const DIAS = [
+      { n:1, l:'L' }, { n:2, l:'M' }, { n:3, l:'X' },
+      { n:4, l:'J' }, { n:5, l:'V' }, { n:6, l:'S' }, { n:0, l:'D' }
+    ];
+    const parseDD = s => new Set(String(s||'').split(',').filter(x=>x!=='').map(x=>parseInt(x)));
     $('modal-cambiar-clave-body').innerHTML = `
       <button onclick="closeModal('modal-cambiar-clave')" style="position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;border:2px solid var(--border);background:#fff;cursor:pointer;font-size:14px;font-weight:800;color:var(--muted)">✕</button>
-      <h4>⚙ Configurar PINs del Checador</h4>
-      <div class="ibox info" style="margin-bottom:12px;font-size:12px">Asigna un PIN de 4-6 dígitos a cada colaborador y su hora esperada de entrada.</div>
-      <div style="max-height:400px;overflow-y:auto">
-        <table style="width:100%;font-size:12px">
-          <thead><tr><th style="text-align:left">Colaborador</th><th>Hora entrada</th><th>PIN</th><th></th></tr></thead>
-          <tbody>${detalle.map(e => `<tr style="border-bottom:1px solid var(--border)">
-            <td style="padding:6px">
-              <div style="font-weight:700">${e.nombre}</div>
-              <div style="font-size:10px;color:var(--muted)">${e.puesto||''}</div>
-            </td>
-            <td style="padding:6px"><input type="time" id="cpin-hora-${e.id}" value="${e.hora_entrada_esperada?e.hora_entrada_esperada.toString().slice(0,5):'09:00'}" style="width:100px"></td>
-            <td style="padding:6px"><input type="text" id="cpin-${e.id}" placeholder="****" maxlength="10" value="${e.pin_checador||''}" style="width:100px;text-align:center;letter-spacing:3px;font-weight:800"></td>
-            <td style="padding:6px"><button class="btn bs bsm" onclick="guardarPINEmp(${e.id})">💾</button></td>
-          </tr>`).join('')}</tbody>
+      <h4>⚙ Configurar Horarios y PINs</h4>
+      <div class="ibox info" style="margin-bottom:12px;font-size:12px">
+        Asigna a cada colaborador su <strong>horario de oficina</strong>, <strong>días de descanso</strong> y <strong>PIN</strong> del checador. El retardo se calcula solo en días laborales.
+      </div>
+      <div style="max-height:440px;overflow-y:auto">
+        <table style="width:100%;font-size:12px;border-collapse:collapse">
+          <thead style="background:#f8f9fb;position:sticky;top:0">
+            <tr>
+              <th style="text-align:left;padding:8px">Colaborador</th>
+              <th style="padding:8px">Entrada</th>
+              <th style="padding:8px">Salida</th>
+              <th style="padding:8px">Días de descanso</th>
+              <th style="padding:8px">PIN</th>
+              <th style="padding:8px"></th>
+            </tr>
+          </thead>
+          <tbody>${emps.map(e => {
+            const dd = parseDD(e.dias_descanso);
+            return `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:8px">
+                <div style="font-weight:700">${e.nombre}</div>
+                <div style="font-size:10px;color:var(--muted)">${e.puesto||''}</div>
+              </td>
+              <td style="padding:8px"><input type="time" id="cpin-hora-${e.id}" value="${e.hora_entrada_esperada?e.hora_entrada_esperada.toString().slice(0,5):'09:00'}" style="width:95px"></td>
+              <td style="padding:8px"><input type="time" id="cpin-sal-${e.id}" value="${e.hora_salida_esperada?e.hora_salida_esperada.toString().slice(0,5):'18:00'}" style="width:95px"></td>
+              <td style="padding:8px">
+                <div style="display:flex;gap:3px" id="cpin-dd-${e.id}" data-empid="${e.id}">
+                  ${DIAS.map(d => `
+                    <label style="cursor:pointer;display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:${dd.has(d.n)?'#fca5a5':'#f3f4f6'};color:${dd.has(d.n)?'#991b1b':'var(--muted)'};font-weight:800;font-size:11px;transition:all .15s"
+                           title="${['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'][d.n]}">
+                      <input type="checkbox" data-dia="${d.n}" ${dd.has(d.n)?'checked':''}
+                             onchange="this.parentElement.style.background=this.checked?'#fca5a5':'#f3f4f6';this.parentElement.style.color=this.checked?'#991b1b':'var(--muted)'"
+                             style="display:none">
+                      ${d.l}
+                    </label>`).join('')}
+                </div>
+              </td>
+              <td style="padding:8px"><input type="text" id="cpin-${e.id}" placeholder="****" maxlength="10" value="${e.pin_checador||''}" style="width:90px;text-align:center;letter-spacing:3px;font-weight:800"></td>
+              <td style="padding:8px"><button class="btn bs bsm" onclick="guardarPINEmp(${e.id})">💾</button></td>
+            </tr>`;
+          }).join('')}</tbody>
         </table>
       </div>
+      <div style="margin-top:10px;padding:10px;background:var(--bg-alt);border-radius:8px;font-size:11px;color:var(--muted)">
+        <strong>Leyenda:</strong> L=Lunes · M=Martes · X=Miércoles · J=Jueves · V=Viernes · S=Sábado · D=Domingo. Marca los días que son descanso para ese colaborador (por defecto: D domingo).
+      </div>
       <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-cambiar-clave')">Cerrar</button></div>`;
-    // reuse modal-cambiar-clave overlay
-    $('modal-cambiar-clave').querySelector('.modal').style.width = 'min(700px,96vw)';
+    $('modal-cambiar-clave').querySelector('.modal').style.width = 'min(900px,96vw)';
     openModal('modal-cambiar-clave');
   } catch(e) { toast(e.message, 'err'); }
 }
 
 async function guardarPINEmp(empId) {
-  const pin  = $(`cpin-${empId}`)?.value || '';
-  const hora = $(`cpin-hora-${empId}`)?.value || '09:00';
+  const pin      = $(`cpin-${empId}`)?.value || '';
+  const horaEnt  = $(`cpin-hora-${empId}`)?.value || '09:00';
+  const horaSal  = $(`cpin-sal-${empId}`)?.value || '18:00';
+  // Recoger días de descanso marcados
+  const cont = $(`cpin-dd-${empId}`);
+  const dias = cont
+    ? [...cont.querySelectorAll('input[type="checkbox"]:checked')].map(cb => parseInt(cb.dataset.dia)).sort()
+    : [];
   try {
-    await api(`/checador/empleado/${empId}/pin`, { method:'PUT', body: JSON.stringify({ pin, hora_entrada_esperada: hora }) });
-    toast('PIN actualizado.');
+    await api(`/checador/empleado/${empId}/pin`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        pin,
+        hora_entrada_esperada: horaEnt,
+        hora_salida_esperada : horaSal,
+        dias_descanso        : dias.join(',')
+      })
+    });
+    toast('Configuración guardada.');
   } catch(e) { toast(e.message, 'err'); }
 }
 

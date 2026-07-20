@@ -51,13 +51,13 @@ router.get('/reporte', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /api/checador/empleados — lista de empleados con PIN configurado
+// GET /api/checador/empleados — lista de empleados con configuración de horarios
 router.get('/empleados', async (req, res) => {
   try {
     const r = await query(`
       SELECT id, nombre, puesto, departamento, numero_colaborador,
         (pin_checador IS NOT NULL AND pin_checador != '') AS tiene_pin,
-        hora_entrada_esperada
+        hora_entrada_esperada, hora_salida_esperada, dias_descanso
       FROM fac_empleados WHERE activo=TRUE ORDER BY nombre
     `);
     res.json(r.rows);
@@ -71,7 +71,7 @@ router.post('/entrada', async (req, res) => {
     if (!empleado_id) return res.status(400).json({ error: 'Empleado requerido.' });
 
     const emp = await query(
-      `SELECT id, nombre, pin_checador, hora_entrada_esperada FROM fac_empleados WHERE id=$1 AND activo=TRUE`,
+      `SELECT id, nombre, pin_checador, hora_entrada_esperada, dias_descanso FROM fac_empleados WHERE id=$1 AND activo=TRUE`,
       [empleado_id]
     );
     if (!emp.rows.length) return res.status(404).json({ error: 'Empleado no encontrado.' });
@@ -85,10 +85,15 @@ router.post('/entrada', async (req, res) => {
     const hoy = new Date().toISOString().slice(0,10);
     const ahora = new Date();
     const horaAhora = ahora.toTimeString().slice(0,8); // HH:MM:SS
+    const diaSemana = ahora.getDay(); // 0=Dom ... 6=Sáb
 
-    // Calcular retardo (minutos)
+    // Verificar si hoy es día de descanso
+    const diasDescanso = new Set(String(emp.rows[0].dias_descanso||'').split(',').filter(x=>x!=='').map(x=>parseInt(x)));
+    const esDescanso = diasDescanso.has(diaSemana);
+
+    // Calcular retardo (minutos) — NO aplica en días de descanso
     let minutosRetardo = 0;
-    if (emp.rows[0].hora_entrada_esperada) {
+    if (!esDescanso && emp.rows[0].hora_entrada_esperada) {
       const esperada = emp.rows[0].hora_entrada_esperada.toString().slice(0,5).split(':');
       const min_esperado = parseInt(esperada[0])*60 + parseInt(esperada[1]);
       const min_actual   = ahora.getHours()*60 + ahora.getMinutes();
@@ -122,7 +127,7 @@ router.post('/entrada', async (req, res) => {
 
     res.json({
       ok: true, empleado: emp.rows[0].nombre, hora: horaAhora,
-      retardo_minutos: minutosRetardo
+      retardo_minutos: minutosRetardo, es_descanso: esDescanso
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -210,13 +215,27 @@ router.delete('/:id', requireRol('admin'), async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// PUT /api/checador/empleado/:id/pin — configurar PIN de un empleado (admin)
+// PUT /api/checador/empleado/:id/pin — configurar PIN + horario + días descanso (admin)
 router.put('/empleado/:id/pin', requireRol('admin'), async (req, res) => {
   try {
-    const { pin, hora_entrada_esperada } = req.body;
+    const { pin, hora_entrada_esperada, hora_salida_esperada, dias_descanso } = req.body;
+    // Normalizar días descanso: string tipo "0,6"
+    let dd = '';
+    if (Array.isArray(dias_descanso)) dd = dias_descanso.join(',');
+    else if (typeof dias_descanso === 'string') dd = dias_descanso;
     await query(
-      `UPDATE fac_empleados SET pin_checador=$1, hora_entrada_esperada=$2, actualizado_en=NOW() WHERE id=$3`,
-      [(pin||'').trim() || null, hora_entrada_esperada || '09:00', req.params.id]
+      `UPDATE fac_empleados SET
+         pin_checador=$1,
+         hora_entrada_esperada=$2,
+         hora_salida_esperada=$3,
+         dias_descanso=$4,
+         actualizado_en=NOW()
+       WHERE id=$5`,
+      [(pin||'').trim() || null,
+       hora_entrada_esperada || '09:00',
+       hora_salida_esperada  || '18:00',
+       dd,
+       req.params.id]
     );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
