@@ -85,7 +85,7 @@ router.get('/empleados', async (req, res) => {
 // POST /api/checador/entrada — registrar entrada (empleado + PIN)
 router.post('/entrada', async (req, res) => {
   try {
-    const { empleado_id, pin, notas } = req.body;
+    const { empleado_id, pin, notas, hora_local, fecha_local } = req.body;
     if (!empleado_id) return res.status(400).json({ error: 'Empleado requerido.' });
 
     const emp = await query(
@@ -100,9 +100,13 @@ router.post('/entrada', async (req, res) => {
       return res.status(403).json({ error: 'PIN incorrecto.' });
     }
 
-    const hoy = new Date().toISOString().slice(0,10);
-    const ahora = new Date();
-    const horaAhora = ahora.toTimeString().slice(0,8); // HH:MM:SS
+    // Usar la hora/fecha LOCAL del navegador si viene; si no, usar la del servidor
+    const hoy       = (fecha_local && /^\d{4}-\d{2}-\d{2}$/.test(fecha_local)) ? fecha_local : new Date().toISOString().slice(0,10);
+    const horaAhora = (hora_local  && /^\d{2}:\d{2}(:\d{2})?$/.test(hora_local))
+                        ? (hora_local.length === 5 ? hora_local + ':00' : hora_local)
+                        : new Date().toTimeString().slice(0,8);
+    // Reconstruir Date en zona local a partir de fecha+hora recibidos, para cálculos
+    const ahora = new Date(`${hoy}T${horaAhora}`);
     const diaSemana = ahora.getDay(); // 0=Dom ... 6=Sáb
 
     // Verificar si hoy es día de descanso
@@ -164,7 +168,7 @@ router.post('/entrada', async (req, res) => {
 // POST /api/checador/salida — registrar salida
 router.post('/salida', async (req, res) => {
   try {
-    const { empleado_id, pin, notas } = req.body;
+    const { empleado_id, pin, notas, hora_local, fecha_local } = req.body;
     if (!empleado_id) return res.status(400).json({ error: 'Empleado requerido.' });
 
     const emp = await query(
@@ -176,8 +180,11 @@ router.post('/salida', async (req, res) => {
       return res.status(403).json({ error: 'PIN incorrecto.' });
     }
 
-    const hoy = new Date().toISOString().slice(0,10);
-    const horaAhora = new Date().toTimeString().slice(0,8);
+    // Usar hora/fecha LOCAL del navegador si viene
+    const hoy       = (fecha_local && /^\d{4}-\d{2}-\d{2}$/.test(fecha_local)) ? fecha_local : new Date().toISOString().slice(0,10);
+    const horaAhora = (hora_local  && /^\d{2}:\d{2}(:\d{2})?$/.test(hora_local))
+                        ? (hora_local.length === 5 ? hora_local + ':00' : hora_local)
+                        : new Date().toTimeString().slice(0,8);
 
     const reg = await query(
       `SELECT id, hora_entrada, hora_salida FROM fac_reloj_checador WHERE empleado_id=$1 AND fecha=$2`,
@@ -194,9 +201,9 @@ router.post('/salida', async (req, res) => {
 
     // Calcular minutos trabajados
     const [eh,em] = reg.rows[0].hora_entrada.toString().slice(0,5).split(':').map(Number);
-    const ahoraDt = new Date();
+    const [sh,sm] = horaAhora.slice(0,5).split(':').map(Number);
     const minEntr = eh*60 + em;
-    const minSal  = ahoraDt.getHours()*60 + ahoraDt.getMinutes();
+    const minSal  = sh*60 + sm;
     const minTrab = Math.max(0, minSal - minEntr);
 
     await query(
