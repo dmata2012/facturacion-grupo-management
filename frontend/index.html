@@ -642,11 +642,13 @@ function canAdmin() { return ME && ME.rol === 'admin'; }
 function isCapturista()        { return ME && ME.rol === 'capturista'; }
 function isTesoreria()         { return ME && ME.rol === 'tesoreria'; }
 function isTesoreriaConsulta() { return ME && ME.rol === 'tesoreria_consulta'; }
+function isChecador()          { return ME && ME.rol === 'checador'; }
 
 // Páginas permitidas por rol restringido
 const PAGES_CAPTURISTA         = ['facturas', 'empleados', 'vacaciones'];
 const PAGES_TESORERIA          = ['cajaChica'];
 const PAGES_TESORERIA_CONSULTA = ['cajaChica'];
+const PAGES_CHECADOR           = ['checador'];
 
 function badgeEstatus(e) {
   const map = {pendiente:'b-pendiente',parcial:'b-parcial',pagada:'b-pagada',vencida:'b-vencida',cancelada:'b-cancelada',borrador:'b-borrador',cerrada:'b-cerrada'};
@@ -771,11 +773,14 @@ function initApp() {
     $('nav-sec-admin').style.display = 'block';
   }
   // Capturista: ocultar todo el menú excepto Facturas y aterrizar ahí
-  if (isCapturista() || isTesoreria() || isTesoreriaConsulta()) {
+  if (isCapturista() || isTesoreria() || isTesoreriaConsulta() || isChecador()) {
     const permitidas = isCapturista() ? PAGES_CAPTURISTA
                      : isTesoreria()  ? PAGES_TESORERIA
-                     : PAGES_TESORERIA_CONSULTA;
-    const landing    = isCapturista() ? 'facturas' : 'cajaChica';
+                     : isTesoreriaConsulta() ? PAGES_TESORERIA_CONSULTA
+                     : PAGES_CHECADOR;
+    const landing    = isCapturista() ? 'facturas'
+                     : isChecador()   ? 'checador'
+                     : 'cajaChica';
     document.querySelectorAll('nav a').forEach(a => {
       const pg = a.id?.replace('nav-','');
       if (!permitidas.includes(pg)) a.style.display = 'none';
@@ -807,6 +812,10 @@ function nav(page) {
     return;
   }
   if (isTesoreriaConsulta() && !PAGES_TESORERIA_CONSULTA.includes(page)) {
+    toast('No tienes acceso a esta sección.', 'err');
+    return;
+  }
+  if (isChecador() && !PAGES_CHECADOR.includes(page)) {
     toast('No tienes acceso a esta sección.', 'err');
     return;
   }
@@ -3997,22 +4006,23 @@ async function cargarDetalleEst(tipo) {
 
 // ══ RELOJ CHECADOR ═══════════════════════════
 async function checador() {
+  const soloMarcar = isChecador();  // El rol 'checador' solo ve la pantalla de marcar
   $('content').innerHTML = `
     <div class="page-header">
       <div class="page-header-left">
         <div class="page-title">🕐 Reloj Checador</div>
-        <div class="page-sub">Registro de entradas y salidas del personal</div>
+        <div class="page-sub">${soloMarcar?'Marca tu entrada o salida':'Registro de entradas y salidas del personal'}</div>
       </div>
       ${canAdmin()?`<div style="display:flex;gap:6px">
         <button class="btn bo bsm" onclick="openUbicacionesCH()">📍 Ubicaciones</button>
         <button class="btn bo bsm" onclick="openConfigPINs()">⚙ Configurar PINs</button>
       </div>`:''}
     </div>
-    <div class="tabs">
+    ${soloMarcar?'':`<div class="tabs">
       <div class="tab active" onclick="showTab(this,'ch-tab-marcar')">✋ Marcar entrada/salida</div>
       <div class="tab" onclick="showTab(this,'ch-tab-hoy');cargarChecadorHoy()">📅 Registros de hoy</div>
       <div class="tab" onclick="showTab(this,'ch-tab-reporte');cargarChecadorReporte()">📊 Reporte por periodo</div>
-    </div>
+    </div>`}
 
     <!-- PESTAÑA MARCAR -->
     <div class="tab-panel active" id="ch-tab-marcar">
@@ -6639,7 +6649,7 @@ function openUsuario(id=null) {
   <div class="fi" style="margin-bottom:10px"><label>Email *</label><input type="email" id="us-email"></div>
   <div class="fi" style="margin-bottom:10px"><label>Contraseña ${id?'(dejar vacío = no cambiar)':''}</label><input type="password" id="us-pass"></div>
   <div class="fi" style="margin-bottom:14px"><label>Rol</label>
-    <select id="us-rol"><option>admin</option><option>gerente</option><option>capturista</option><option>tesoreria</option><option value="tesoreria_consulta">tesoreria_consulta</option><option>lectura</option></select>
+    <select id="us-rol"><option>admin</option><option>gerente</option><option>capturista</option><option>tesoreria</option><option value="tesoreria_consulta">tesoreria_consulta</option><option>checador</option><option>lectura</option></select>
   </div>
   <div class="form-actions">
     <button class="btn bo" onclick="closeModal('modal-usuario')">Cancelar</button>
