@@ -102,7 +102,13 @@ router.get('/hoy', async (req, res) => {
     const { fecha } = req.query;
     const f = fecha || new Date().toISOString().slice(0,10);
     const r = await query(`
-      SELECT r.*, e.nombre, e.puesto, e.departamento, e.numero_colaborador, e.hora_entrada_esperada
+      SELECT r.id, r.empleado_id, r.fecha, r.hora_entrada, r.hora_salida,
+        r.minutos_trabajados, r.minutos_retardo, r.notas,
+        r.lat_entrada, r.lng_entrada, r.lat_salida, r.lng_salida,
+        r.ubicacion_id_entr, r.ubicacion_id_sal, r.distancia_entr_mts, r.distancia_sal_mts,
+        (r.foto_entrada IS NOT NULL) AS tiene_foto_entrada,
+        (r.foto_salida  IS NOT NULL) AS tiene_foto_salida,
+        e.nombre, e.puesto, e.departamento, e.numero_colaborador, e.hora_entrada_esperada
       FROM fac_reloj_checador r
       JOIN fac_empleados e ON e.id = r.empleado_id
       WHERE r.fecha = $1
@@ -134,7 +140,11 @@ router.get('/reporte', async (req, res) => {
 
     // Marca en_vacaciones si la fecha del registro cae dentro de una solicitud aprobada
     const r = await query(`
-      SELECT r.*, e.nombre, e.puesto, e.departamento, e.numero_colaborador,
+      SELECT r.id, r.empleado_id, r.fecha, r.hora_entrada, r.hora_salida,
+        r.minutos_trabajados, r.minutos_retardo, r.notas,
+        (r.foto_entrada IS NOT NULL) AS tiene_foto_entrada,
+        (r.foto_salida  IS NOT NULL) AS tiene_foto_salida,
+        e.nombre, e.puesto, e.departamento, e.numero_colaborador,
         EXISTS (
           SELECT 1 FROM fac_vacaciones_solicitudes s
           WHERE s.empleado_id = r.empleado_id
@@ -177,7 +187,7 @@ router.get('/empleados', async (req, res) => {
 // POST /api/checador/entrada — registrar entrada (empleado + PIN)
 router.post('/entrada', async (req, res) => {
   try {
-    const { empleado_id, pin, notas, hora_local, fecha_local, lat, lng } = req.body;
+    const { empleado_id, pin, notas, hora_local, fecha_local, lat, lng, foto } = req.body;
     if (!empleado_id) return res.status(400).json({ error: 'Empleado requerido.' });
 
     // Validar ubicación si está activada
@@ -252,27 +262,33 @@ router.post('/entrada', async (req, res) => {
       });
     }
 
+    // Validar tamaño de foto (~200KB máx para prevenir abuso)
+    const fotoOk = (foto && typeof foto === 'string' && foto.length < 300000) ? foto : null;
+
     if (ya.rows.length) {
       await query(
         `UPDATE fac_reloj_checador SET hora_entrada=$1, minutos_retardo=$2, notas=$3,
            lat_entrada=$4, lng_entrada=$5, ubicacion_id_entr=$6, distancia_entr_mts=$7,
+           foto_entrada=COALESCE($8, foto_entrada),
            actualizado_en=NOW()
-         WHERE id=$8`,
+         WHERE id=$9`,
         [horaAhora, minutosRetardo, notas||null,
          lat != null ? parseFloat(lat) : null,
          lng != null ? parseFloat(lng) : null,
          ubiInfo?.id || null, ubiInfo?.distancia ?? null,
+         fotoOk,
          ya.rows[0].id]
       );
     } else {
       await query(
         `INSERT INTO fac_reloj_checador(empleado_id, fecha, hora_entrada, minutos_retardo, notas,
-           lat_entrada, lng_entrada, ubicacion_id_entr, distancia_entr_mts, creado_por)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+           lat_entrada, lng_entrada, ubicacion_id_entr, distancia_entr_mts, foto_entrada, creado_por)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [empleado_id, hoy, horaAhora, minutosRetardo, notas||null,
          lat != null ? parseFloat(lat) : null,
          lng != null ? parseFloat(lng) : null,
          ubiInfo?.id || null, ubiInfo?.distancia ?? null,
+         fotoOk,
          req.usuario.id]
       );
     }
@@ -290,7 +306,7 @@ router.post('/entrada', async (req, res) => {
 // POST /api/checador/salida — registrar salida
 router.post('/salida', async (req, res) => {
   try {
-    const { empleado_id, pin, notas, hora_local, fecha_local, lat, lng } = req.body;
+    const { empleado_id, pin, notas, hora_local, fecha_local, lat, lng, foto } = req.body;
     if (!empleado_id) return res.status(400).json({ error: 'Empleado requerido.' });
 
     // Validar ubicación si está activada
@@ -345,17 +361,21 @@ router.post('/salida', async (req, res) => {
     const minSal  = sh*60 + sm;
     const minTrab = Math.max(0, minSal - minEntr);
 
+    const fotoOk = (foto && typeof foto === 'string' && foto.length < 300000) ? foto : null;
+
     await query(
       `UPDATE fac_reloj_checador SET
          hora_salida=$1, minutos_trabajados=$2,
          notas=COALESCE(NULLIF($3,''), notas),
          lat_salida=$4, lng_salida=$5, ubicacion_id_sal=$6, distancia_sal_mts=$7,
+         foto_salida=COALESCE($8, foto_salida),
          actualizado_en=NOW()
-       WHERE id=$8`,
+       WHERE id=$9`,
       [horaAhora, minTrab, notas||'',
        lat != null ? parseFloat(lat) : null,
        lng != null ? parseFloat(lng) : null,
        ubiInfo?.id || null, ubiInfo?.distancia ?? null,
+       fotoOk,
        reg.rows[0].id]
     );
 
@@ -422,5 +442,32 @@ router.put('/empleado/:id/pin', requireRol('admin'), async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// GET /api/checador/:id/foto/:tipo — obtener foto individual (entrada|salida)
+router.get('/:id/foto/:tipo', async (req, res) => {
+  try {
+    const tipo = req.params.tipo === 'entrada' ? 'foto_entrada' : 'foto_salida';
+    const r = await query(`SELECT ${tipo} AS foto FROM fac_reloj_checador WHERE id=$1`, [req.params.id]);
+    if (!r.rows.length || !r.rows[0].foto) return res.status(404).json({ error: 'Sin foto.' });
+    res.json({ foto: r.rows[0].foto });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Auto-limpieza: borra fotos > 90 días (se ejecuta al arrancar y cada 24h)
+async function limpiarFotosAntiguas() {
+  try {
+    const r = await query(`
+      UPDATE fac_reloj_checador
+        SET foto_entrada=NULL, foto_salida=NULL
+      WHERE fecha < CURRENT_DATE - INTERVAL '90 days'
+        AND (foto_entrada IS NOT NULL OR foto_salida IS NOT NULL)
+      RETURNING id
+    `);
+    if (r.rows.length) console.log(`🗑 Checador: fotos borradas de ${r.rows.length} registros con más de 90 días.`);
+  } catch (e) { console.warn('⚠ Auto-limpieza checador:', e.message); }
+}
+// Ejecutar al arrancar y cada 24 horas
+limpiarFotosAntiguas();
+setInterval(limpiarFotosAntiguas, 24*60*60*1000);
 
 module.exports = router;

@@ -4030,9 +4030,19 @@ async function checador() {
           <input type="password" id="ch-pin" placeholder="****" maxlength="10" inputmode="numeric" autocomplete="off"
                  style="font-size:20px;text-align:center;letter-spacing:6px;padding:12px;font-weight:800">
         </div>
-        <div class="fi" style="margin-bottom:14px">
+        <div class="fi" style="margin-bottom:12px">
           <label>Notas (opcional)</label>
           <input id="ch-notas" placeholder="Ej: Salida temprana por cita médica">
+        </div>
+        <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;padding:10px 12px;margin-bottom:14px;display:flex;align-items:center;gap:12px">
+          <div id="ch-foto-preview" style="width:52px;height:52px;border-radius:50%;background:#dbeafe;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;overflow:hidden;border:2px solid #93c5fd">📷</div>
+          <div style="flex:1;min-width:0">
+            <label class="btn bo bsm" style="cursor:pointer;font-weight:700">
+              📸 Tomar foto de verificación
+              <input type="file" id="ch-foto-input" accept="image/*" capture="user" style="display:none" onchange="onFotoCHFile(this)">
+            </label>
+            <div id="ch-foto-msg" style="font-size:10.5px;color:#1e40af;margin-top:3px">La foto se comprime y guarda para auditoría (auto-borra a 90 días).</div>
+          </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <button onclick="marcarChecador('entrada')" style="padding:18px;font-size:16px;font-weight:800;border-radius:12px;border:2px solid #16a34a;background:#dcfce7;color:#166534;cursor:pointer;transition:all .18s"
@@ -4112,6 +4122,53 @@ async function obtenerUbicacionCH() {
   });
 }
 
+// Comprime una imagen (File o Blob) a JPG 400x300 q70 (~30 KB)
+function comprimirFotoCH(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = e => {
+      img.onload = () => {
+        try {
+          const MAX_W = 400, MAX_H = 400;
+          let w = img.width, h = img.height;
+          const ratio = Math.min(MAX_W/w, MAX_H/h, 1);
+          w = Math.round(w * ratio);
+          h = Math.round(h * ratio);
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          resolve(dataUrl);
+        } catch(err) { reject(err); }
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// Manejo del input de foto: comprime y guarda en memoria
+async function onFotoCHFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const msg = $('ch-foto-msg');
+  const prev = $('ch-foto-preview');
+  try {
+    if (msg) msg.innerHTML = '<span style="color:var(--muted)">📸 Comprimiendo...</span>';
+    const dataUrl = await comprimirFotoCH(file);
+    window._chFoto = dataUrl;
+    if (prev) prev.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover">`;
+    const kb = Math.round(dataUrl.length * 3 / 4 / 1024);
+    if (msg) msg.innerHTML = `<span style="color:#16a34a">✅ Foto lista (${kb} KB)</span>`;
+  } catch(e) {
+    if (msg) msg.innerHTML = `<span style="color:#dc2626">⚠ ${e.message}</span>`;
+  }
+}
+
 async function marcarChecador(tipo) {
   const empleado_id = $('ch-emp')?.value;
   const pin         = $('ch-pin')?.value || '';
@@ -4128,6 +4185,7 @@ async function marcarChecador(tipo) {
   const ubi = await obtenerUbicacionCH();
   const body = { empleado_id, pin, notas, hora_local, fecha_local };
   if (ubi && !ubi.error) { body.lat = ubi.lat; body.lng = ubi.lng; }
+  if (window._chFoto) { body.foto = window._chFoto; }
 
   try {
     const r = await api(`/checador/${tipo}`, { method:'POST', body: JSON.stringify(body) });
@@ -4144,6 +4202,11 @@ async function marcarChecador(tipo) {
     if (msg) msg.innerHTML = `<span style="color:#16a34a;font-size:15px">✅ ${r.empleado} — ${tipo==='entrada'?'Entrada':'Salida'} a las ${r.hora?.slice(0,5)}${extra}</span>${ubiTxt}`;
     if ($('ch-pin'))   $('ch-pin').value = '';
     if ($('ch-notas')) $('ch-notas').value = '';
+    // Limpiar foto para el siguiente colaborador
+    window._chFoto = null;
+    if ($('ch-foto-input')) $('ch-foto-input').value = '';
+    if ($('ch-foto-preview')) $('ch-foto-preview').innerHTML = '📷';
+    if ($('ch-foto-msg')) $('ch-foto-msg').innerHTML = 'La foto se comprime y guarda para auditoría (auto-borra a 90 días).';
   } catch(e) {
     if (msg) msg.innerHTML = `<span style="color:#dc2626">⚠ ${e.message}</span>`;
   }
@@ -4174,7 +4237,7 @@ async function cargarChecadorHoy() {
     $('chd-tabla').innerHTML = vacHtml + (d.registros.length ? `
       <div class="tscroll"><table>
         <thead><tr><th>N°</th><th>Colaborador</th><th>Puesto</th>
-        <th>Entrada</th><th>Retardo</th><th>Salida</th><th>Trabajado</th><th>Notas</th>${canAdmin()?'<th></th>':''}</tr></thead>
+        <th>Entrada</th><th>Retardo</th><th>Salida</th><th>Trabajado</th><th>Notas</th><th>Acciones</th></tr></thead>
         <tbody>${d.registros.map(r => `<tr>
           <td>${r.numero_colaborador||r.empleado_id}</td>
           <td style="font-weight:700">${r.nombre}</td>
@@ -4184,7 +4247,11 @@ async function cargarChecadorHoy() {
           <td style="font-weight:700;color:${r.hora_salida?'#991b1b':'var(--muted)'}">${r.hora_salida?r.hora_salida.toString().slice(0,5):'—'}</td>
           <td style="font-weight:800">${fmtMin(r.minutos_trabajados)}</td>
           <td style="font-size:11px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.notas||''}">${r.notas||'—'}</td>
-          ${canAdmin()?`<td><button class="btn bg bsm" onclick="editarChecador(${r.id})">✏️</button> <button class="btn bd bsm" onclick="eliminarChecador(${r.id})">🗑</button></td>`:''}
+          <td style="white-space:nowrap">
+            ${r.tiene_foto_entrada?`<button class="btn bo bsm" onclick="verFotoChecador(${r.id},'entrada','${(r.nombre||'').replace(/'/g,"\\'")}')" title="Foto entrada">📸E</button>`:''}
+            ${r.tiene_foto_salida?`<button class="btn bo bsm" onclick="verFotoChecador(${r.id},'salida','${(r.nombre||'').replace(/'/g,"\\'")}')" title="Foto salida">📸S</button>`:''}
+            ${canAdmin()?`<button class="btn bg bsm" onclick="editarChecador(${r.id})">✏️</button> <button class="btn bd bsm" onclick="eliminarChecador(${r.id})">🗑</button>`:''}
+          </td>
         </tr>`).join('')}</tbody>
       </table></div>` : '<p class="empty">Sin registros del checador para esta fecha.</p>');
   } catch(e) { $('chd-tabla').innerHTML = `<p class="empty">${e.message}</p>`; }
@@ -4275,6 +4342,22 @@ async function eliminarChecador(id) {
     await api(`/checador/${id}`, { method:'DELETE' });
     toast('Registro eliminado.');
     cargarChecadorHoy();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function verFotoChecador(id, tipo, nombre) {
+  try {
+    const r = await api(`/checador/${id}/foto/${tipo}`);
+    // Reusar modal-cambiar-clave como visor genérico
+    $('modal-cambiar-clave-body').innerHTML = `
+      <button onclick="closeModal('modal-cambiar-clave')" style="position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;border:2px solid var(--border);background:#fff;cursor:pointer;font-size:14px;font-weight:800;color:var(--muted)">✕</button>
+      <h4>📸 Foto de ${tipo} — ${nombre}</h4>
+      <div style="text-align:center;padding:12px">
+        <img src="${r.foto}" style="max-width:100%;max-height:60vh;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.15)">
+      </div>
+      <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-cambiar-clave')">Cerrar</button></div>`;
+    $('modal-cambiar-clave').querySelector('.modal').style.width = 'min(500px,96vw)';
+    openModal('modal-cambiar-clave');
   } catch(e) { toast(e.message, 'err'); }
 }
 
