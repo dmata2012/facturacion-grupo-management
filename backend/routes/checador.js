@@ -106,11 +106,15 @@ router.get('/hoy', async (req, res) => {
         r.minutos_trabajados, r.minutos_retardo, r.notas,
         r.lat_entrada, r.lng_entrada, r.lat_salida, r.lng_salida,
         r.ubicacion_id_entr, r.ubicacion_id_sal, r.distancia_entr_mts, r.distancia_sal_mts,
+        ue.nombre AS ubicacion_entrada,
+        us.nombre AS ubicacion_salida,
         (r.foto_entrada IS NOT NULL) AS tiene_foto_entrada,
         (r.foto_salida  IS NOT NULL) AS tiene_foto_salida,
         e.nombre, e.puesto, e.departamento, e.numero_colaborador, e.hora_entrada_esperada
       FROM fac_reloj_checador r
       JOIN fac_empleados e ON e.id = r.empleado_id
+      LEFT JOIN fac_checador_ubicaciones ue ON ue.id = r.ubicacion_id_entr
+      LEFT JOIN fac_checador_ubicaciones us ON us.id = r.ubicacion_id_sal
       WHERE r.fecha = $1
       ORDER BY r.hora_entrada NULLS LAST, e.nombre
     `, [f]);
@@ -142,6 +146,10 @@ router.get('/reporte', async (req, res) => {
     const r = await query(`
       SELECT r.id, r.empleado_id, r.fecha, r.hora_entrada, r.hora_salida,
         r.minutos_trabajados, r.minutos_retardo, r.notas,
+        r.lat_entrada, r.lng_entrada, r.lat_salida, r.lng_salida,
+        r.distancia_entr_mts, r.distancia_sal_mts,
+        ue.nombre AS ubicacion_entrada,
+        us.nombre AS ubicacion_salida,
         (r.foto_entrada IS NOT NULL) AS tiene_foto_entrada,
         (r.foto_salida  IS NOT NULL) AS tiene_foto_salida,
         e.nombre, e.puesto, e.departamento, e.numero_colaborador,
@@ -153,6 +161,8 @@ router.get('/reporte', async (req, res) => {
         ) AS en_vacaciones
       FROM fac_reloj_checador r
       JOIN fac_empleados e ON e.id = r.empleado_id
+      LEFT JOIN fac_checador_ubicaciones ue ON ue.id = r.ubicacion_id_entr
+      LEFT JOIN fac_checador_ubicaciones us ON us.id = r.ubicacion_id_sal
       ${where}
       ORDER BY r.fecha DESC, e.nombre
     `, params);

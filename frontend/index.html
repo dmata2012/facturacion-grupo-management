@@ -4218,6 +4218,30 @@ const fmtMin = m => {
   return `${h}h ${r.toString().padStart(2,'0')}m`;
 };
 
+// Renderiza la información de ubicación de un registro
+function renderUbicacionCH(r) {
+  const parts = [];
+  if (r.ubicacion_entrada) {
+    const dist = r.distancia_entr_mts != null ? ` · ${r.distancia_entr_mts}m` : '';
+    const link = r.lat_entrada && r.lng_entrada
+      ? ` <a href="https://www.google.com/maps?q=${r.lat_entrada},${r.lng_entrada}" target="_blank" style="color:var(--red);text-decoration:none" title="Ver en mapa">🗺</a>`
+      : '';
+    parts.push(`<div><span style="color:#166534;font-weight:700">📥 ${r.ubicacion_entrada}</span><span style="color:var(--muted)">${dist}</span>${link}</div>`);
+  } else if (r.lat_entrada && r.lng_entrada) {
+    parts.push(`<div><a href="https://www.google.com/maps?q=${r.lat_entrada},${r.lng_entrada}" target="_blank" style="color:#d97706;text-decoration:none" title="Fuera de zona autorizada">📥 ⚠ Fuera de zona 🗺</a></div>`);
+  }
+  if (r.ubicacion_salida) {
+    const dist = r.distancia_sal_mts != null ? ` · ${r.distancia_sal_mts}m` : '';
+    const link = r.lat_salida && r.lng_salida
+      ? ` <a href="https://www.google.com/maps?q=${r.lat_salida},${r.lng_salida}" target="_blank" style="color:var(--red);text-decoration:none" title="Ver en mapa">🗺</a>`
+      : '';
+    parts.push(`<div><span style="color:#991b1b;font-weight:700">📤 ${r.ubicacion_salida}</span><span style="color:var(--muted)">${dist}</span>${link}</div>`);
+  } else if (r.lat_salida && r.lng_salida) {
+    parts.push(`<div><a href="https://www.google.com/maps?q=${r.lat_salida},${r.lng_salida}" target="_blank" style="color:#d97706;text-decoration:none" title="Fuera de zona autorizada">📤 ⚠ Fuera de zona 🗺</a></div>`);
+  }
+  return parts.length ? parts.join('') : '<span style="color:var(--muted)">—</span>';
+}
+
 async function cargarChecadorHoy() {
   const fecha = $('chd-fecha')?.value || new Date().toISOString().slice(0,10);
   try {
@@ -4237,7 +4261,7 @@ async function cargarChecadorHoy() {
     $('chd-tabla').innerHTML = vacHtml + (d.registros.length ? `
       <div class="tscroll"><table>
         <thead><tr><th>N°</th><th>Colaborador</th><th>Puesto</th>
-        <th>Entrada</th><th>Retardo</th><th>Salida</th><th>Trabajado</th><th>Notas</th><th>Acciones</th></tr></thead>
+        <th>Entrada</th><th>Retardo</th><th>Salida</th><th>Trabajado</th><th>Ubicación</th><th>Notas</th><th>Acciones</th></tr></thead>
         <tbody>${d.registros.map(r => `<tr>
           <td>${r.numero_colaborador||r.empleado_id}</td>
           <td style="font-weight:700">${r.nombre}</td>
@@ -4246,6 +4270,7 @@ async function cargarChecadorHoy() {
           <td style="color:${(r.minutos_retardo||0)>0?'#dc2626':'var(--muted)'};font-weight:${(r.minutos_retardo||0)>0?'700':'400'}">${(r.minutos_retardo||0)>0?fmtMin(r.minutos_retardo):'—'}</td>
           <td style="font-weight:700;color:${r.hora_salida?'#991b1b':'var(--muted)'}">${r.hora_salida?r.hora_salida.toString().slice(0,5):'—'}</td>
           <td style="font-weight:800">${fmtMin(r.minutos_trabajados)}</td>
+          <td style="font-size:11px;min-width:140px">${renderUbicacionCH(r)}</td>
           <td style="font-size:11px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.notas||''}">${r.notas||'—'}</td>
           <td style="white-space:nowrap">
             ${r.tiene_foto_entrada?`<button class="btn bo bsm" onclick="verFotoChecador(${r.id},'entrada','${(r.nombre||'').replace(/'/g,"\\'")}')" title="Foto entrada">📸E</button>`:''}
@@ -4301,7 +4326,7 @@ async function cargarChecadorReporte() {
       ${d.registros.length?`
       <div class="tscroll"><table>
         <thead><tr><th>Fecha</th><th>N°</th><th>Colaborador</th>
-        <th>Entrada</th><th>Retardo</th><th>Salida</th><th>Trabajado</th><th>Estado</th><th>Notas</th>${canAdmin()?'<th></th>':''}</tr></thead>
+        <th>Entrada</th><th>Retardo</th><th>Salida</th><th>Trabajado</th><th>Ubicación</th><th>Estado</th><th>Notas</th><th></th></tr></thead>
         <tbody>${d.registros.map(r => `<tr style="${r.en_vacaciones?'background:#eff6ff':''}">
           <td>${fmtDate(r.fecha)}</td>
           <td>${r.numero_colaborador||r.empleado_id}</td>
@@ -4310,9 +4335,14 @@ async function cargarChecadorReporte() {
           <td style="color:${(r.minutos_retardo||0)>0?'#dc2626':'var(--muted)'}">${(r.minutos_retardo||0)>0?fmtMin(r.minutos_retardo):'—'}</td>
           <td style="color:${r.hora_salida?'#991b1b':'var(--muted)'};font-weight:600">${r.hora_salida?r.hora_salida.toString().slice(0,5):'—'}</td>
           <td style="font-weight:700">${fmtMin(r.minutos_trabajados)}</td>
-          <td>${r.en_vacaciones?'<span style="background:#dbeafe;color:#1e3a8a;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:800">🏖 VACACIONES</span>':'—'}</td>
-          <td style="font-size:11px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.notas||''}">${r.notas||'—'}</td>
-          ${canAdmin()?`<td><button class="btn bg bsm" onclick="editarChecador(${r.id})">✏️</button></td>`:''}
+          <td style="font-size:11px;min-width:140px">${renderUbicacionCH(r)}</td>
+          <td>${r.en_vacaciones?'<span style="background:#dbeafe;color:#1e3a8a;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:800">🏖 VAC</span>':'—'}</td>
+          <td style="font-size:11px;color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.notas||''}">${r.notas||'—'}</td>
+          <td style="white-space:nowrap">
+            ${r.tiene_foto_entrada?`<button class="btn bo bsm" onclick="verFotoChecador(${r.id},'entrada','${(r.nombre||'').replace(/'/g,"\\'")}')" title="Foto entrada">📸E</button>`:''}
+            ${r.tiene_foto_salida?`<button class="btn bo bsm" onclick="verFotoChecador(${r.id},'salida','${(r.nombre||'').replace(/'/g,"\\'")}')" title="Foto salida">📸S</button>`:''}
+            ${canAdmin()?`<button class="btn bg bsm" onclick="editarChecador(${r.id})">✏️</button>`:''}
+          </td>
         </tr>`).join('')}</tbody>
       </table></div>`:'<p class="empty">Sin registros para estos filtros.</p>'}`;
   } catch(e) { $('chr-body').innerHTML = `<p class="empty">${e.message}</p>`; }
