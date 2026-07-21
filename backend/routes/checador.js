@@ -4,6 +4,98 @@ const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
 
+// Fórmula de Haversine — distancia en metros entre 2 coords lat/lng
+function distanciaMetros(lat1, lng1, lat2, lng2) {
+  const R = 6371000; // radio Tierra en metros
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat/2)**2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+}
+
+// Devuelve la ubicación autorizada más cercana, o null si el usuario está fuera de todas
+async function ubicacionCercana(lat, lng) {
+  if (lat == null || lng == null) return null;
+  const ubis = await query(`SELECT * FROM fac_checador_ubicaciones WHERE activo=TRUE`);
+  let mejor = null;
+  for (const u of ubis.rows) {
+    const d = distanciaMetros(lat, lng, parseFloat(u.latitud), parseFloat(u.longitud));
+    if (d <= u.radio_metros && (!mejor || d < mejor.distancia)) {
+      mejor = { id: u.id, nombre: u.nombre, distancia: d };
+    }
+  }
+  return mejor;
+}
+
+// Config global: validar ubicación obligatoria
+async function validarUbicacionRequerida() {
+  const r = await query(`SELECT valor FROM fac_checador_config WHERE clave='validar_ubicacion'`);
+  return r.rows[0]?.valor === 'true';
+}
+
+// ══ UBICACIONES AUTORIZADAS ══
+router.get('/ubicaciones', async (req, res) => {
+  try {
+    const [ubis, cfg] = await Promise.all([
+      query(`SELECT * FROM fac_checador_ubicaciones ORDER BY activo DESC, nombre`),
+      query(`SELECT valor FROM fac_checador_config WHERE clave='validar_ubicacion'`)
+    ]);
+    res.json({
+      ubicaciones: ubis.rows,
+      validar_ubicacion: cfg.rows[0]?.valor === 'true'
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/ubicaciones', requireRol('admin'), async (req, res) => {
+  try {
+    const { nombre, latitud, longitud, radio_metros } = req.body;
+    if (!nombre || latitud == null || longitud == null)
+      return res.status(400).json({ error: 'Nombre, latitud y longitud requeridos.' });
+    const r = await query(
+      `INSERT INTO fac_checador_ubicaciones(nombre, latitud, longitud, radio_metros)
+       VALUES($1,$2,$3,$4) RETURNING *`,
+      [nombre.trim(), parseFloat(latitud), parseFloat(longitud), parseInt(radio_metros)||100]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/ubicaciones/:id', requireRol('admin'), async (req, res) => {
+  try {
+    const { nombre, latitud, longitud, radio_metros, activo } = req.body;
+    await query(
+      `UPDATE fac_checador_ubicaciones SET nombre=$1, latitud=$2, longitud=$3, radio_metros=$4, activo=$5
+       WHERE id=$6`,
+      [nombre.trim(), parseFloat(latitud), parseFloat(longitud), parseInt(radio_metros)||100,
+       activo !== false, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/ubicaciones/:id', requireRol('admin'), async (req, res) => {
+  try {
+    await query(`DELETE FROM fac_checador_ubicaciones WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Config global — validación obligatoria
+router.put('/config', requireRol('admin'), async (req, res) => {
+  try {
+    const { validar_ubicacion } = req.body;
+    await query(
+      `INSERT INTO fac_checador_config(clave, valor) VALUES('validar_ubicacion',$1)
+       ON CONFLICT(clave) DO UPDATE SET valor=$1`,
+      [validar_ubicacion ? 'true' : 'false']
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/checador/hoy — registros del día + colaboradores en vacaciones
 router.get('/hoy', async (req, res) => {
   try {
@@ -85,8 +177,26 @@ router.get('/empleados', async (req, res) => {
 // POST /api/checador/entrada — registrar entrada (empleado + PIN)
 router.post('/entrada', async (req, res) => {
   try {
-    const { empleado_id, pin, notas, hora_local, fecha_local } = req.body;
+    const { empleado_id, pin, notas, hora_local, fecha_local, lat, lng } = req.body;
     if (!empleado_id) return res.status(400).json({ error: 'Empleado requerido.' });
+
+    // Validar ubicación si está activada
+    const validarUbi = await validarUbicacionRequerida();
+    let ubiInfo = null;
+    if (validarUbi) {
+      if (lat == null || lng == null) {
+        return res.status(400).json({ error: 'Ubicación requerida. Autoriza el acceso al GPS en tu navegador.' });
+      }
+      ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng));
+      if (!ubiInfo) {
+        return res.status(403).json({
+          error: 'Estás fuera del área autorizada de trabajo. Solo puedes marcar entrada dentro de una ubicación registrada.'
+        });
+      }
+    } else if (lat != null && lng != null) {
+      // Guardar ubicación aunque no sea obligatoria
+      ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng));
+    }
 
     const emp = await query(
       `SELECT id, nombre, pin_checador, hora_entrada_esperada, dias_descanso FROM fac_empleados WHERE id=$1 AND activo=TRUE`,
@@ -144,15 +254,26 @@ router.post('/entrada', async (req, res) => {
 
     if (ya.rows.length) {
       await query(
-        `UPDATE fac_reloj_checador SET hora_entrada=$1, minutos_retardo=$2, notas=$3, actualizado_en=NOW()
-         WHERE id=$4`,
-        [horaAhora, minutosRetardo, notas||null, ya.rows[0].id]
+        `UPDATE fac_reloj_checador SET hora_entrada=$1, minutos_retardo=$2, notas=$3,
+           lat_entrada=$4, lng_entrada=$5, ubicacion_id_entr=$6, distancia_entr_mts=$7,
+           actualizado_en=NOW()
+         WHERE id=$8`,
+        [horaAhora, minutosRetardo, notas||null,
+         lat != null ? parseFloat(lat) : null,
+         lng != null ? parseFloat(lng) : null,
+         ubiInfo?.id || null, ubiInfo?.distancia ?? null,
+         ya.rows[0].id]
       );
     } else {
       await query(
-        `INSERT INTO fac_reloj_checador(empleado_id, fecha, hora_entrada, minutos_retardo, notas, creado_por)
-         VALUES($1,$2,$3,$4,$5,$6)`,
-        [empleado_id, hoy, horaAhora, minutosRetardo, notas||null, req.usuario.id]
+        `INSERT INTO fac_reloj_checador(empleado_id, fecha, hora_entrada, minutos_retardo, notas,
+           lat_entrada, lng_entrada, ubicacion_id_entr, distancia_entr_mts, creado_por)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [empleado_id, hoy, horaAhora, minutosRetardo, notas||null,
+         lat != null ? parseFloat(lat) : null,
+         lng != null ? parseFloat(lng) : null,
+         ubiInfo?.id || null, ubiInfo?.distancia ?? null,
+         req.usuario.id]
       );
     }
 
@@ -160,7 +281,8 @@ router.post('/entrada', async (req, res) => {
       ok: true, empleado: emp.rows[0].nombre, hora: horaAhora,
       retardo_minutos: minutosRetardo,
       es_descanso: esDescanso,
-      en_vacaciones: enVacaciones
+      en_vacaciones: enVacaciones,
+      ubicacion: ubiInfo ? { nombre: ubiInfo.nombre, distancia: ubiInfo.distancia } : null
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -168,8 +290,25 @@ router.post('/entrada', async (req, res) => {
 // POST /api/checador/salida — registrar salida
 router.post('/salida', async (req, res) => {
   try {
-    const { empleado_id, pin, notas, hora_local, fecha_local } = req.body;
+    const { empleado_id, pin, notas, hora_local, fecha_local, lat, lng } = req.body;
     if (!empleado_id) return res.status(400).json({ error: 'Empleado requerido.' });
+
+    // Validar ubicación si está activada
+    const validarUbi = await validarUbicacionRequerida();
+    let ubiInfo = null;
+    if (validarUbi) {
+      if (lat == null || lng == null) {
+        return res.status(400).json({ error: 'Ubicación requerida. Autoriza el acceso al GPS en tu navegador.' });
+      }
+      ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng));
+      if (!ubiInfo) {
+        return res.status(403).json({
+          error: 'Estás fuera del área autorizada de trabajo. Solo puedes marcar salida dentro de una ubicación registrada.'
+        });
+      }
+    } else if (lat != null && lng != null) {
+      ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng));
+    }
 
     const emp = await query(
       `SELECT id, nombre, pin_checador FROM fac_empleados WHERE id=$1 AND activo=TRUE`, [empleado_id]);
@@ -209,14 +348,21 @@ router.post('/salida', async (req, res) => {
     await query(
       `UPDATE fac_reloj_checador SET
          hora_salida=$1, minutos_trabajados=$2,
-         notas=COALESCE(NULLIF($3,''), notas), actualizado_en=NOW()
-       WHERE id=$4`,
-      [horaAhora, minTrab, notas||'', reg.rows[0].id]
+         notas=COALESCE(NULLIF($3,''), notas),
+         lat_salida=$4, lng_salida=$5, ubicacion_id_sal=$6, distancia_sal_mts=$7,
+         actualizado_en=NOW()
+       WHERE id=$8`,
+      [horaAhora, minTrab, notas||'',
+       lat != null ? parseFloat(lat) : null,
+       lng != null ? parseFloat(lng) : null,
+       ubiInfo?.id || null, ubiInfo?.distancia ?? null,
+       reg.rows[0].id]
     );
 
     res.json({
       ok: true, empleado: emp.rows[0].nombre, hora: horaAhora,
-      minutos_trabajados: minTrab
+      minutos_trabajados: minTrab,
+      ubicacion: ubiInfo ? { nombre: ubiInfo.nombre, distancia: ubiInfo.distancia } : null
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -4003,7 +4003,10 @@ async function checador() {
         <div class="page-title">🕐 Reloj Checador</div>
         <div class="page-sub">Registro de entradas y salidas del personal</div>
       </div>
-      ${canAdmin()?`<button class="btn bo bsm" onclick="openConfigPINs()">⚙ Configurar PINs</button>`:''}
+      ${canAdmin()?`<div style="display:flex;gap:6px">
+        <button class="btn bo bsm" onclick="openUbicacionesCH()">📍 Ubicaciones</button>
+        <button class="btn bo bsm" onclick="openConfigPINs()">⚙ Configurar PINs</button>
+      </div>`:''}
     </div>
     <div class="tabs">
       <div class="tab active" onclick="showTab(this,'ch-tab-marcar')">✋ Marcar entrada/salida</div>
@@ -4098,6 +4101,17 @@ async function checador() {
   window._chTimer = setInterval(dibujarReloj, 1000);
 }
 
+async function obtenerUbicacionCH() {
+  return new Promise(resolve => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, precision: pos.coords.accuracy }),
+      err => resolve({ error: err.message }),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+    );
+  });
+}
+
 async function marcarChecador(tipo) {
   const empleado_id = $('ch-emp')?.value;
   const pin         = $('ch-pin')?.value || '';
@@ -4106,16 +4120,28 @@ async function marcarChecador(tipo) {
   if (!empleado_id) { if (msg) msg.innerHTML = '<span style="color:#dc2626">⚠ Selecciona tu nombre</span>'; return; }
   // Enviar hora y fecha LOCAL del navegador (evita bug de zona horaria del servidor)
   const now = new Date();
-  const hora_local  = now.toTimeString().slice(0,8);   // HH:MM:SS
+  const hora_local  = now.toTimeString().slice(0,8);
   const fecha_local = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+
+  // Obtener ubicación GPS
+  if (msg) msg.innerHTML = '<span style="color:var(--muted)">📍 Obteniendo ubicación...</span>';
+  const ubi = await obtenerUbicacionCH();
+  const body = { empleado_id, pin, notas, hora_local, fecha_local };
+  if (ubi && !ubi.error) { body.lat = ubi.lat; body.lng = ubi.lng; }
+
   try {
-    const r = await api(`/checador/${tipo}`, { method:'POST', body: JSON.stringify({ empleado_id, pin, notas, hora_local, fecha_local }) });
+    const r = await api(`/checador/${tipo}`, { method:'POST', body: JSON.stringify(body) });
     let extra = '';
     if (tipo === 'entrada' && r.en_vacaciones)       extra = ` — 🏖 estás en vacaciones aprobadas`;
     else if (tipo === 'entrada' && r.es_descanso)    extra = ` — 🌴 hoy es día de descanso`;
     else if (tipo === 'entrada' && r.retardo_minutos > 0) extra = ` (${r.retardo_minutos} min de retardo)`;
     if (tipo === 'salida'  && r.minutos_trabajados)  extra = ` (${Math.floor(r.minutos_trabajados/60)}h ${r.minutos_trabajados%60}m trabajados)`;
-    if (msg) msg.innerHTML = `<span style="color:#16a34a;font-size:15px">✅ ${r.empleado} — ${tipo==='entrada'?'Entrada':'Salida'} a las ${r.hora?.slice(0,5)}${extra}</span>`;
+    // Info de ubicación
+    let ubiTxt = '';
+    if (r.ubicacion) ubiTxt = `<br><span style="color:#166534;font-size:12px">📍 ${r.ubicacion.nombre} · ${r.ubicacion.distancia}m del centro</span>`;
+    else if (ubi && !ubi.error) ubiTxt = `<br><span style="color:var(--muted);font-size:11px">📍 Ubicación fuera de zonas registradas</span>`;
+    else if (ubi?.error) ubiTxt = `<br><span style="color:#d97706;font-size:11px">⚠ GPS no disponible: ${ubi.error}</span>`;
+    if (msg) msg.innerHTML = `<span style="color:#16a34a;font-size:15px">✅ ${r.empleado} — ${tipo==='entrada'?'Entrada':'Salida'} a las ${r.hora?.slice(0,5)}${extra}</span>${ubiTxt}`;
     if ($('ch-pin'))   $('ch-pin').value = '';
     if ($('ch-notas')) $('ch-notas').value = '';
   } catch(e) {
@@ -4249,6 +4275,113 @@ async function eliminarChecador(id) {
     await api(`/checador/${id}`, { method:'DELETE' });
     toast('Registro eliminado.');
     cargarChecadorHoy();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function openUbicacionesCH() {
+  try {
+    const d = await api('/checador/ubicaciones');
+    $('modal-cambiar-clave-body').innerHTML = `
+      <button onclick="closeModal('modal-cambiar-clave')" style="position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;border:2px solid var(--border);background:#fff;cursor:pointer;font-size:14px;font-weight:800;color:var(--muted)">✕</button>
+      <h4>📍 Ubicaciones Autorizadas del Checador</h4>
+      <div class="ibox info" style="margin-bottom:12px;font-size:12px">
+        Configura las coordenadas de tu(s) oficina(s). Cuando la validación esté activa, los colaboradores solo podrán marcar entrada/salida si están dentro del radio autorizado.
+      </div>
+
+      <div style="background:${d.validar_ubicacion?'#fef3c7':'#f3f4f6'};border:2px solid ${d.validar_ubicacion?'#f59e0b':'#d1d5db'};border-radius:10px;padding:12px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:800;color:${d.validar_ubicacion?'#92400e':'#374151'}">
+            ${d.validar_ubicacion ? '🔒 Validación de ubicación ACTIVA' : '🔓 Validación de ubicación INACTIVA'}
+          </div>
+          <div style="font-size:11px;color:${d.validar_ubicacion?'#78350f':'#6b7280'};margin-top:2px">
+            ${d.validar_ubicacion ? 'Solo se puede marcar dentro de las ubicaciones registradas.' : 'Los colaboradores pueden marcar desde cualquier lugar.'}
+          </div>
+        </div>
+        <button class="btn ${d.validar_ubicacion?'bo':'bs'} bsm" onclick="toggleValidarUbicacion(${!d.validar_ubicacion})">
+          ${d.validar_ubicacion ? '🔓 Desactivar' : '🔒 Activar validación'}
+        </button>
+      </div>
+
+      <div style="margin-bottom:14px">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.5px;margin-bottom:8px">➕ Agregar nueva ubicación</div>
+        <div style="background:var(--bg-alt);border-radius:8px;padding:12px">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end">
+            <div class="fi" style="margin:0"><label style="font-size:10px">Nombre</label><input id="ubi-nombre" placeholder="Ej: Oficina principal"></div>
+            <div class="fi" style="margin:0"><label style="font-size:10px">Latitud</label><input id="ubi-lat" placeholder="21.161908" step="0.0000001" type="number"></div>
+            <div class="fi" style="margin:0"><label style="font-size:10px">Longitud</label><input id="ubi-lng" placeholder="-86.851528" step="0.0000001" type="number"></div>
+            <div class="fi" style="margin:0"><label style="font-size:10px">Radio (m)</label><input id="ubi-radio" type="number" value="100" min="10" max="5000"></div>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:8px">
+            <button class="btn bo bsm" onclick="capturarUbicacionActual()">📱 Usar mi ubicación actual</button>
+            <button class="btn bs bsm" onclick="guardarNuevaUbicacion()">💾 Agregar ubicación</button>
+          </div>
+          <div id="ubi-msg" style="font-size:11px;margin-top:6px;min-height:14px"></div>
+        </div>
+      </div>
+
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.5px;margin-bottom:8px">📍 Ubicaciones registradas (${d.ubicaciones.length})</div>
+      ${d.ubicaciones.length?`
+      <div class="tscroll" style="max-height:280px;overflow-y:auto"><table>
+        <thead><tr><th>Nombre</th><th>Coordenadas</th><th>Radio</th><th>Estado</th><th></th></tr></thead>
+        <tbody>${d.ubicaciones.map(u => `<tr>
+          <td style="font-weight:700">${u.nombre}</td>
+          <td style="font-family:monospace;font-size:11px">${parseFloat(u.latitud).toFixed(6)}, ${parseFloat(u.longitud).toFixed(6)}</td>
+          <td style="text-align:center;font-weight:600">${u.radio_metros}m</td>
+          <td>${u.activo?'<span style="color:#16a34a;font-weight:700">✅ Activo</span>':'<span style="color:var(--muted)">Inactivo</span>'}</td>
+          <td style="white-space:nowrap">
+            <a href="https://www.google.com/maps?q=${u.latitud},${u.longitud}" target="_blank" class="btn bo bsm" title="Ver en Google Maps">🗺</a>
+            <button class="btn bd bsm" onclick="eliminarUbicacionCH(${u.id})">🗑</button>
+          </td>
+        </tr>`).join('')}</tbody>
+      </table></div>` : '<p class="empty">Sin ubicaciones registradas. Agrega una arriba.</p>'}
+
+      <div class="form-actions" style="margin-top:14px"><button class="btn bo" onclick="closeModal('modal-cambiar-clave')">Cerrar</button></div>`;
+    $('modal-cambiar-clave').querySelector('.modal').style.width = 'min(820px,96vw)';
+    openModal('modal-cambiar-clave');
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function capturarUbicacionActual() {
+  const msg = $('ubi-msg');
+  if (msg) msg.innerHTML = '<span style="color:var(--muted)">📍 Obteniendo tu ubicación...</span>';
+  const u = await obtenerUbicacionCH();
+  if (!u || u.error) {
+    if (msg) msg.innerHTML = `<span style="color:#dc2626">⚠ No se pudo obtener GPS: ${u?.error||'desconocido'}</span>`;
+    return;
+  }
+  if ($('ubi-lat')) $('ubi-lat').value = u.lat.toFixed(7);
+  if ($('ubi-lng')) $('ubi-lng').value = u.lng.toFixed(7);
+  if (msg) msg.innerHTML = `<span style="color:#16a34a">✅ Ubicación capturada (precisión: ${Math.round(u.precision)}m)</span>`;
+}
+
+async function guardarNuevaUbicacion() {
+  const nombre = $('ubi-nombre')?.value.trim();
+  const lat    = parseFloat($('ubi-lat')?.value);
+  const lng    = parseFloat($('ubi-lng')?.value);
+  const radio  = parseInt($('ubi-radio')?.value) || 100;
+  if (!nombre) return toast('Nombre requerido.', 'warn');
+  if (isNaN(lat) || isNaN(lng)) return toast('Latitud y longitud requeridas.', 'warn');
+  try {
+    await api('/checador/ubicaciones', { method:'POST', body: JSON.stringify({ nombre, latitud:lat, longitud:lng, radio_metros:radio }) });
+    toast('Ubicación agregada.');
+    openUbicacionesCH();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarUbicacionCH(id) {
+  if (!await confirm2('¿Eliminar esta ubicación?')) return;
+  try {
+    await api(`/checador/ubicaciones/${id}`, { method:'DELETE' });
+    toast('Ubicación eliminada.');
+    openUbicacionesCH();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function toggleValidarUbicacion(nuevo) {
+  try {
+    await api('/checador/config', { method:'PUT', body: JSON.stringify({ validar_ubicacion: nuevo }) });
+    toast(`Validación de ubicación ${nuevo?'ACTIVADA':'DESACTIVADA'}.`);
+    openUbicacionesCH();
   } catch(e) { toast(e.message, 'err'); }
 }
 
