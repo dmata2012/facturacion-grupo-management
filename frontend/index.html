@@ -6612,14 +6612,20 @@ function regenerarInformeCC() {
     });
   }
 
+  // Cálculo del reembolso REAL = Fondo Fijo - Saldo Actual (lo que se necesita para restaurar)
+  const reembolsoReal = Math.max(0, asignado - saldoActual);
+
   txt += `${LINE}\n`;
   if (tipoFiltro === 'todos') {
     txt += `📥 Total entradas:  ${fmt(totEntradas)}\n`;
     txt += `📤 Total salidas:   ${fmt(totSalidas)}\n`;
     txt += `💰 *Neto:           ${fmt(totalNeto)}*\n`;
+  } else if (tipoFiltro === 'entrada') {
+    txt += `💰 *TOTAL INGRESOS: ${fmt(totalAbs)}*\n`;
   } else {
-    const label = tipoFiltro === 'entrada' ? 'TOTAL INGRESOS' : 'TOTAL A REEMBOLSAR';
-    txt += `💰 *${label}: ${fmt(totalAbs)}*\n`;
+    txt += `🧾 Comprobantes seleccionados: ${fmt(totalAbs)}\n`;
+    txt += `💰 *TOTAL A REEMBOLSAR: ${fmt(reembolsoReal)}*\n`;
+    txt += `   (Fondo Fijo ${fmt(asignado)} − Saldo actual ${fmt(saldoActual)})\n`;
   }
   txt += `${LINE}\n\n`;
 
@@ -6628,13 +6634,16 @@ function regenerarInformeCC() {
   txt += `🎯 Fondo Fijo:        ${fmt(asignado)}\n`;
   txt += `💵 Saldo actual:      ${fmt(saldoActual)}\n`;
   if (tipoFiltro === 'salida') {
-    const saldoProy = saldoActual + totalAbs;
-    txt += `💰 Reembolso pedido:  ${fmt(totalAbs)}\n`;
-    txt += `📈 Saldo proyectado:  ${fmt(saldoProy)}\n`;
-    if (asignado > 0) {
-      const faltaDespues = Math.max(0, asignado - saldoProy);
-      if (faltaDespues < 0.01) txt += `✅ Fondo quedará al 100%\n`;
-      else txt += `⚠  Aún faltará: ${fmt(faltaDespues)} para completar el fondo\n`;
+    txt += `💰 Reembolso a pedir: ${fmt(reembolsoReal)}\n`;
+    txt += `📈 Saldo tras cobro:  ${fmt(asignado)}  (fondo al 100%)\n`;
+    // Aviso si los comprobantes no cuadran con el reembolso
+    if (asignado > 0 && Math.abs(totalAbs - reembolsoReal) > 0.01) {
+      txt += `\n⚠  Los comprobantes seleccionados (${fmt(totalAbs)}) no coinciden\n`;
+      txt += `   con el reembolso requerido (${fmt(reembolsoReal)}).\n`;
+      if (totalAbs < reembolsoReal)
+        txt += `   Faltan comprobantes por ${fmt(reembolsoReal - totalAbs)}.\n`;
+      else
+        txt += `   Se están justificando ${fmt(totalAbs - reembolsoReal)} de más.\n`;
     }
   }
   txt += `${LINE}\n\n`;
@@ -6733,27 +6742,36 @@ function excelInformeCC() {
     m.notas || '',
     parseFloat(m.monto)
   ]));
+  // Cálculo del reembolso REAL = Fondo Fijo - Saldo Actual
+  const reembolsoReal = Math.max(0, asignado - saldoActual);
+
   aoa.push([]);
   if (tipoFiltro === 'todos') {
     aoa.push(['','','','','','','','','','TOTAL ENTRADAS:', parseFloat(totEntradas.toFixed(2))]);
     aoa.push(['','','','','','','','','','TOTAL SALIDAS:',  parseFloat(totSalidas.toFixed(2))]);
     aoa.push(['','','','','','','','','','NETO:',           parseFloat(totalNeto.toFixed(2))]);
+  } else if (tipoFiltro === 'entrada') {
+    aoa.push(['','','','','','','','','','TOTAL INGRESOS:', parseFloat(totEntradas.toFixed(2))]);
   } else {
-    const tot = tipoFiltro==='entrada' ? totEntradas : totSalidas;
-    const label = tipoFiltro==='entrada' ? 'TOTAL INGRESOS:' : 'TOTAL A REEMBOLSAR:';
-    aoa.push(['','','','','','','','','',label, parseFloat(tot.toFixed(2))]);
+    aoa.push(['','','','','','','','','','Comprobantes seleccionados:', parseFloat(totSalidas.toFixed(2))]);
+    aoa.push(['','','','','','','','','','TOTAL A REEMBOLSAR:',         parseFloat(reembolsoReal.toFixed(2))]);
+    aoa.push(['','','','','','','','','','(Fondo Fijo − Saldo actual)', '']);
   }
   aoa.push([]);
   aoa.push(['RESUMEN FINANCIERO']);
   aoa.push(['Fondo Fijo:',    parseFloat(asignado.toFixed(2))]);
   aoa.push(['Saldo actual:',  parseFloat(saldoActual.toFixed(2))]);
   if (tipoFiltro === 'salida') {
-    const saldoProy = saldoActual + totSalidas;
-    aoa.push(['Reembolso pedido:',  parseFloat(totSalidas.toFixed(2))]);
-    aoa.push(['Saldo proyectado:',  parseFloat(saldoProy.toFixed(2))]);
-    if (asignado > 0) {
-      const falta = Math.max(0, asignado - saldoProy);
-      aoa.push([falta < 0.01 ? '✅ Fondo quedará al 100%' : `⚠ Aún faltará para completar fondo:`, falta < 0.01 ? '' : parseFloat(falta.toFixed(2))]);
+    aoa.push(['Reembolso a pedir:',   parseFloat(reembolsoReal.toFixed(2))]);
+    aoa.push(['Saldo tras cobro:',    parseFloat(asignado.toFixed(2))]);
+    aoa.push(['(el fondo queda al 100% tras recibir el reembolso)', '']);
+    // Aviso si comprobantes no cuadran
+    if (asignado > 0 && Math.abs(totSalidas - reembolsoReal) > 0.01) {
+      aoa.push([]);
+      if (totSalidas < reembolsoReal)
+        aoa.push([`⚠ Faltan comprobantes por:`, parseFloat((reembolsoReal - totSalidas).toFixed(2))]);
+      else
+        aoa.push([`⚠ Comprobantes en exceso:`,  parseFloat((totSalidas - reembolsoReal).toFixed(2))]);
     }
     // Datos del cheque de reembolso (si se llenaron)
     const cheque      = ($('cci-cheque')?.value || '').trim();
