@@ -6451,10 +6451,11 @@ function openInformeReembolsoCC() {
           <button class="btn bo bsm" style="font-size:10px;padding:4px 8px" onclick="regenerarInformeCC()">↻ Actualizar</button>
         </div>
         <textarea id="cci-texto" readonly style="width:100%;height:420px;font-family:'Consolas','Courier New',monospace;font-size:11.5px;line-height:1.45;padding:12px;border:1px solid var(--border);border-radius:10px;background:#fafafa;resize:none"></textarea>
-        <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+        <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px">
           <button class="btn bs bsm" onclick="copiarInformeCC()">📋 Copiar</button>
           <button class="btn bsuc bsm" onclick="enviarInformeWhatsApp()">💬 WhatsApp</button>
           <button class="btn bo bsm" onclick="enviarInformeEmail()">📧 Email</button>
+          <button class="btn bo bsm" onclick="excelInformeCC()">⬇ Excel</button>
         </div>
       </div>
     </div>
@@ -6656,6 +6657,96 @@ function enviarInformeWhatsApp() {
   const txt = window._ccInformeTxt || $('cci-texto')?.value || '';
   if (!txt) return;
   window.open(`https://wa.me/?text=${encodeURIComponent(txt)}`, '_blank');
+}
+
+function excelInformeCC() {
+  const f = window._ccFondoActual;
+  if (!f) return;
+  const sel = window._ccInformeSel || new Set();
+  const filtrados = movimientosFiltradosCC();
+  const seleccionados = filtrados.filter(m => sel.has(m.id))
+                                  .sort((a,b) => new Date(a.fecha) - new Date(b.fecha));
+  if (!seleccionados.length) return toast('No hay movimientos seleccionados.', 'warn');
+
+  const tipoFiltro  = $('cci-tipo')?.value || 'salida';
+  const desdeFiltro = $('cci-desde')?.value || '';
+  const hastaFiltro = $('cci-hasta')?.value || '';
+  const totEntradas = seleccionados.filter(m => m.tipo==='entrada').reduce((a,m)=>a+parseFloat(m.monto),0);
+  const totSalidas  = seleccionados.filter(m => m.tipo==='salida').reduce((a,m)=>a+parseFloat(m.monto),0);
+  const totalNeto   = totEntradas - totSalidas;
+  const saldoActual = parseFloat(f.kpi?.saldo_actual)   || 0;
+  const asignado    = parseFloat(f.fondo_asignado)      || 0;
+  const hoy = new Date().toLocaleDateString('es-MX', { day:'2-digit', month:'long', year:'numeric' });
+
+  const tipoTxt = tipoFiltro==='entrada' ? 'INGRESOS' : tipoFiltro==='salida' ? 'GASTOS / SALIDAS' : 'TODOS LOS MOVIMIENTOS';
+  const titulo  = tipoFiltro==='entrada' ? 'REPORTE DE INGRESOS'
+               :  tipoFiltro==='salida'  ? 'SOLICITUD DE REEMBOLSO'
+               :  'REPORTE DE MOVIMIENTOS';
+  const periodoTxt = (desdeFiltro || hastaFiltro)
+    ? `${desdeFiltro?new Date(desdeFiltro+'T00:00:00').toLocaleDateString('es-MX'):'Inicio'} al ${hastaFiltro?new Date(hastaFiltro+'T00:00:00').toLocaleDateString('es-MX'):'Hoy'}`
+    : 'Histórico completo (sin filtros)';
+
+  const wb = XLSX.utils.book_new();
+  const aoa = [
+    ['GRUPO MANAGEMENT'],
+    [`${titulo} — CAJA CHICA`],
+    [`Reporte de ${tipoTxt}`],
+    [],
+    ['Fondo:', f.nombre],
+    ['Departamento:', f.departamento || '—'],
+    ['Responsable:', f.responsable || '—'],
+    ['Período de consulta:', periodoTxt],
+    ['Fecha del reporte:', hoy],
+    ['Generado por:', ME?.nombre || '—'],
+    [],
+    ['#', 'Fecha', 'Tipo', 'Categoría', 'Concepto', 'Beneficiario/Proveedor', 'Referencia/Cheque', 'Forma de pago', 'Autorizó', 'Notas', 'Monto']
+  ];
+  seleccionados.forEach((m, i) => aoa.push([
+    i + 1,
+    fmtDate(m.fecha),
+    m.tipo,
+    m.categoria || '',
+    m.concepto || '',
+    m.beneficiario || '',
+    m.referencia || '',
+    m.forma_pago || '',
+    m.autorizado_por || '',
+    m.notas || '',
+    parseFloat(m.monto)
+  ]));
+  aoa.push([]);
+  if (tipoFiltro === 'todos') {
+    aoa.push(['','','','','','','','','','TOTAL ENTRADAS:', parseFloat(totEntradas.toFixed(2))]);
+    aoa.push(['','','','','','','','','','TOTAL SALIDAS:',  parseFloat(totSalidas.toFixed(2))]);
+    aoa.push(['','','','','','','','','','NETO:',           parseFloat(totalNeto.toFixed(2))]);
+  } else {
+    const tot = tipoFiltro==='entrada' ? totEntradas : totSalidas;
+    const label = tipoFiltro==='entrada' ? 'TOTAL INGRESOS:' : 'TOTAL A REEMBOLSAR:';
+    aoa.push(['','','','','','','','','',label, parseFloat(tot.toFixed(2))]);
+  }
+  aoa.push([]);
+  aoa.push(['RESUMEN FINANCIERO']);
+  aoa.push(['Fondo Fijo:',    parseFloat(asignado.toFixed(2))]);
+  aoa.push(['Saldo actual:',  parseFloat(saldoActual.toFixed(2))]);
+  if (tipoFiltro === 'salida') {
+    const saldoProy = saldoActual + totSalidas;
+    aoa.push(['Reembolso pedido:',  parseFloat(totSalidas.toFixed(2))]);
+    aoa.push(['Saldo proyectado:',  parseFloat(saldoProy.toFixed(2))]);
+    if (asignado > 0) {
+      const falta = Math.max(0, asignado - saldoProy);
+      aoa.push([falta < 0.01 ? '✅ Fondo quedará al 100%' : `⚠ Aún faltará para completar fondo:`, falta < 0.01 ? '' : parseFloat(falta.toFixed(2))]);
+    }
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:4},{wch:12},{wch:10},{wch:18},{wch:34},{wch:22},{wch:18},{wch:14},{wch:16},{wch:22},{wch:14}];
+  ws['!merges'] = [
+    { s:{r:0,c:0}, e:{r:0,c:10} },
+    { s:{r:1,c:0}, e:{r:1,c:10} },
+    { s:{r:2,c:0}, e:{r:2,c:10} }
+  ];
+  XLSX.utils.book_append_sheet(wb, ws, tipoTxt.slice(0,25));
+  XLSX.writeFile(wb, `${titulo.replace(/\s+/g,'_')}_${(f.nombre||'').replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 function enviarInformeEmail() {
