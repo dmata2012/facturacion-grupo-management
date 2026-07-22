@@ -47,6 +47,7 @@ router.get('/', async (req, res) => {
         er.razon_social     AS emisora_razon_social,
         er.nombre_comercial AS emisora_nombre_comercial,
         er.rfc              AS emisora_rfc,
+        er.aplica_desglose  AS emisora_aplica_desglose,
         COALESCE(sub_p.cobrado, 0)                AS cobrado,
         f.total - COALESCE(sub_p.cobrado, 0)      AS saldo,
         COALESCE(sub_d.rh_total, 0)               AS rh_total,
@@ -82,13 +83,16 @@ router.get('/:id', async (req, res) => {
   try {
     const r = await query(`
       SELECT f.*, c.razon_social, c.rfc, c.email AS cliente_email,
+        er.aplica_desglose AS emisora_aplica_desglose,
+        er.razon_social    AS emisora_razon_social,
         COALESCE(SUM(p.monto),0) AS cobrado,
         f.total - COALESCE(SUM(p.monto),0) AS saldo
       FROM fac_facturas f
-      LEFT JOIN fac_clientes c ON c.id = f.cliente_id
-      LEFT JOIN fac_pagos p ON p.factura_id = f.id
+      LEFT JOIN fac_clientes c              ON c.id = f.cliente_id
+      LEFT JOIN fac_empresas_receptoras er  ON er.id = f.empresa_receptora_id
+      LEFT JOIN fac_pagos p                 ON p.factura_id = f.id
       WHERE f.id=$1
-      GROUP BY f.id, c.razon_social, c.rfc, c.email
+      GROUP BY f.id, c.razon_social, c.rfc, c.email, er.aplica_desglose, er.razon_social
     `, [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Factura no encontrada.' });
 

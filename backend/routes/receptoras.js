@@ -50,13 +50,13 @@ router.get('/rfc/:rfc', async (req, res) => {
 // POST /api/receptoras
 router.post('/', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { rfc, razon_social, nombre_comercial, contacto, email, telefono, direccion, ciudad, regimen_fiscal, codigo_postal, notas } = req.body;
+    const { rfc, razon_social, nombre_comercial, contacto, email, telefono, direccion, ciudad, regimen_fiscal, codigo_postal, notas, aplica_desglose } = req.body;
     if (!rfc || !razon_social) return res.status(400).json({ error: 'RFC y razón social requeridos.' });
     const r = await query(
       `INSERT INTO fac_empresas_receptoras
-        (rfc,razon_social,nombre_comercial,contacto,email,telefono,direccion,ciudad,regimen_fiscal,codigo_postal,notas)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [rfc.toUpperCase().trim(), razon_social, nombre_comercial, contacto, email, telefono, direccion, ciudad, regimen_fiscal, codigo_postal, notas]
+        (rfc,razon_social,nombre_comercial,contacto,email,telefono,direccion,ciudad,regimen_fiscal,codigo_postal,notas,aplica_desglose)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [rfc.toUpperCase().trim(), razon_social, nombre_comercial, contacto, email, telefono, direccion, ciudad, regimen_fiscal, codigo_postal, notas, aplica_desglose !== false]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) {
@@ -68,14 +68,14 @@ router.post('/', requireRol('admin', 'capturista'), async (req, res) => {
 // PUT /api/receptoras/:id
 router.put('/:id', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { rfc, razon_social, nombre_comercial, contacto, email, telefono, direccion, ciudad, regimen_fiscal, codigo_postal, activo, notas } = req.body;
+    const { rfc, razon_social, nombre_comercial, contacto, email, telefono, direccion, ciudad, regimen_fiscal, codigo_postal, activo, notas, aplica_desglose } = req.body;
     await query(
       `UPDATE fac_empresas_receptoras
        SET rfc=$1,razon_social=$2,nombre_comercial=$3,contacto=$4,email=$5,
            telefono=$6,direccion=$7,ciudad=$8,regimen_fiscal=$9,codigo_postal=$10,
-           activo=$11,notas=$12,actualizado_en=NOW()
-       WHERE id=$13`,
-      [rfc?.toUpperCase().trim(), razon_social, nombre_comercial, contacto, email, telefono, direccion, ciudad, regimen_fiscal, codigo_postal, activo, notas, req.params.id]
+           activo=$11,notas=$12,aplica_desglose=$13,actualizado_en=NOW()
+       WHERE id=$14`,
+      [rfc?.toUpperCase().trim(), razon_social, nombre_comercial, contacto, email, telefono, direccion, ciudad, regimen_fiscal, codigo_postal, activo, notas, aplica_desglose !== false, req.params.id]
     );
     res.json({ ok: true });
   } catch (e) {
