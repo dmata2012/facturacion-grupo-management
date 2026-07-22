@@ -545,6 +545,23 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-cambiar-clave"><div class="modal modal-sm" id="modal-cambiar-clave-body"></div></div>
 <div class="overlay" id="modal-vac-editar-tomados"><div class="modal modal-sm" id="modal-vac-editar-tomados-body"></div></div>
 <div class="overlay" id="modal-cc-permisos"><div class="modal" id="modal-cc-permisos-body"></div></div>
+<div class="overlay" id="modal-camara-ch" style="align-items:center;justify-content:center">
+  <div class="modal" style="width:min(480px,96vw);padding:16px;background:#0f172a;color:#fff">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:14px;font-weight:800">📸 Cámara Frontal</div>
+      <button onclick="cerrarCamaraCH()" style="background:transparent;border:none;color:#fff;font-size:22px;cursor:pointer;padding:0 4px">✕</button>
+    </div>
+    <div style="position:relative;background:#000;border-radius:12px;overflow:hidden;aspect-ratio:4/3;min-height:280px">
+      <video id="cam-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;transform:scaleX(-1)"></video>
+      <div id="cam-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px">Iniciando cámara...</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button onclick="toggleCamaraCH()" style="flex:0 0 auto;padding:10px 14px;background:#334155;border:none;border-radius:10px;color:#fff;font-weight:600;cursor:pointer" title="Cambiar cámara">🔄</button>
+      <button onclick="capturarFotoCamaraCH()" style="flex:1;padding:14px;background:#dc2626;border:none;border-radius:10px;color:#fff;font-weight:800;font-size:16px;cursor:pointer">📸 Capturar</button>
+    </div>
+    <div id="cam-err" style="font-size:11px;color:#fca5a5;margin-top:8px;text-align:center;min-height:16px"></div>
+  </div>
+</div>
 
 <script>
 // ══ CONFIG ══════════════════════════════════════
@@ -4047,11 +4064,11 @@ async function checador() {
         <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;padding:10px 12px;margin-bottom:14px;display:flex;align-items:center;gap:12px">
           <div id="ch-foto-preview" style="width:52px;height:52px;border-radius:50%;background:#dbeafe;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;overflow:hidden;border:2px solid #93c5fd">📷</div>
           <div style="flex:1;min-width:0">
-            <label class="btn bo bsm" style="cursor:pointer;font-weight:700">
+            <button type="button" class="btn bo bsm" onclick="abrirCamaraCH()" style="font-weight:700">
               📸 Tomar foto de verificación
-              <input type="file" id="ch-foto-input" accept="image/*" capture="user" style="display:none" onchange="onFotoCHFile(this)">
-            </label>
-            <div id="ch-foto-msg" style="font-size:10.5px;color:#1e40af;margin-top:3px">La foto se comprime y guarda para auditoría (auto-borra a 90 días).</div>
+            </button>
+            <input type="file" id="ch-foto-input" accept="image/*" capture="user" style="display:none" onchange="onFotoCHFile(this)">
+            <div id="ch-foto-msg" style="font-size:10.5px;color:#1e40af;margin-top:3px">Cámara frontal · foto se comprime y auto-borra a 90 días.</div>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -4159,6 +4176,89 @@ function comprimirFotoCH(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+// Cámara en vivo — abre modal con getUserMedia y prioriza cámara frontal
+let _camStream = null;
+let _camFacing = 'user'; // 'user'=frontal, 'environment'=trasera
+
+async function abrirCamaraCH() {
+  const err = $('cam-err'); if (err) err.textContent = '';
+  const loading = $('cam-loading'); if (loading) loading.style.display = 'flex';
+  openModal('modal-camara-ch');
+  // Fallback: si el navegador no soporta getUserMedia, usar input file (con capture=user)
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    cerrarCamaraCH();
+    $('ch-foto-input')?.click();
+    return;
+  }
+  _camFacing = 'user';
+  await iniciarStreamCamaraCH();
+}
+
+async function iniciarStreamCamaraCH() {
+  const video = $('cam-video');
+  const err   = $('cam-err');
+  const loading = $('cam-loading');
+  detenerStreamCamaraCH();
+  try {
+    _camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: _camFacing }, width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
+    if (video) video.srcObject = _camStream;
+    if (loading) loading.style.display = 'none';
+    // Espejo solo para cámara frontal
+    if (video) video.style.transform = _camFacing === 'user' ? 'scaleX(-1)' : 'none';
+  } catch(e) {
+    if (err) err.textContent = 'No se pudo acceder a la cámara: ' + e.message + '. Autoriza el permiso.';
+    if (loading) loading.style.display = 'flex';
+  }
+}
+
+async function toggleCamaraCH() {
+  _camFacing = _camFacing === 'user' ? 'environment' : 'user';
+  await iniciarStreamCamaraCH();
+}
+
+function detenerStreamCamaraCH() {
+  if (_camStream) {
+    _camStream.getTracks().forEach(t => t.stop());
+    _camStream = null;
+  }
+}
+
+function cerrarCamaraCH() {
+  detenerStreamCamaraCH();
+  closeModal('modal-camara-ch');
+}
+
+async function capturarFotoCamaraCH() {
+  const video = $('cam-video');
+  if (!video || !video.videoWidth) return toast('Cámara no lista aún.', 'warn');
+  try {
+    const canvas = document.createElement('canvas');
+    const MAX = 400;
+    const ratio = Math.min(MAX / video.videoWidth, MAX / video.videoHeight, 1);
+    canvas.width  = Math.round(video.videoWidth * ratio);
+    canvas.height = Math.round(video.videoHeight * ratio);
+    const ctx = canvas.getContext('2d');
+    // Si es cámara frontal, aplicar espejo para que la foto guardada NO esté al revés
+    if (_camFacing === 'user') {
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+    window._chFoto = dataUrl;
+    const kb = Math.round(dataUrl.length * 3 / 4 / 1024);
+    // Actualizar preview
+    const prev = $('ch-foto-preview'), msg = $('ch-foto-msg');
+    if (prev) prev.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover">`;
+    if (msg)  msg.innerHTML  = `<span style="color:#16a34a">✅ Foto lista (${kb} KB)</span>`;
+    cerrarCamaraCH();
+    toast('📸 Foto capturada correctamente.');
+  } catch(e) { toast('Error al capturar: ' + e.message, 'err'); }
 }
 
 // Manejo del input de foto: comprime y guarda en memoria
