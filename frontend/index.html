@@ -6298,31 +6298,87 @@ function whatsappReporteCategoriasCC() {
 function excelReporteCategoriasCC() {
   const f = window._ccFondoActual;
   const grupos = agruparPorCategoriaCC();
-  const wb = XLSX.utils.book_new();
-  // Hoja 1: resumen por categoría
+  const tipo = $('ccc-tipo')?.value || 'salida';
+  const desde = $('ccc-desde')?.value || '';
+  const hasta = $('ccc-hasta')?.value || '';
   const totalGen = grupos.reduce((a,g)=>a+g.total,0);
-  const resumen = grupos.map(g => ({
-    'Categoría': g.categoria,
-    'Movimientos': g.count,
-    'Total': parseFloat(g.total.toFixed(2)),
-    '% del total': totalGen > 0 ? parseFloat(((g.total/totalGen)*100).toFixed(2)) : 0
-  }));
-  resumen.push({ 'Categoría':'TOTAL GENERAL','Movimientos':grupos.reduce((a,g)=>a+g.count,0),'Total':parseFloat(totalGen.toFixed(2)),'% del total':100 });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumen), 'Por categoría');
-  // Hoja 2: detalle
-  const detalle = [];
-  grupos.forEach(g => g.movs.forEach(m => detalle.push({
-    'Categoría': g.categoria,
-    'Fecha': fmtDate(m.fecha),
-    'Tipo': m.tipo,
-    'Concepto': m.concepto||'',
-    'Beneficiario': m.beneficiario||'',
-    'Referencia': m.referencia||'',
-    'Forma pago': m.forma_pago||'',
-    'Monto': parseFloat(m.monto)
-  })));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detalle), 'Detalle');
-  XLSX.writeFile(wb, `Caja_${(f.nombre||'').replace(/\s+/g,'_')}_por_categoria_${new Date().toISOString().slice(0,10)}.xlsx`);
+  const totalCount = grupos.reduce((a,g)=>a+g.count,0);
+  const hoy = new Date().toLocaleDateString('es-MX', { day:'2-digit', month:'long', year:'numeric' });
+  const tipoTxt = tipo==='entrada' ? 'INGRESOS' : tipo==='salida' ? 'GASTOS / SALIDAS' : 'TODOS LOS MOVIMIENTOS';
+  const periodoTxt = (desde || hasta)
+    ? `${desde?new Date(desde+'T00:00:00').toLocaleDateString('es-MX'):'Inicio'} al ${hasta?new Date(hasta+'T00:00:00').toLocaleDateString('es-MX'):'Hoy'}`
+    : 'Histórico completo (sin filtros)';
+
+  const wb = XLSX.utils.book_new();
+
+  // ═══ HOJA 1: Resumen por categoría con encabezado ═══
+  const aoa1 = [
+    ['GRUPO MANAGEMENT'],
+    ['REPORTE GENERAL DE CAJA CHICA'],
+    [`Reporte de ${tipoTxt}`],
+    [],
+    ['Fondo:', f.nombre],
+    ['Departamento:', f.departamento || '—'],
+    ['Responsable:', f.responsable || '—'],
+    ['Período de consulta:', periodoTxt],
+    ['Fecha del reporte:', hoy],
+    ['Generado por:', ME?.nombre || '—'],
+    [],
+    ['Categoría', 'Movimientos', 'Total', '% del total']
+  ];
+  grupos.forEach(g => aoa1.push([
+    g.categoria,
+    g.count,
+    parseFloat(g.total.toFixed(2)),
+    totalGen > 0 ? parseFloat(((g.total/totalGen)*100).toFixed(2)) : 0
+  ]));
+  aoa1.push([]);
+  aoa1.push(['TOTAL GENERAL', totalCount, parseFloat(totalGen.toFixed(2)), 100]);
+  const ws1 = XLSX.utils.aoa_to_sheet(aoa1);
+  // Ancho de columnas
+  ws1['!cols'] = [{wch:32},{wch:14},{wch:16},{wch:14}];
+  // Merge de título y subtítulo (fila 1,2,3)
+  ws1['!merges'] = [
+    { s:{r:0,c:0}, e:{r:0,c:3} },
+    { s:{r:1,c:0}, e:{r:1,c:3} },
+    { s:{r:2,c:0}, e:{r:2,c:3} }
+  ];
+  XLSX.utils.book_append_sheet(wb, ws1, 'Por categoría');
+
+  // ═══ HOJA 2: Detalle completo con encabezado ═══
+  const aoa2 = [
+    ['GRUPO MANAGEMENT'],
+    ['REPORTE GENERAL DE CAJA CHICA — DETALLE'],
+    [`Reporte de ${tipoTxt}`],
+    [],
+    ['Fondo:', f.nombre],
+    ['Período de consulta:', periodoTxt],
+    ['Fecha del reporte:', hoy],
+    [],
+    ['Categoría', 'Fecha', 'Tipo', 'Concepto', 'Beneficiario', 'Referencia', 'Forma de pago', 'Monto']
+  ];
+  grupos.forEach(g => g.movs.forEach(m => aoa2.push([
+    g.categoria,
+    fmtDate(m.fecha),
+    m.tipo,
+    m.concepto || '',
+    m.beneficiario || '',
+    m.referencia || '',
+    m.forma_pago || '',
+    parseFloat(m.monto)
+  ])));
+  aoa2.push([]);
+  aoa2.push(['','','','','','','TOTAL GENERAL:', parseFloat(totalGen.toFixed(2))]);
+  const ws2 = XLSX.utils.aoa_to_sheet(aoa2);
+  ws2['!cols'] = [{wch:22},{wch:12},{wch:10},{wch:32},{wch:22},{wch:16},{wch:14},{wch:14}];
+  ws2['!merges'] = [
+    { s:{r:0,c:0}, e:{r:0,c:7} },
+    { s:{r:1,c:0}, e:{r:1,c:7} },
+    { s:{r:2,c:0}, e:{r:2,c:7} }
+  ];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Detalle');
+
+  XLSX.writeFile(wb, `Reporte_CajaChica_${(f.nombre||'').replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 function openInformeReembolsoCC() {
