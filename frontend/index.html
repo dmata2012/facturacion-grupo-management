@@ -6450,7 +6450,15 @@ function openInformeReembolsoCC() {
           <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.5px">Vista previa del informe</div>
           <button class="btn bo bsm" style="font-size:10px;padding:4px 8px" onclick="regenerarInformeCC()">↻ Actualizar</button>
         </div>
-        <textarea id="cci-texto" readonly style="width:100%;height:420px;font-family:'Consolas','Courier New',monospace;font-size:11.5px;line-height:1.45;padding:12px;border:1px solid var(--border);border-radius:10px;background:#fafafa;resize:none"></textarea>
+        <textarea id="cci-texto" readonly style="width:100%;height:390px;font-family:'Consolas','Courier New',monospace;font-size:11.5px;line-height:1.45;padding:12px;border:1px solid var(--border);border-radius:10px;background:#fafafa;resize:none"></textarea>
+        <div id="cci-cheque-wrap" style="margin-top:10px;background:#fef9c3;border:1.5px solid #fde68a;border-radius:8px;padding:10px 12px">
+          <label style="font-size:11px;font-weight:800;color:#854d0e;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:4px">🧾 N° de cheque con que se reembolsa (opcional)</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            <input id="cci-cheque" placeholder="Ej: 001234 · SPEI-88291" oninput="regenerarInformeCC()">
+            <input type="date" id="cci-fecha-cheque" onchange="regenerarInformeCC()" title="Fecha del cheque/transferencia">
+          </div>
+          <div style="font-size:10px;color:#78350f;margin-top:3px">Si aún no se sabe, déjalo vacío y llénalo cuando se genere el cheque.</div>
+        </div>
         <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px">
           <button class="btn bs bsm" onclick="copiarInformeCC()">📋 Copiar</button>
           <button class="btn bsuc bsm" onclick="enviarInformeWhatsApp()">💬 WhatsApp</button>
@@ -6631,6 +6639,17 @@ function regenerarInformeCC() {
   }
   txt += `${LINE}\n\n`;
 
+  // N° de cheque de reembolso (opcional)
+  const cheque      = ($('cci-cheque')?.value || '').trim();
+  const fechaCheque = $('cci-fecha-cheque')?.value || '';
+  if (tipoFiltro === 'salida' && (cheque || fechaCheque)) {
+    txt += `🧾 *DATOS DEL REEMBOLSO*\n`;
+    txt += `${LINE}\n`;
+    if (cheque)      txt += `N° cheque / referencia: ${cheque}\n`;
+    if (fechaCheque) txt += `Fecha de emisión:       ${new Date(fechaCheque+'T00:00:00').toLocaleDateString('es-MX', { day:'2-digit', month:'long', year:'numeric' })}\n`;
+    txt += `${LINE}\n\n`;
+  }
+
   if (me) txt += `Solicitado por: ${me}\n`;
   txt += `Sistema de Facturación - Grupo Management`;
 
@@ -6735,6 +6754,15 @@ function excelInformeCC() {
     if (asignado > 0) {
       const falta = Math.max(0, asignado - saldoProy);
       aoa.push([falta < 0.01 ? '✅ Fondo quedará al 100%' : `⚠ Aún faltará para completar fondo:`, falta < 0.01 ? '' : parseFloat(falta.toFixed(2))]);
+    }
+    // Datos del cheque de reembolso (si se llenaron)
+    const cheque      = ($('cci-cheque')?.value || '').trim();
+    const fechaCheque = $('cci-fecha-cheque')?.value || '';
+    if (cheque || fechaCheque) {
+      aoa.push([]);
+      aoa.push(['DATOS DEL REEMBOLSO']);
+      if (cheque)      aoa.push(['N° cheque / referencia:', cheque]);
+      if (fechaCheque) aoa.push(['Fecha de emisión:', new Date(fechaCheque+'T00:00:00').toLocaleDateString('es-MX')]);
     }
   }
 
