@@ -542,6 +542,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-cc-detalle"><div class="modal" style="width:min(960px,96vw);position:relative" id="modal-cc-detalle-body"></div></div>
 <div class="overlay" id="modal-cc-mov"><div class="modal modal-sm" id="modal-cc-mov-body"></div></div>
 <div class="overlay" id="modal-cc-informe"><div class="modal" style="width:min(1000px,96vw)" id="modal-cc-informe-body"></div></div>
+<div class="overlay" id="modal-cc-cats"><div class="modal" style="width:min(1000px,96vw);position:relative" id="modal-cc-cats-body"></div></div>
 <div class="overlay" id="modal-cambiar-clave"><div class="modal modal-sm" id="modal-cambiar-clave-body"></div></div>
 <div class="overlay" id="modal-vac-editar-tomados"><div class="modal modal-sm" id="modal-vac-editar-tomados-body"></div></div>
 <div class="overlay" id="modal-cc-permisos"><div class="modal" id="modal-cc-permisos-body"></div></div>
@@ -5941,6 +5942,7 @@ function renderDetalleFondoCC() {
         ${canWrite()?`<button class="btn bo bsm" onclick="openFondoCC(${f.id})">✏️ Editar fondo</button>`:''}
         ${canAdmin()?`<button class="btn bo bsm" onclick="openPermisosCC(${f.id})">👥 Permisos</button>`:''}
         <button class="btn bg bsm" onclick="openInformeReembolsoCC()">📋 Generar informe</button>
+        <button class="btn bg bsm" onclick="openReporteCategoriasCC()">📊 Por categoría</button>
         ${canAdmin()?`<button class="btn bd bsm" onclick="eliminarCajaCC(${f.id},'${(f.nombre||'').replace(/'/g,"\\'")}')" title="Eliminar caja permanentemente">🗑 Eliminar caja</button>`:''}
         ${canWrite()?`<button class="btn bsuc bsm" onclick="openMovCC('entrada')">+ Entrada de efectivo</button>`:''}
         ${canWrite()?`<button class="btn bd bsm" onclick="openMovCC('salida')">− Gasto / Salida</button>`:''}
@@ -6072,6 +6074,257 @@ function renderDetalleFondoCC() {
 }
 
 // ══ INFORME DE REEMBOLSO ══
+function openReporteCategoriasCC() {
+  const f = window._ccFondoActual;
+  if (!f) return;
+  window._ccCatsFiltro = { desde:'', hasta:'', tipo:'salida' };
+  window._ccCatsExpanded = new Set();
+  $('modal-cc-cats-body').innerHTML = `
+    <button onclick="closeModal('modal-cc-cats')" style="position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;border:2px solid var(--border);background:#fff;cursor:pointer;font-size:14px;font-weight:800;color:var(--muted);z-index:10">✕</button>
+    <div style="margin:-28px -28px 20px;padding:22px 28px;background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Reporte por categoría</div>
+      <div style="font-size:20px;font-weight:900;margin-top:4px">📊 ${f.nombre}</div>
+      <div style="font-size:12px;opacity:.9;margin-top:4px">Totales agrupados por categoría con detalle expandible</div>
+    </div>
+
+    <div style="background:var(--bg-alt);border-radius:10px;padding:12px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.5px;margin-bottom:8px">🔍 Filtros</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto auto;gap:8px;align-items:end">
+        <div class="fi" style="margin:0"><label style="font-size:10px">Desde</label><input type="date" id="ccc-desde" onchange="renderReporteCategoriasCC()"></div>
+        <div class="fi" style="margin:0"><label style="font-size:10px">Hasta</label><input type="date" id="ccc-hasta" onchange="renderReporteCategoriasCC()"></div>
+        <div class="fi" style="margin:0"><label style="font-size:10px">Tipo</label>
+          <select id="ccc-tipo" onchange="renderReporteCategoriasCC()">
+            <option value="salida" selected>📤 Gastos / salidas</option>
+            <option value="entrada">📥 Entradas / ingresos</option>
+            <option value="todos">🔄 Todos</option>
+          </select>
+        </div>
+        <button class="btn bo bsm" onclick="ccExpandirCats(true)" style="height:36px">⊞ Todos</button>
+        <button class="btn bo bsm" onclick="ccExpandirCats(false)" style="height:36px">⊟ Cerrar</button>
+      </div>
+    </div>
+
+    <div id="ccc-body"></div>
+
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn bs bsm" onclick="copiarReporteCategoriasCC()">📋 Copiar informe</button>
+      <button class="btn bsuc bsm" onclick="whatsappReporteCategoriasCC()">💬 WhatsApp</button>
+      <button class="btn bo bsm" onclick="excelReporteCategoriasCC()">⬇ Excel</button>
+      <button class="btn bo" onclick="closeModal('modal-cc-cats')">Cerrar</button>
+    </div>`;
+  openModal('modal-cc-cats');
+  renderReporteCategoriasCC();
+}
+
+function movimientosCatsFiltradosCC() {
+  const f = window._ccFondoActual;
+  const desde = $('ccc-desde')?.value || '';
+  const hasta = $('ccc-hasta')?.value || '';
+  const tipo  = $('ccc-tipo')?.value  || 'salida';
+  return (f.movimientos||[]).filter(m => {
+    if (tipo !== 'todos' && m.tipo !== tipo) return false;
+    const fm = String(m.fecha).slice(0,10);
+    if (desde && fm < desde) return false;
+    if (hasta && fm > hasta) return false;
+    return true;
+  });
+}
+
+function ccExpandirCats(abrir) {
+  const data = agruparPorCategoriaCC();
+  window._ccCatsExpanded = new Set(abrir ? data.map(g => g.categoria) : []);
+  renderReporteCategoriasCC();
+}
+
+function agruparPorCategoriaCC() {
+  const movs = movimientosCatsFiltradosCC();
+  const grupos = {};
+  movs.forEach(m => {
+    const cat = m.categoria || '(sin categoría)';
+    if (!grupos[cat]) grupos[cat] = { categoria:cat, count:0, total:0, movs:[] };
+    grupos[cat].count++;
+    grupos[cat].total += parseFloat(m.monto)||0;
+    grupos[cat].movs.push(m);
+  });
+  return Object.values(grupos).sort((a,b) => b.total - a.total);
+}
+
+function renderReporteCategoriasCC() {
+  const grupos = agruparPorCategoriaCC();
+  const totalGeneral = grupos.reduce((a,g) => a+g.total, 0);
+  const totalCount   = grupos.reduce((a,g) => a+g.count, 0);
+  const body = $('ccc-body');
+  if (!body) return;
+  if (!grupos.length) { body.innerHTML = '<p class="empty">Sin movimientos para estos filtros.</p>'; return; }
+
+  const tipo = $('ccc-tipo')?.value || 'salida';
+  const color = tipo === 'entrada' ? '#166534' : tipo === 'salida' ? '#991b1b' : '#1e40af';
+  const signo = tipo === 'entrada' ? '+' : tipo === 'salida' ? '−' : '';
+
+  body.innerHTML = `
+    <div class="kpi-grid" style="margin-bottom:14px">
+      <div class="kpi primary">
+        <div class="kpi-icon">📊</div>
+        <div class="label">Categorías</div>
+        <div class="value">${grupos.length}</div>
+        <div class="sub">Con movimientos</div>
+      </div>
+      <div class="kpi ${tipo==='entrada'?'success':'warning'}">
+        <div class="kpi-icon">🧾</div>
+        <div class="label">Movimientos</div>
+        <div class="value">${totalCount}</div>
+        <div class="sub">Total del período</div>
+      </div>
+      <div class="kpi ${tipo==='entrada'?'success':'danger'}">
+        <div class="kpi-icon">💰</div>
+        <div class="label">Total general</div>
+        <div class="value" style="font-size:22px;color:${color}">${signo}${fmt(totalGeneral)}</div>
+      </div>
+    </div>
+
+    <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff">
+      ${grupos.map((g,i) => {
+        const pct = totalGeneral > 0 ? (g.total/totalGeneral)*100 : 0;
+        const abierto = window._ccCatsExpanded.has(g.categoria);
+        return `
+        <div style="border-bottom:1px solid var(--border)">
+          <div onclick="ccToggleCat('${g.categoria.replace(/'/g,"\\'")}')" style="padding:12px 14px;cursor:pointer;display:flex;align-items:center;gap:12px;transition:background .15s"
+               onmouseover="this.style.background='var(--bg-alt)'" onmouseout="this.style.background=''">
+            <div style="width:26px;text-align:center;font-size:14px;color:var(--muted)">${abierto?'▼':'▶'}</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:800;color:var(--dark)">${g.categoria}</div>
+              <div style="height:5px;background:#f3f4f6;border-radius:99px;margin-top:6px;overflow:hidden">
+                <div style="height:100%;width:${pct}%;background:${color};border-radius:99px;transition:width .4s"></div>
+              </div>
+              <div style="font-size:10.5px;color:var(--muted);margin-top:3px">${g.count} movimiento${g.count!==1?'s':''} · ${pct.toFixed(1)}% del total</div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+              <div style="font-size:16px;font-weight:900;color:${color}">${signo}${fmt(g.total)}</div>
+            </div>
+          </div>
+          ${abierto?`
+          <div style="background:var(--bg-alt);padding:8px 14px 12px">
+            <table style="width:100%;font-size:11.5px">
+              <thead><tr style="color:var(--muted);text-transform:uppercase;font-size:10px;letter-spacing:.5px">
+                <th style="text-align:left;padding:4px 6px">Fecha</th>
+                <th style="text-align:left;padding:4px 6px">Concepto</th>
+                <th style="text-align:left;padding:4px 6px">Beneficiario</th>
+                <th style="text-align:left;padding:4px 6px">Ref/Cheque</th>
+                <th style="text-align:right;padding:4px 6px">Monto</th>
+              </tr></thead>
+              <tbody>${[...g.movs].sort((a,b)=>new Date(a.fecha)-new Date(b.fecha)).map(m => `
+                <tr style="border-top:1px solid #e5e7eb">
+                  <td style="padding:6px">${fmtDate(m.fecha)}</td>
+                  <td style="padding:6px;font-weight:600;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.concepto||''}">${m.concepto||''}</td>
+                  <td style="padding:6px;color:var(--muted)">${m.beneficiario||'—'}</td>
+                  <td style="padding:6px;color:var(--muted);font-family:monospace">${m.referencia||m.comprobante||'—'}</td>
+                  <td style="padding:6px;text-align:right;font-weight:700;color:${color}">${signo}${fmt(m.monto)}</td>
+                </tr>`).join('')}</tbody>
+              <tfoot><tr style="border-top:2px solid ${color}">
+                <td colspan="4" style="padding:6px;font-weight:800;text-align:right">Subtotal ${g.categoria}:</td>
+                <td style="padding:6px;text-align:right;font-weight:900;color:${color}">${signo}${fmt(g.total)}</td>
+              </tr></tfoot>
+            </table>
+          </div>`:''}
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function ccToggleCat(cat) {
+  if (window._ccCatsExpanded.has(cat)) window._ccCatsExpanded.delete(cat);
+  else window._ccCatsExpanded.add(cat);
+  renderReporteCategoriasCC();
+}
+
+function generarTextoReporteCategoriasCC() {
+  const f = window._ccFondoActual;
+  const grupos = agruparPorCategoriaCC();
+  const tipo = $('ccc-tipo')?.value || 'salida';
+  const desde = $('ccc-desde')?.value || '';
+  const hasta = $('ccc-hasta')?.value || '';
+  const total = grupos.reduce((a,g)=>a+g.total,0);
+  const totalCount = grupos.reduce((a,g)=>a+g.count,0);
+  const LINE = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
+  const hoy = new Date().toLocaleDateString('es-MX', { day:'2-digit', month:'long', year:'numeric' });
+  const signo = tipo === 'entrada' ? '+' : tipo === 'salida' ? '−' : '';
+  const titulo = tipo==='entrada' ? 'REPORTE DE INGRESOS POR CATEGORÍA'
+               : tipo==='salida'  ? 'REPORTE DE GASTOS POR CATEGORÍA'
+               : 'REPORTE DE MOVIMIENTOS POR CATEGORÍA';
+  let txt = `📊 *${titulo} — CAJA CHICA*\n${LINE}\n`;
+  txt += `📌 Fondo:        ${f.nombre}\n`;
+  if (f.departamento) txt += `🏢 Departamento: ${f.departamento}\n`;
+  if (f.responsable)  txt += `👤 Responsable:  ${f.responsable}\n`;
+  txt += `📅 Fecha:        ${hoy}\n`;
+  if (desde || hasta) {
+    const d1 = desde ? new Date(desde+'T00:00:00').toLocaleDateString('es-MX') : '—';
+    const d2 = hasta ? new Date(hasta+'T00:00:00').toLocaleDateString('es-MX') : 'hoy';
+    txt += `🗓  Período:      ${d1} al ${d2}\n`;
+  }
+  txt += `${LINE}\n\n`;
+  grupos.forEach((g,i) => {
+    const pct = total > 0 ? (g.total/total)*100 : 0;
+    txt += `${(i+1).toString().padStart(2,' ')}. *${g.categoria}*\n`;
+    txt += `    Total: ${signo}${g.total.toLocaleString('es-MX',{style:'currency',currency:'MXN'})}\n`;
+    txt += `    ${g.count} movimiento${g.count!==1?'s':''} (${pct.toFixed(1)}%)\n\n`;
+    [...g.movs].sort((a,b)=>new Date(a.fecha)-new Date(b.fecha)).forEach(m => {
+      txt += `    • ${fmtDate(m.fecha)}  ${signo}${parseFloat(m.monto).toLocaleString('es-MX',{style:'currency',currency:'MXN'})}\n`;
+      txt += `      ${m.concepto||''}\n`;
+      if (m.beneficiario) txt += `      👤 ${m.beneficiario}\n`;
+      if (m.referencia)   txt += `      🧾 ${m.referencia}\n`;
+    });
+    txt += '\n';
+  });
+  txt += `${LINE}\n`;
+  txt += `📊 *Categorías:* ${grupos.length}\n`;
+  txt += `🧾 *Movimientos:* ${totalCount}\n`;
+  txt += `💰 *TOTAL GENERAL: ${signo}${total.toLocaleString('es-MX',{style:'currency',currency:'MXN'})}*\n`;
+  txt += `${LINE}\n`;
+  if (ME?.nombre) txt += `Generado por: ${ME.nombre}\n`;
+  return txt;
+}
+
+async function copiarReporteCategoriasCC() {
+  const txt = generarTextoReporteCategoriasCC();
+  try { await navigator.clipboard.writeText(txt); toast('✅ Reporte copiado.'); }
+  catch { toast('No se pudo copiar.', 'err'); }
+}
+
+function whatsappReporteCategoriasCC() {
+  const txt = generarTextoReporteCategoriasCC();
+  window.open(`https://wa.me/?text=${encodeURIComponent(txt)}`, '_blank');
+}
+
+function excelReporteCategoriasCC() {
+  const f = window._ccFondoActual;
+  const grupos = agruparPorCategoriaCC();
+  const wb = XLSX.utils.book_new();
+  // Hoja 1: resumen por categoría
+  const totalGen = grupos.reduce((a,g)=>a+g.total,0);
+  const resumen = grupos.map(g => ({
+    'Categoría': g.categoria,
+    'Movimientos': g.count,
+    'Total': parseFloat(g.total.toFixed(2)),
+    '% del total': totalGen > 0 ? parseFloat(((g.total/totalGen)*100).toFixed(2)) : 0
+  }));
+  resumen.push({ 'Categoría':'TOTAL GENERAL','Movimientos':grupos.reduce((a,g)=>a+g.count,0),'Total':parseFloat(totalGen.toFixed(2)),'% del total':100 });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumen), 'Por categoría');
+  // Hoja 2: detalle
+  const detalle = [];
+  grupos.forEach(g => g.movs.forEach(m => detalle.push({
+    'Categoría': g.categoria,
+    'Fecha': fmtDate(m.fecha),
+    'Tipo': m.tipo,
+    'Concepto': m.concepto||'',
+    'Beneficiario': m.beneficiario||'',
+    'Referencia': m.referencia||'',
+    'Forma pago': m.forma_pago||'',
+    'Monto': parseFloat(m.monto)
+  })));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detalle), 'Detalle');
+  XLSX.writeFile(wb, `Caja_${(f.nombre||'').replace(/\s+/g,'_')}_por_categoria_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 function openInformeReembolsoCC() {
   const f = window._ccFondoActual;
   if (!f) return;
