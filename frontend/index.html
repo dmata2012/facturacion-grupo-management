@@ -1304,14 +1304,14 @@ async function loadFacturas() {
         <td style="font-weight:600">${fmt(f.total)}</td>
         <td style="color:var(--success)">${fmt(f.cobrado)}</td>
         <td style="color:${parseFloat(f.saldo)>0?'var(--danger)':'var(--success)'};font-weight:600">${fmt(f.saldo)}</td>
-        <td>${(f.emisora_aplica_desglose === false)
-          ? badgeEstatus(f.estatus) + ' <span style="display:inline-flex;align-items:center;gap:3px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:20px;padding:2px 8px;color:#6b7280;font-size:10.5px;font-weight:700;margin-left:4px" title="Emisora no requiere desglose">✕ Sin desglose</span>'
+        <td>${(f.cliente_aplica_desglose === false)
+          ? badgeEstatus(f.estatus) + ' <span style="display:inline-flex;align-items:center;gap:3px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:20px;padding:2px 8px;color:#6b7280;font-size:10.5px;font-weight:700;margin-left:4px" title="Cliente no requiere desglose">✕ Sin desglose</span>'
           : (f.desglose_validado
               ? '<span title="Desglose cuadrado — factura bloqueada" style="display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:20px;padding:3px 10px;color:#166534;font-size:12px;font-weight:800">✔ CUADRADA</span>'
               : badgeEstatus(f.estatus))}</td>
         <td style="white-space:nowrap">
           ${canWrite() && !f.desglose_validado ? `<button class="btn bo bsm" onclick="editFactura(${f.id})" title="Editar factura">✏️</button>` : ''}
-          ${(f.emisora_aplica_desglose !== false) ? `<button class="btn bg bsm" onclick="openRH(${f.id})" title="Ver/editar desglose">Desg</button>` : ''}
+          ${(f.cliente_aplica_desglose !== false) ? `<button class="btn bg bsm" onclick="openRH(${f.id})" title="Ver/editar desglose">Desg</button>` : ''}
           <button class="btn bsuc bsm" onclick="openPago(${f.id})" title="Registrar pago">💲</button>
           ${canAdmin()&&f.estatus!=='cancelada'&&!f.desglose_validado?`<button class="btn bd bsm" onclick="cancelarFactura(${f.id})" title="Cancelar factura">✕</button>`:''}
           ${canAdmin()&&!f.desglose_validado?`<button class="btn bd bsm" onclick="eliminarFactura(${f.id})" title="Eliminar factura" style="background:#fff0f0;border-color:#ffd7d7">🗑️</button>`:''}
@@ -2569,6 +2569,16 @@ function openCliente(id=null, rfcPre='') {
     ${sec('📝 Notas')}
     <div class="fi full"><label>Notas internas</label><textarea id="cc-notas" rows="2" placeholder="Observaciones, acuerdos especiales..."></textarea></div>
 
+    <div class="fi full" style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-top:10px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;color:#1e40af;margin-bottom:0">
+        <input type="checkbox" id="cc-desglose" checked style="width:18px;height:18px;cursor:pointer">
+        <span>🗂 Requiere desglose de factura</span>
+      </label>
+      <div style="font-size:11px;color:#1e3a8a;margin-top:4px;margin-left:26px">
+        Si está <strong>marcada</strong>, las facturas de este cliente requieren desglose de conceptos y aparecen como "cuadradas / no cuadradas". Si está <strong>desmarcada</strong>, se omite el desglose completamente.
+      </div>
+    </div>
+
   </div>
   <div class="form-actions">
     <button class="btn bo" onclick="closeModal('modal-cliente')">Cancelar</button>
@@ -2597,6 +2607,7 @@ async function loadClienteEdit(id) {
     $('cc-dias').value      = c.dias_credito      ?? 0;
     $('cc-condpago').value  = c.condiciones_pago  || '';
     $('cc-ejecutivo').value = c.ejecutivo_cuenta  || '';
+    if ($('cc-desglose')) $('cc-desglose').checked = c.aplica_desglose !== false;
   } catch {}
 }
 
@@ -2618,6 +2629,7 @@ async function saveCliente(id) {
     dias_credito:     $('cc-dias').value,
     condiciones_pago: $('cc-condpago').value.trim(),
     ejecutivo_cuenta: $('cc-ejecutivo').value.trim(),
+    aplica_desglose:  $('cc-desglose')?.checked !== false,
     activo: true
   };
   if (!body.rfc || !body.razon_social) return toast('RFC y razón social requeridos.','err');
@@ -7359,15 +7371,6 @@ function openReceptora(id = null) {
     <div class="fi"><label>Teléfono</label><input id="er-tel"></div>
     <div class="fi full"><label>Dirección</label><input id="er-dir"></div>
     <div class="fi full"><label>Notas</label><textarea id="er-notas" rows="2"></textarea></div>
-    <div class="fi full" style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:8px;padding:10px 12px">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;color:#1e40af;margin-bottom:0">
-        <input type="checkbox" id="er-desglose" checked style="width:18px;height:18px;cursor:pointer">
-        <span>🗂 Requiere desglose de factura</span>
-      </label>
-      <div style="font-size:11px;color:#1e3a8a;margin-top:4px;margin-left:26px">
-        Si está <strong>marcada</strong>, las facturas de esta emisora requieren desglose de conceptos y aparecen como "cuadradas / no cuadradas". Si está <strong>desmarcada</strong>, se omite el desglose completamente.
-      </div>
-    </div>
   </div>
   <div class="form-actions">
     <button class="btn bo" onclick="closeModal('modal-cliente')">Cancelar</button>
@@ -7391,7 +7394,6 @@ async function cargarReceptoraEdit(id) {
     $('er-tel').value      = r.telefono || '';
     $('er-dir').value      = r.direccion || '';
     $('er-notas').value    = r.notas || '';
-    if ($('er-desglose')) $('er-desglose').checked = r.aplica_desglose !== false;
   } catch {}
 }
 
@@ -7408,7 +7410,6 @@ async function saveReceptora(id) {
     telefono:        $('er-tel').value,
     direccion:       $('er-dir').value,
     notas:           $('er-notas').value,
-    aplica_desglose: $('er-desglose')?.checked !== false,
     activo:          true
   };
   if (!body.rfc || !body.razon_social) return toast('RFC y razón social son requeridos.', 'err');

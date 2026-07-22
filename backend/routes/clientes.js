@@ -55,7 +55,8 @@ router.post('/', requireRol('admin', 'capturista'), async (req, res) => {
       rfc, razon_social, nombre_comercial, contacto, email, telefono,
       direccion, ciudad, notas, comision,
       contacto_admin, contacto_pagos, whatsapp,
-      dias_credito, condiciones_pago, ejecutivo_cuenta
+      dias_credito, condiciones_pago, ejecutivo_cuenta,
+      aplica_desglose
     } = req.body;
     if (!rfc || !razon_social) return res.status(400).json({ error: 'RFC y razón social requeridos.' });
     const r = await query(
@@ -63,13 +64,14 @@ router.post('/', requireRol('admin', 'capturista'), async (req, res) => {
          rfc,razon_social,nombre_comercial,contacto,email,telefono,
          direccion,ciudad,notas,comision,
          contacto_admin,contacto_pagos,whatsapp,
-         dias_credito,condiciones_pago,ejecutivo_cuenta
-       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+         dias_credito,condiciones_pago,ejecutivo_cuenta,aplica_desglose
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
       [
         rfc.toUpperCase(), razon_social, nombre_comercial, contacto,
         email, telefono, direccion, ciudad, notas, parseFloat(comision)||0,
         contacto_admin||null, contacto_pagos||null, whatsapp||null,
-        parseInt(dias_credito)||0, condiciones_pago||null, ejecutivo_cuenta||null
+        parseInt(dias_credito)||0, condiciones_pago||null, ejecutivo_cuenta||null,
+        aplica_desglose !== false
       ]
     );
     res.status(201).json(r.rows[0]);
@@ -86,7 +88,8 @@ router.put('/:id', requireRol('admin', 'capturista'), async (req, res) => {
       rfc, razon_social, nombre_comercial, contacto, email, telefono,
       direccion, ciudad, activo, notas, comision,
       contacto_admin, contacto_pagos, whatsapp,
-      dias_credito, condiciones_pago, ejecutivo_cuenta
+      dias_credito, condiciones_pago, ejecutivo_cuenta,
+      aplica_desglose
     } = req.body;
     await query(
       `UPDATE fac_clientes SET
@@ -94,13 +97,15 @@ router.put('/:id', requireRol('admin', 'capturista'), async (req, res) => {
          telefono=$6, direccion=$7, ciudad=$8, activo=$9, notas=$10, comision=$11,
          contacto_admin=$12, contacto_pagos=$13, whatsapp=$14,
          dias_credito=$15, condiciones_pago=$16, ejecutivo_cuenta=$17,
+         aplica_desglose=$18,
          actualizado_en=NOW()
-       WHERE id=$18`,
+       WHERE id=$19`,
       [
         rfc?.toUpperCase(), razon_social, nombre_comercial, contacto,
         email, telefono, direccion, ciudad, activo, notas, parseFloat(comision)||0,
         contacto_admin||null, contacto_pagos||null, whatsapp||null,
         parseInt(dias_credito)||0, condiciones_pago||null, ejecutivo_cuenta||null,
+        aplica_desglose !== false,
         req.params.id
       ]
     );
