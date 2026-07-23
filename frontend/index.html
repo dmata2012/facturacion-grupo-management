@@ -4038,7 +4038,9 @@ async function cargarDetalleEst(tipo) {
 
 // ══ RELOJ CHECADOR ═══════════════════════════
 async function checador() {
-  const soloMarcar = isChecador();  // El rol 'checador' solo ve la pantalla de marcar
+  // Si el usuario tiene rol 'checador' → pantalla tablet en modo oscuro
+  if (isChecador()) return renderChecadorTablet();
+  const soloMarcar = false;
   $('content').innerHTML = `
     <div class="page-header">
       <div class="page-header-left">
@@ -4292,6 +4294,329 @@ async function onFotoCHFile(input) {
   } catch(e) {
     if (msg) msg.innerHTML = `<span style="color:#dc2626">⚠ ${e.message}</span>`;
   }
+}
+
+// ══════════════ CHECADOR TABLET (modo oscuro, dedicado) ══════════════
+async function renderChecadorTablet() {
+  document.body.classList.add('tablet-mode');
+  $('content').innerHTML = `
+    <style>
+      body.tablet-mode { background:#0a0f1a; color:#e5e7eb; overflow:hidden }
+      body.tablet-mode .sidebar, body.tablet-mode .mobile-topbar { display:none !important }
+      body.tablet-mode .main-wrap { margin:0 !important; padding:0 !important }
+      body.tablet-mode #content { padding:0; margin:0 }
+      body.tablet-mode #floating-logo { display:none !important }
+      .tab-page { min-height:100vh;background:linear-gradient(180deg,#0a0f1a 0%,#111827 100%);color:#fff;display:flex;flex-direction:column;position:relative;overflow:hidden }
+      .tab-page::before { content:'';position:absolute;top:-200px;left:-200px;width:600px;height:600px;background:radial-gradient(circle,rgba(59,130,246,.08) 0%,transparent 70%);pointer-events:none }
+      .tab-page::after { content:'';position:absolute;bottom:-200px;right:-200px;width:600px;height:600px;background:radial-gradient(circle,rgba(16,185,129,.06) 0%,transparent 70%);pointer-events:none }
+      .tab-header { display:flex;justify-content:space-between;align-items:center;padding:24px 40px;position:relative;z-index:2 }
+      .tab-logo { font-size:14px;font-weight:800;letter-spacing:2px;color:#94a3b8;text-transform:uppercase;display:flex;align-items:center;gap:10px }
+      .tab-logo img { height:36px;filter:brightness(0) invert(1);opacity:.85 }
+      .tab-clock { text-align:right }
+      .tab-clock .h { font-size:42px;font-weight:200;letter-spacing:-1px;color:#f1f5f9;font-variant-numeric:tabular-nums;line-height:1 }
+      .tab-clock .d { font-size:11px;color:#64748b;letter-spacing:2px;margin-top:6px;text-transform:uppercase;font-weight:600 }
+      .tab-body { flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 40px 40px;position:relative;z-index:2 }
+      .glass { background:rgba(30,41,59,.5);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(148,163,184,.12);border-radius:24px }
+      .search-wrap { width:100%;max-width:520px }
+      .search-box { display:flex;align-items:center;gap:14px;background:rgba(15,23,42,.7);border:1px solid rgba(148,163,184,.18);border-radius:16px;padding:18px 22px;transition:all .2s }
+      .search-box:focus-within { border-color:#3b82f6;background:rgba(15,23,42,.9);box-shadow:0 0 0 4px rgba(59,130,246,.15) }
+      .search-box input { flex:1;background:none;border:none;color:#f1f5f9;font-size:15px;outline:none;font-weight:500 }
+      .search-box input::placeholder { color:#64748b;letter-spacing:.5px }
+      .search-box .ic { color:#64748b;font-size:20px }
+      .emp-list { margin-top:12px;max-height:360px;overflow-y:auto;background:rgba(15,23,42,.85);border:1px solid rgba(148,163,184,.15);border-radius:16px }
+      .emp-list::-webkit-scrollbar { width:8px }
+      .emp-list::-webkit-scrollbar-thumb { background:rgba(148,163,184,.2);border-radius:4px }
+      .emp-row { display:flex;align-items:center;gap:14px;padding:14px 20px;cursor:pointer;transition:background .15s;border-bottom:1px solid rgba(148,163,184,.08) }
+      .emp-row:last-child { border-bottom:none }
+      .emp-row:hover { background:rgba(59,130,246,.1) }
+      .emp-avatar { width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:15px;flex-shrink:0;overflow:hidden }
+      .emp-avatar img { width:100%;height:100%;object-fit:cover }
+      .emp-info { flex:1;min-width:0 }
+      .emp-name { font-size:15px;font-weight:700;color:#f1f5f9 }
+      .emp-role { font-size:12px;color:#94a3b8;margin-top:2px }
+      .emp-pin-badge { font-size:11px;color:#a78bfa;background:rgba(139,92,246,.15);padding:3px 8px;border-radius:20px;font-weight:700 }
+
+      .user-panel { display:flex;flex-direction:column;align-items:center;gap:20px;width:100%;max-width:520px;animation:fadeInUp .35s ease }
+      @keyframes fadeInUp { from { opacity:0;transform:translateY(20px) } to { opacity:1;transform:translateY(0) } }
+      .user-avatar-lg { width:130px;height:130px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:44px;overflow:hidden;box-shadow:0 15px 40px rgba(59,130,246,.35),0 0 0 3px rgba(255,255,255,.05) }
+      .user-avatar-lg img { width:100%;height:100%;object-fit:cover }
+      .user-name { font-size:26px;font-weight:800;color:#f1f5f9;text-align:center;letter-spacing:-.3px }
+      .user-hint { font-size:14px;color:#94a3b8;letter-spacing:.3px;text-transform:uppercase;font-weight:600 }
+      .user-status { font-size:13px;color:#a78bfa;text-align:center;background:rgba(139,92,246,.1);padding:8px 16px;border-radius:20px;font-weight:600 }
+
+      .pin-dots { display:flex;gap:16px;margin:8px 0 6px }
+      .pin-dot { width:16px;height:16px;border-radius:50%;background:rgba(148,163,184,.25);border:1.5px solid rgba(148,163,184,.4);transition:all .2s }
+      .pin-dot.filled { background:#3b82f6;border-color:#3b82f6;box-shadow:0 0 12px rgba(59,130,246,.6) }
+      .pin-dot.error { background:#ef4444;border-color:#ef4444;animation:shake .35s }
+      @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
+
+      .keypad { display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:280px;margin-top:6px }
+      .key { width:80px;height:80px;border-radius:20px;background:rgba(30,41,59,.7);border:1px solid rgba(148,163,184,.15);color:#f1f5f9;font-size:24px;font-weight:600;cursor:pointer;transition:all .12s;user-select:none;-webkit-tap-highlight-color:transparent;display:flex;align-items:center;justify-content:center }
+      .key:hover { background:rgba(59,130,246,.2);border-color:#3b82f6 }
+      .key:active { transform:scale(.94);background:#3b82f6 }
+      .key.cancel { color:#f87171;font-size:14px;font-weight:700 }
+      .key.back { color:#94a3b8;font-size:20px }
+
+      .actions-row { display:grid;grid-template-columns:1fr 1fr;gap:14px;width:100%;max-width:520px;margin-top:10px;animation:fadeInUp .3s ease .1s backwards }
+      .act-btn { padding:22px;border-radius:20px;border:none;color:#fff;font-size:15px;font-weight:800;letter-spacing:.4px;cursor:pointer;transition:all .18s;display:flex;flex-direction:column;align-items:center;gap:6px;box-shadow:0 8px 24px rgba(0,0,0,.3) }
+      .act-btn:hover { transform:translateY(-2px);box-shadow:0 12px 32px rgba(0,0,0,.4) }
+      .act-btn:active { transform:translateY(0) }
+      .act-btn .ic { font-size:26px }
+      .act-btn.entrada { background:linear-gradient(135deg,#10b981 0%,#84cc16 100%) }
+      .act-btn.salida  { background:linear-gradient(135deg,#3b82f6 0%,#1e40af 100%) }
+
+      .sec-actions { display:flex;gap:14px;margin-top:14px;font-size:12px;color:#64748b }
+      .sec-btn { background:none;border:none;color:#94a3b8;cursor:pointer;padding:6px 12px;border-radius:6px;font-weight:600;transition:color .15s }
+      .sec-btn:hover { color:#3b82f6 }
+
+      .cam-view { width:220px;height:220px;border-radius:50%;overflow:hidden;background:#000;box-shadow:0 15px 40px rgba(59,130,246,.4);position:relative;border:3px solid rgba(59,130,246,.3) }
+      .cam-view video { width:100%;height:100%;object-fit:cover;transform:scaleX(-1) }
+      .cam-pulse { position:absolute;inset:-8px;border-radius:50%;border:3px solid #3b82f6;animation:campulse 1.4s infinite }
+      @keyframes campulse { 0%{opacity:1;transform:scale(1)} 100%{opacity:0;transform:scale(1.15)} }
+
+      .msg-flash { position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:100;padding:24px 40px;border-radius:20px;font-size:16px;font-weight:700;box-shadow:0 20px 60px rgba(0,0,0,.5);text-align:center;animation:flashIn .3s ease }
+      @keyframes flashIn { from{opacity:0;transform:translate(-50%,-40%);} to{opacity:1;transform:translate(-50%,-50%)} }
+      .msg-flash.ok { background:linear-gradient(135deg,#10b981,#059669);color:#fff }
+      .msg-flash.err { background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff }
+    </style>
+
+    <div class="tab-page">
+      <!-- HEADER -->
+      <div class="tab-header">
+        <div class="tab-logo">
+          <img src="logo.png" alt="GM" onerror="this.style.display='none';this.nextElementSibling.style.marginLeft='0'">
+          <span>GRUPO MANAGEMENT</span>
+        </div>
+        <div class="tab-clock">
+          <div class="h" id="tab-clock-h">--:--</div>
+          <div class="d" id="tab-clock-d">—</div>
+        </div>
+      </div>
+
+      <!-- BODY -->
+      <div class="tab-body">
+        <div id="tab-stage"></div>
+      </div>
+    </div>`;
+
+  // Reloj en vivo
+  const dibujar = () => {
+    const d = new Date();
+    if ($('tab-clock-h')) $('tab-clock-h').textContent = d.toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', hour12:false });
+    if ($('tab-clock-d')) $('tab-clock-d').textContent = d.toLocaleDateString('es-MX', { weekday:'long', day:'numeric', month:'long' }).toUpperCase();
+  };
+  dibujar();
+  if (window._tabClkTimer) clearInterval(window._tabClkTimer);
+  window._tabClkTimer = setInterval(dibujar, 1000);
+
+  // Cargar empleados
+  try {
+    window._tabEmps = await api('/checador/empleados');
+    window._tabRegistrosHoy = await api('/checador/hoy?fecha=' + new Date().toISOString().slice(0,10));
+  } catch(e) { window._tabEmps = []; window._tabRegistrosHoy = { registros:[] }; }
+
+  renderTabSearch();
+}
+
+function renderTabSearch() {
+  window._tabEmpSel = null;
+  window._tabPin = '';
+  window._tabFoto = null;
+  $('tab-stage').innerHTML = `
+    <div class="search-wrap">
+      <div class="search-box">
+        <span class="ic">🔍</span>
+        <input id="tab-search" placeholder="BUSCAR O INGRESAR ID DE EMPLEADO" oninput="renderTabEmpList()" autocomplete="off">
+      </div>
+      <div id="tab-emp-list" class="emp-list"></div>
+    </div>`;
+  renderTabEmpList();
+  setTimeout(() => $('tab-search')?.focus(), 100);
+}
+
+function iniciales(n) { return (n||'?').trim().split(/\s+/).slice(0,2).map(s=>s[0]).join('').toUpperCase(); }
+
+function renderTabEmpList() {
+  const q = ($('tab-search')?.value || '').toLowerCase().trim();
+  const emps = window._tabEmps || [];
+  let lista;
+  if (q) {
+    lista = emps.filter(e => (e.nombre||'').toLowerCase().includes(q) || String(e.id).includes(q) || String(e.numero_colaborador||'').toLowerCase().includes(q)).slice(0, 12);
+  } else {
+    // Los 5 con marca más reciente (o los primeros 5)
+    lista = emps.slice(0, 5);
+  }
+  const cont = $('tab-emp-list');
+  if (!cont) return;
+  if (!lista.length) { cont.innerHTML = `<div style="padding:22px;text-align:center;color:#64748b;font-size:13px">Sin resultados</div>`; return; }
+  cont.innerHTML = lista.map(e => `
+    <div class="emp-row" onclick="seleccionarEmpleadoTablet(${e.id})">
+      <div class="emp-avatar">${iniciales(e.nombre)}</div>
+      <div class="emp-info">
+        <div class="emp-name">${e.nombre}</div>
+        <div class="emp-role">${e.numero_colaborador?'#'+e.numero_colaborador+' · ':''}${e.puesto||'Sin puesto'}</div>
+      </div>
+      ${e.tiene_pin?'<div class="emp-pin-badge">🔐 PIN</div>':''}
+    </div>`).join('');
+}
+
+function seleccionarEmpleadoTablet(empId) {
+  const emp = (window._tabEmps||[]).find(e => e.id === empId);
+  if (!emp) return;
+  window._tabEmpSel = emp;
+  window._tabPin = '';
+  // Determinar acción predictiva
+  const hoy = new Date().toISOString().slice(0,10);
+  const regHoy = (window._tabRegistrosHoy?.registros||[]).find(r => r.empleado_id === empId);
+  let accion = 'entrada';
+  let hint = '¿REGISTRAR TU ENTRADA?';
+  if (regHoy && regHoy.hora_entrada && !regHoy.hora_salida) { accion = 'salida'; hint = '¿REGISTRAR TU SALIDA?'; }
+  else if (regHoy && regHoy.hora_entrada && regHoy.hora_salida) hint = 'YA MARCASTE ENTRADA Y SALIDA HOY';
+  window._tabAccion = accion;
+
+  // Si NO tiene PIN, saltar directo a la confirmación
+  if (!emp.tiene_pin) {
+    renderTabConfirmar(emp, accion, hint, false);
+    return;
+  }
+  renderTabPin(emp, accion, hint);
+}
+
+function renderTabPin(emp, accion, hint) {
+  $('tab-stage').innerHTML = `
+    <div class="user-panel">
+      <div class="user-avatar-lg">${iniciales(emp.nombre)}</div>
+      <div class="user-name">HOLA, ${emp.nombre.split(' ')[0].toUpperCase()}</div>
+      <div class="user-status">${hint}</div>
+      <div class="user-hint">Ingresa tu PIN</div>
+      <div class="pin-dots" id="tab-pin-dots">
+        <div class="pin-dot"></div><div class="pin-dot"></div>
+        <div class="pin-dot"></div><div class="pin-dot"></div>
+      </div>
+      <div class="keypad">
+        ${[1,2,3,4,5,6,7,8,9].map(n=>`<button class="key" onclick="pinKeyTab('${n}')">${n}</button>`).join('')}
+        <button class="key cancel" onclick="renderTabSearch()">CANCELAR</button>
+        <button class="key" onclick="pinKeyTab('0')">0</button>
+        <button class="key back" onclick="pinKeyTab('back')">⌫</button>
+      </div>
+    </div>`;
+}
+
+function pinKeyTab(key) {
+  if (!window._tabEmpSel) return;
+  const emp = window._tabEmpSel;
+  const dots = document.querySelectorAll('#tab-pin-dots .pin-dot');
+  if (key === 'back') { window._tabPin = window._tabPin.slice(0, -1); }
+  else { if (window._tabPin.length < 6) window._tabPin += key; }
+  // Actualizar dots
+  dots.forEach((d,i) => {
+    d.classList.remove('filled','error');
+    if (i < window._tabPin.length) d.classList.add('filled');
+  });
+  // Cuando llega a 4 dígitos, intenta validar (asumiendo PIN de 4)
+  if (window._tabPin.length >= 4) {
+    // Damos un pequeño delay para ver el último punto
+    setTimeout(() => {
+      const hint = window._tabAccion === 'entrada' ? '¿REGISTRAR TU ENTRADA?' : '¿REGISTRAR TU SALIDA?';
+      renderTabConfirmar(emp, window._tabAccion, hint, true, window._tabPin);
+    }, 200);
+  }
+}
+
+function renderTabConfirmar(emp, accion, hint, conPin, pin='') {
+  const esEnt = accion === 'entrada';
+  window._tabPinTentativo = pin;
+  $('tab-stage').innerHTML = `
+    <div class="user-panel">
+      <div class="user-avatar-lg">${iniciales(emp.nombre)}</div>
+      <div class="user-name">¡${esEnt?'BIENVENID':'HASTA PRONTO'}, ${emp.nombre.split(' ')[0].toUpperCase()}!</div>
+      <div class="user-status">${hint}</div>
+      <div class="actions-row">
+        <button class="act-btn entrada" onclick="ejecutarChecadaTablet('entrada')" ${accion==='salida'?'style="opacity:.35;filter:grayscale(.6)"':''}>
+          <div class="ic">📥</div>CONFIRMAR ENTRADA
+        </button>
+        <button class="act-btn salida" onclick="ejecutarChecadaTablet('salida')" ${accion==='entrada'?'style="opacity:.35;filter:grayscale(.6)"':''}>
+          <div class="ic">📤</div>CONFIRMAR SALIDA
+        </button>
+      </div>
+      <div class="sec-actions">
+        <button class="sec-btn" onclick="renderTabSearch()">← Cambiar de usuario</button>
+      </div>
+    </div>`;
+}
+
+async function ejecutarChecadaTablet(tipo) {
+  const emp = window._tabEmpSel;
+  if (!emp) return;
+  const pin = window._tabPinTentativo || '';
+
+  // Mostrar cámara y capturar foto
+  $('tab-stage').innerHTML = `
+    <div class="user-panel">
+      <div class="user-name" style="font-size:18px;color:#94a3b8">Tomando foto de verificación...</div>
+      <div style="position:relative">
+        <div class="cam-view"><video id="tab-cam-video" autoplay playsinline muted></video></div>
+        <div class="cam-pulse"></div>
+      </div>
+      <div class="user-hint">Mantente frente a la cámara</div>
+    </div>`;
+
+  let fotoData = null;
+  try {
+    if (navigator.mediaDevices?.getUserMedia) {
+      const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user', width:{ideal:640}, height:{ideal:480} }, audio:false });
+      const video = $('tab-cam-video');
+      video.srcObject = stream;
+      await new Promise(r => video.onloadedmetadata = r);
+      await new Promise(r => setTimeout(r, 1200)); // dejar que ajuste exposición
+      // Capturar
+      const canvas = document.createElement('canvas');
+      canvas.width = 400; canvas.height = 300;
+      const ctx = canvas.getContext('2d');
+      ctx.translate(canvas.width, 0); ctx.scale(-1, 1);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      fotoData = canvas.toDataURL('image/jpeg', 0.7);
+      stream.getTracks().forEach(t => t.stop());
+    }
+  } catch(e) { /* sin foto, se guarda solo el registro */ }
+
+  // Enviar al backend
+  const now = new Date();
+  const hora_local  = now.toTimeString().slice(0,8);
+  const fecha_local = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const body = { empleado_id: emp.id, pin, hora_local, fecha_local };
+  if (fotoData) body.foto = fotoData;
+  // GPS
+  try {
+    const ubi = await new Promise(res => {
+      if (!navigator.geolocation) return res(null);
+      navigator.geolocation.getCurrentPosition(
+        p => res({ lat:p.coords.latitude, lng:p.coords.longitude }),
+        () => res(null),
+        { enableHighAccuracy:true, timeout:5000 }
+      );
+    });
+    if (ubi) { body.lat = ubi.lat; body.lng = ubi.lng; }
+  } catch {}
+
+  try {
+    const r = await api(`/checador/${tipo}`, { method:'POST', body: JSON.stringify(body) });
+    flashTablet('ok', `✅ ${tipo==='entrada'?'Entrada':'Salida'} registrada — ${r.hora?.slice(0,5)}`);
+    // Refrescar registros del día para próxima predicción
+    try { window._tabRegistrosHoy = await api('/checador/hoy?fecha=' + fecha_local); } catch{}
+    setTimeout(renderTabSearch, 2200);
+  } catch(e) {
+    flashTablet('err', `⚠ ${e.message}`);
+    setTimeout(() => seleccionarEmpleadoTablet(emp.id), 2200);
+  }
+}
+
+function flashTablet(tipo, msg) {
+  const el = document.createElement('div');
+  el.className = 'msg-flash ' + tipo;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
 }
 
 async function marcarChecador(tipo) {
