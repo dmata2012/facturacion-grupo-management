@@ -4309,13 +4309,25 @@ async function renderChecadorTablet() {
       .tab-page { min-height:100vh;background:linear-gradient(180deg,#0a0f1a 0%,#111827 100%);color:#fff;display:flex;flex-direction:column;position:relative;overflow:hidden }
       .tab-page::before { content:'';position:absolute;top:-200px;left:-200px;width:600px;height:600px;background:radial-gradient(circle,rgba(59,130,246,.08) 0%,transparent 70%);pointer-events:none }
       .tab-page::after { content:'';position:absolute;bottom:-200px;right:-200px;width:600px;height:600px;background:radial-gradient(circle,rgba(16,185,129,.06) 0%,transparent 70%);pointer-events:none }
-      .tab-header { display:flex;justify-content:space-between;align-items:center;padding:24px 40px;position:relative;z-index:2 }
-      .tab-logo { font-size:14px;font-weight:800;letter-spacing:2px;color:#94a3b8;text-transform:uppercase;display:flex;align-items:center;gap:10px }
-      .tab-logo img { height:36px;filter:brightness(0) invert(1);opacity:.85 }
-      .tab-clock { text-align:right }
-      .tab-clock .h { font-size:42px;font-weight:200;letter-spacing:-1px;color:#f1f5f9;font-variant-numeric:tabular-nums;line-height:1 }
-      .tab-clock .d { font-size:11px;color:#64748b;letter-spacing:2px;margin-top:6px;text-transform:uppercase;font-weight:600 }
-      .tab-body { flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 40px 40px;position:relative;z-index:2 }
+      .tab-header { display:flex;justify-content:space-between;align-items:flex-start;padding:20px 40px 0;position:relative;z-index:2 }
+      .tab-logo { font-size:12px;font-weight:800;letter-spacing:2px;color:#64748b;text-transform:uppercase;display:flex;align-items:center;gap:10px;padding-top:14px }
+      .tab-logo img { height:32px;filter:brightness(0) invert(1);opacity:.7 }
+      .tab-hero { text-align:center;flex:1;padding:0 20px }
+      .tab-hero .h { font-size:120px;font-weight:100;letter-spacing:-6px;color:#f8fafc;font-variant-numeric:tabular-nums;line-height:.95;background:linear-gradient(180deg,#f8fafc 0%,#cbd5e1 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;text-shadow:0 0 60px rgba(59,130,246,.15);font-family:'SF Pro Display','Segoe UI',-apple-system,system-ui,sans-serif }
+      .tab-hero .h .sec { font-size:56px;color:#64748b;-webkit-text-fill-color:#64748b;margin-left:6px;letter-spacing:-2px;font-weight:200;vertical-align:top;position:relative;top:14px }
+      .tab-hero .h .colon { animation:blinkColon 1.2s infinite;-webkit-text-fill-color:#f8fafc }
+      @keyframes blinkColon { 0%,50%{opacity:1} 51%,100%{opacity:.35} }
+      .tab-hero .d { font-size:14px;color:#94a3b8;letter-spacing:6px;margin-top:12px;text-transform:uppercase;font-weight:600 }
+      .tab-hero-spacer { width:180px;padding-top:14px;display:flex;justify-content:flex-end }
+      .tab-hero-spacer .status-pill { display:inline-flex;align-items:center;gap:8px;font-size:11px;color:#10b981;letter-spacing:1.5px;font-weight:700;text-transform:uppercase;background:rgba(16,185,129,.08);padding:6px 12px;border-radius:20px;border:1px solid rgba(16,185,129,.2) }
+      .tab-hero-spacer .status-pill .dot { width:6px;height:6px;background:#10b981;border-radius:50%;box-shadow:0 0 8px #10b981;animation:pulseDot 1.5s infinite }
+      @keyframes pulseDot { 0%,100%{opacity:1} 50%{opacity:.4} }
+      .tab-body { flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 40px 40px;position:relative;z-index:2 }
+      @media (max-width:900px) {
+        .tab-hero .h { font-size:88px;letter-spacing:-4px }
+        .tab-hero .h .sec { font-size:38px }
+        .tab-hero-spacer { display:none }
+      }
       .glass { background:rgba(30,41,59,.5);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(148,163,184,.12);border-radius:24px }
       .search-wrap { width:100%;max-width:520px }
       .search-box { display:flex;align-items:center;gap:14px;background:rgba(15,23,42,.7);border:1px solid rgba(148,163,184,.18);border-radius:16px;padding:18px 22px;transition:all .2s }
@@ -4385,11 +4397,14 @@ async function renderChecadorTablet() {
       <div class="tab-header">
         <div class="tab-logo">
           <img src="logo.png" alt="GM" onerror="this.style.display='none';this.nextElementSibling.style.marginLeft='0'">
-          <span>GRUPO MANAGEMENT</span>
+          <span>GRUPO<br>MANAGEMENT</span>
         </div>
-        <div class="tab-clock">
-          <div class="h" id="tab-clock-h">--:--</div>
+        <div class="tab-hero">
+          <div class="h" id="tab-clock-h">--<span class="colon">:</span>--<span class="sec" id="tab-clock-s">00</span></div>
           <div class="d" id="tab-clock-d">—</div>
+        </div>
+        <div class="tab-hero-spacer">
+          <span class="status-pill"><span class="dot"></span>En línea</span>
         </div>
       </div>
 
@@ -4402,8 +4417,12 @@ async function renderChecadorTablet() {
   // Reloj en vivo
   const dibujar = () => {
     const d = new Date();
-    if ($('tab-clock-h')) $('tab-clock-h').textContent = d.toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', hour12:false });
-    if ($('tab-clock-d')) $('tab-clock-d').textContent = d.toLocaleDateString('es-MX', { weekday:'long', day:'numeric', month:'long' }).toUpperCase();
+    const hh = String(d.getHours()).padStart(2,'0');
+    const mm = String(d.getMinutes()).padStart(2,'0');
+    const ss = String(d.getSeconds()).padStart(2,'0');
+    const elH = $('tab-clock-h');
+    if (elH) elH.innerHTML = `${hh}<span class="colon">:</span>${mm}<span class="sec" id="tab-clock-s">${ss}</span>`;
+    if ($('tab-clock-d')) $('tab-clock-d').textContent = d.toLocaleDateString('es-MX', { weekday:'long', day:'numeric', month:'long', year:'numeric' }).toUpperCase();
   };
   dibujar();
   if (window._tabClkTimer) clearInterval(window._tabClkTimer);
