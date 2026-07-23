@@ -1313,7 +1313,7 @@ async function loadFacturas() {
           ${canWrite() && !f.desglose_validado ? `<button class="btn bo bsm" onclick="editFactura(${f.id})" title="Editar factura">✏️</button>` : ''}
           ${(f.cliente_aplica_desglose !== false) ? `<button class="btn bg bsm" onclick="openRH(${f.id})" title="Ver/editar desglose">Desg</button>` : ''}
           <button class="btn bsuc bsm" onclick="openPago(${f.id})" title="Registrar pago">💲</button>
-          ${canAdmin()&&f.estatus!=='cancelada'&&!f.desglose_validado?`<button class="btn bd bsm" onclick="cancelarFactura(${f.id})" title="Cancelar factura">✕</button>`:''}
+          ${canWrite()&&f.estatus!=='cancelada'&&!f.desglose_validado?`<button class="btn bd bsm" onclick="cancelarFactura(${f.id})" title="Cancelar factura">✕</button>`:''}
           ${canAdmin()&&!f.desglose_validado?`<button class="btn bd bsm" onclick="eliminarFactura(${f.id})" title="Eliminar factura" style="background:#fff0f0;border-color:#ffd7d7">🗑️</button>`:''}
           ${f.desglose_validado?`<span title="Factura bloqueada — desglose cuadrado" style="color:var(--muted);font-size:11px;font-style:italic">🔒 bloqueada</span>`:''}
         </td>

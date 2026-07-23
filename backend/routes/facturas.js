@@ -283,7 +283,7 @@ router.post('/importar-masivo', requireRol('admin', 'capturista'), async (req, r
 });
 
 // ── CANCELAR ──────────────────────────────────
-router.patch('/:id/cancelar', requireRol('admin'), async (req, res) => {
+router.patch('/:id/cancelar', requireRol('admin', 'capturista'), async (req, res) => {
   try {
     await query(`UPDATE fac_facturas SET estatus='cancelada',actualizado_en=NOW() WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
