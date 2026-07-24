@@ -6414,7 +6414,7 @@ function renderDetalleFondoCC() {
           <td>${fmtDate(m.fecha)}</td>
           <td><span style="display:inline-flex;align-items:center;gap:3px;background:${es?'#dcfce7':'#fee2e2'};color:${es?'#166534':'#991b1b'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">${es?'📥 Entrada':'📤 Salida'}</span></td>
           <td>${m.categoria||'—'}</td>
-          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.concepto||''}">${m.concepto||''}</td>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.concepto||''}${m.tipo_gasto?' · '+m.tipo_gasto:''}">${m.tipo_gasto==='Reembolso pendiente de caja'?'<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fbbf24;padding:1px 6px;border-radius:10px;font-size:9.5px;font-weight:800;margin-right:4px;vertical-align:middle" title="Reembolso pendiente de caja">💸 REEMB. PEND.</span>':''}${m.concepto||''}</td>
           <td>${m.beneficiario||'—'}</td>
           <td style="text-align:right;font-weight:700;color:${es?'#166534':'#991b1b'}">${es?'+':'−'}${fmt(m.monto)}</td>
           <td style="text-align:right;font-weight:800;color:${saldoAcum<0?'#dc2626':'var(--dark)'}">${fmt(saldoAcum)}</td>
@@ -7349,6 +7349,14 @@ function openMovCC(tipo, id) {
           <label>Concepto <span style="color:${theme.accent}">*</span> <span id="cm-conc-len" style="font-size:10px;color:var(--muted);float:right">0 / 300</span></label>
           <input id="cm-concepto" placeholder="${es?'Ej: Transferencia para reponer fondo':'Ej: Compra papelería Office Depot'}" maxlength="300" value="${mov.concepto||''}" oninput="validarMovCC()">
         </div>
+        ${!es?`
+        <div class="fi full">
+          <label>Tipo de gasto <span style="font-weight:400;color:var(--muted);font-size:10.5px">(opcional)</span></label>
+          <select id="cm-tipo-gasto">
+            <option value="">— No aplica —</option>
+            <option value="Reembolso pendiente de caja" ${mov.tipo_gasto==='Reembolso pendiente de caja'?'selected':''}>💸 Reembolso pendiente de caja</option>
+          </select>
+        </div>`:''}
       </div>
     </div>
 
@@ -7469,6 +7477,7 @@ async function saveMovCC(tipo, id) {
     monto       : $('cm-monto').value,
     comprobante : $('cm-comp')?.value.trim() || '',
     periodo_pago: $('cm-periodo')?.value.trim() || '',
+    tipo_gasto  : tipo === 'salida' ? ($('cm-tipo-gasto')?.value || '') : '',
     referencia  : tipo === 'entrada' ? ($('cm-cheque')?.value.trim() || '') : ''
   };
   if (!body.concepto || !body.monto) return toast('Concepto y monto son requeridos.', 'warn');

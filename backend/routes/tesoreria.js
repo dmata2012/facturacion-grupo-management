@@ -4,6 +4,12 @@ const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
 
+// Migración idempotente: columna tipo_gasto para marcar "Reembolso pendiente de caja"
+(async () => {
+  try { await query(`ALTER TABLE fac_caja_chica_movimientos ADD COLUMN IF NOT EXISTS tipo_gasto TEXT`); }
+  catch (e) { console.warn('Migración tipo_gasto:', e.message); }
+})();
+
 // Helper: verificar si usuario tiene acceso a un fondo (admin = siempre; otros = permiso explícito)
 async function tienePermisoFondo(fondoId, usuario) {
   if (usuario.rol === 'admin') return true;
@@ -251,11 +257,11 @@ router.post('/movimientos', requireRol('admin', 'capturista', 'tesoreria'), asyn
     const r = await query(
       `INSERT INTO fac_caja_chica_movimientos(
          fondo_id, fecha, tipo, categoria, concepto, monto,
-         beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, periodo_pago, creado_por
-       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+         beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, periodo_pago, tipo_gasto, creado_por
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
       [fondo_id, fecha, tipo, categoria||null, concepto, m,
        beneficiario||null, forma_pago||'efectivo', referencia||null, comprobante||null,
-       autorizado_por||null, notas||null, periodo_pago||null, req.usuario.id]
+       autorizado_por||null, notas||null, periodo_pago||null, req.body.tipo_gasto||null, req.usuario.id]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -263,7 +269,7 @@ router.post('/movimientos', requireRol('admin', 'capturista', 'tesoreria'), asyn
 
 router.put('/movimientos/:id', requireRol('admin', 'capturista', 'tesoreria'), async (req, res) => {
   try {
-    const { fecha, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, clave, periodo_pago } = req.body;
+    const { fecha, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, clave, periodo_pago, tipo_gasto } = req.body;
     if (!fecha || !concepto || !monto)
       return res.status(400).json({ error: 'Fecha, concepto y monto requeridos.' });
     const m = parseFloat(monto);
@@ -301,10 +307,10 @@ router.put('/movimientos/:id', requireRol('admin', 'capturista', 'tesoreria'), a
       `UPDATE fac_caja_chica_movimientos SET
          fecha=$1, categoria=$2, concepto=$3, monto=$4,
          beneficiario=$5, forma_pago=$6, referencia=$7, comprobante=$8,
-         autorizado_por=$9, notas=$10, periodo_pago=$11, actualizado_en=NOW()
-       WHERE id=$12`,
+         autorizado_por=$9, notas=$10, periodo_pago=$11, tipo_gasto=$12, actualizado_en=NOW()
+       WHERE id=$13`,
       [fecha, categoria||null, concepto, m, beneficiario||null, forma_pago||'efectivo',
-       referencia||null, comprobante||null, autorizado_por||null, notas||null, periodo_pago||null, req.params.id]
+       referencia||null, comprobante||null, autorizado_por||null, notas||null, periodo_pago||null, tipo_gasto||null, req.params.id]
     );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
