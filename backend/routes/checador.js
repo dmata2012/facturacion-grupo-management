@@ -256,7 +256,10 @@ router.get('/asistencia', async (req, res) => {
 
     // Construir matriz
     const matriz = empleados.rows.map(e => {
-      const descanso = Array.isArray(e.dias_descanso) ? e.dias_descanso : [];
+      // Default LFT: domingo es dia de descanso obligatorio si no hay config
+      const descanso = Array.isArray(e.dias_descanso) && e.dias_descanso.length
+        ? e.dias_descanso
+        : [0]; // 0 = domingo
       const celdas = {};
       const totales = { A:0, F:0, V:0, 'P/G':0, In:0, D:0 };
       dias.forEach(fecha => {
