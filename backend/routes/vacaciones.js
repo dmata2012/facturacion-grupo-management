@@ -234,8 +234,8 @@ router.put('/empleados/:id/periodos', requireRol('admin', 'capturista'), async (
   } finally { client.release(); }
 });
 
-// ── CREAR SOLICITUD ──
-router.post('/solicitudes', requireRol('admin', 'capturista'), async (req, res) => {
+// ── CREAR SOLICITUD ── (cualquier usuario autenticado puede solicitar)
+router.post('/solicitudes', async (req, res) => {
   const client = await getClient();
   try {
     await client.query('BEGIN');

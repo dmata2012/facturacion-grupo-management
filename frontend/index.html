@@ -665,8 +665,8 @@ function isChecador()          { return ME && ME.rol === 'checador'; }
 
 // Páginas permitidas por rol restringido
 const PAGES_CAPTURISTA         = ['facturas', 'empleados', 'vacaciones'];
-const PAGES_TESORERIA          = ['cajaChica'];
-const PAGES_TESORERIA_CONSULTA = ['cajaChica'];
+const PAGES_TESORERIA          = ['cajaChica', 'vacaciones'];
+const PAGES_TESORERIA_CONSULTA = ['cajaChica', 'vacaciones'];
 const PAGES_CHECADOR           = ['checador'];
 
 function badgeEstatus(e) {
@@ -5061,7 +5061,7 @@ async function vacaciones() {
         <div class="page-title">Vacaciones</div>
         <div class="page-sub">Control vacacional de colaboradores</div>
       </div>
-      ${canWrite()?`<button class="btn bs" onclick="openSolicitudVac()">+ Nueva solicitud</button>`:''}
+      ${ME?`<button class="btn bs" onclick="openSolicitudVac()">+ Nueva solicitud</button>`:''}
     </div>
 
     <div id="vac-kpis" style="margin-bottom:14px"></div>
@@ -5403,7 +5403,7 @@ function renderVacEmpleado() {
 
     <div class="form-actions" style="margin-top:18px">
       <button class="btn bo" onclick="closeModal('modal-vac-emp')">Cerrar</button>
-      ${canWrite()?`<button class="btn bs" onclick="openSolicitudVac(${e.id})">+ Nueva solicitud</button>`:''}
+      ${ME?`<button class="btn bs" onclick="openSolicitudVac(${e.id})">+ Nueva solicitud</button>`:''}
     </div>`;
 }
 
