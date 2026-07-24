@@ -6428,6 +6428,7 @@ function renderDetalleFondoCC() {
           <td style="text-align:right;font-weight:700;color:${es?'#166534':'#991b1b'}">${es?'+':'−'}${fmt(m.monto)}</td>
           <td style="text-align:right;font-weight:800;color:${saldoAcum<0?'#dc2626':'var(--dark)'}">${fmt(saldoAcum)}</td>
           <td style="white-space:nowrap">
+            ${canWrite() && m.tipo_gasto==='Reembolso pendiente de caja'?`<button class="btn bsuc bsm" style="background:#d97706;border-color:#b45309" onclick="marcarDevueltoCC(${m.id})" title="Registrar devolución del préstamo y limpiar el pendiente">💸 Devuelto</button>`:''}
             ${canWrite()?`<button class="btn bg bsm" onclick="openMovCC('${m.tipo}',${m.id})">✏️</button>`:''}
             ${canWrite()?`<button class="btn bd bsm" onclick="eliminarMovCC(${m.id})">🗑</button>`:''}
           </td>
@@ -7326,6 +7327,145 @@ function registrarReembolsoCC(monto) {
     if ($('cm-monto'))    $('cm-monto').value    = monto;
     if ($('cm-forma'))    $('cm-forma').value    = 'transferencia';
   }, 50);
+}
+
+async function marcarDevueltoCC(id) {
+  const f = window._ccFondoActual;
+  if (!f) return;
+  const orig = (f.movimientos||[]).find(m => m.id === id);
+  if (!orig) return toast('Movimiento no encontrado.', 'err');
+  const montoOrig = parseFloat(orig.monto) || 0;
+  const hoy = new Date().toISOString().slice(0,10);
+
+  const modalHtml = `
+    <div style="margin:-28px -28px 20px;padding:20px 28px;background:linear-gradient(135deg,#d97706,#f59e0b);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Registrar devolución</div>
+      <div style="font-size:18px;font-weight:900;margin-top:4px">💸 Devolución de préstamo</div>
+      <div style="font-size:12px;opacity:.9;margin-top:4px">Préstamo original: <strong>${fmt(montoOrig)}</strong> · ${orig.concepto||''}</div>
+    </div>
+    <div style="background:#fef3c7;border:1.5px solid #fbbf24;border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:#78350f;line-height:1.4">
+      Se creará una <strong>Entrada</strong> con categoría <strong>"Devolución"</strong> y se limpiará automáticamente el flag "Reembolso pendiente" del gasto original para que el monto a reembolsar cuadre.
+    </div>
+    <div class="fg" style="gap:12px">
+      <div class="fi">
+        <label>Fecha de devolución <span style="color:var(--red)">*</span></label>
+        <input type="date" id="dev-fecha" value="${hoy}" max="${hoy}">
+      </div>
+      <div class="fi">
+        <label>Monto devuelto <span style="color:var(--red)">*</span></label>
+        <div style="position:relative">
+          <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#166534;font-weight:800;font-size:16px;pointer-events:none">$</span>
+          <input type="text" inputmode="decimal" id="dev-monto" value="${montoOrig.toFixed(2)}" oninput="ensureNum(this)"
+            style="padding-left:24px;font-size:16px;font-weight:800;text-align:right;color:#166534">
+        </div>
+      </div>
+      <div class="fi full">
+        <label>Referencia <span style="font-weight:400;color:var(--muted);font-size:10.5px">(N° de recibo, cheque, transferencia — opcional)</span></label>
+        <input id="dev-ref" placeholder="Ej: SPEI-88291, RECIBO-042">
+      </div>
+    </div>
+    <div id="dev-info" style="margin-top:12px;font-size:12px;color:#166534;font-weight:600"></div>
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn bo" onclick="closeModal('modal-cc-devuelto')">Cancelar</button>
+      <button class="btn bsuc" id="dev-btn-save" onclick="confirmarDevueltoCC(${id})">✅ Confirmar devolución</button>
+    </div>`;
+
+  // Reutilizar el modal contenedor existente
+  let modal = $('modal-cc-devuelto');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-cc-devuelto';
+    modal.className = 'modal';
+    modal.innerHTML = `<div class="mdl" style="max-width:520px"><div class="mdl-body" id="modal-cc-devuelto-body"></div></div>`;
+    document.body.appendChild(modal);
+  }
+  $('modal-cc-devuelto-body').innerHTML = modalHtml;
+  openModal('modal-cc-devuelto');
+  // Validación en vivo
+  const info = $('dev-info');
+  const btn  = $('dev-btn-save');
+  const validar = () => {
+    const m = parseFloat($('dev-monto').value)||0;
+    if (m <= 0) { info.innerHTML = '<span style="color:#dc2626">⚠ Monto debe ser mayor a 0</span>'; btn.disabled = true; btn.style.opacity='.5'; return; }
+    if (m < montoOrig) info.innerHTML = `⚠ Devolución parcial. Los <strong>${fmt(montoOrig - m)}</strong> restantes se convertirán en gasto real (dejarán de estar pendientes).`;
+    else if (m > montoOrig) info.innerHTML = `<span style="color:#0369a1">ℹ Devolución mayor al préstamo (posible intereses).</span>`;
+    else info.innerHTML = `✅ Devolución completa. El flag de reembolso pendiente se limpiará.`;
+    btn.disabled = false; btn.style.opacity = '';
+  };
+  $('dev-monto').addEventListener('input', validar);
+  $('dev-fecha').addEventListener('change', validar);
+  validar();
+}
+
+async function confirmarDevueltoCC(id) {
+  const f = window._ccFondoActual;
+  if (!f) return;
+  const orig = (f.movimientos||[]).find(m => m.id === id);
+  if (!orig) return toast('Movimiento no encontrado.', 'err');
+
+  const fecha = $('dev-fecha').value;
+  const monto = parseFloat($('dev-monto').value);
+  const ref   = ($('dev-ref')?.value||'').trim();
+
+  if (!fecha) return toast('Fecha requerida.', 'warn');
+  if (!(monto > 0)) return toast('Monto inválido.', 'warn');
+
+  // Pedir clave una sola vez (se reusará en ambas operaciones)
+  const clave = await pedirClaveFondoCC(f.id);
+  if (clave == null) return;
+
+  const btn = $('dev-btn-save');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Registrando...'; }
+
+  try {
+    // 1) Crear la ENTRADA de devolución
+    await api('/tesoreria/movimientos', {
+      method: 'POST',
+      body: JSON.stringify({
+        fondo_id    : f.id,
+        fecha       : fecha,
+        tipo        : 'entrada',
+        categoria   : 'Devolución',
+        concepto    : `Devolución de: ${orig.concepto||'préstamo'}`,
+        monto       : monto,
+        beneficiario: orig.beneficiario||'',
+        forma_pago  : 'efectivo',
+        referencia  : ref || `Devolución de mov #${id}`,
+        clave       : clave
+      })
+    });
+
+    // 2) Limpiar el flag tipo_gasto en el gasto original
+    await api(`/tesoreria/movimientos/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        fecha       : String(orig.fecha).slice(0,10),
+        categoria   : orig.categoria || null,
+        concepto    : orig.concepto,
+        monto       : parseFloat(orig.monto),
+        beneficiario: orig.beneficiario||'',
+        forma_pago  : orig.forma_pago||'efectivo',
+        referencia  : orig.referencia||'',
+        comprobante : orig.comprobante||'',
+        autorizado_por: orig.autorizado_por||'',
+        notas       : orig.notas||'',
+        periodo_pago: orig.periodo_pago||'',
+        tipo_gasto  : '',   // ← limpiar el flag
+        clave       : clave
+      })
+    });
+
+    window._ccClaveCache[f.id] = clave;
+    toast('Devolución registrada y préstamo saldado.');
+    closeModal('modal-cc-devuelto');
+    openDetalleFondoCC(f.id);
+    loadKpisCC();
+    loadFondosCC();
+  } catch(e) {
+    if (/clave/i.test(e.message)) delete window._ccClaveCache[f.id];
+    toast(e.message, 'err');
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Confirmar devolución'; }
+  }
 }
 
 function openMovCC(tipo, id) {
