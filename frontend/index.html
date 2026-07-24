@@ -541,6 +541,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-cc-fondo"><div class="modal modal-sm" id="modal-cc-fondo-body"></div></div>
 <div class="overlay" id="modal-cc-detalle"><div class="modal" style="width:min(960px,96vw);position:relative" id="modal-cc-detalle-body"></div></div>
 <div class="overlay" id="modal-cc-mov"><div class="modal modal-sm" id="modal-cc-mov-body"></div></div>
+<div class="overlay" id="modal-cc-devuelto"><div class="modal modal-sm" id="modal-cc-devuelto-body"></div></div>
 <div class="overlay" id="modal-cc-informe"><div class="modal" style="width:min(1000px,96vw)" id="modal-cc-informe-body"></div></div>
 <div class="overlay" id="modal-cc-cats"><div class="modal" style="width:min(1000px,96vw);position:relative" id="modal-cc-cats-body"></div></div>
 <div class="overlay" id="modal-cambiar-clave"><div class="modal modal-sm" id="modal-cambiar-clave-body"></div></div>
@@ -7370,15 +7371,6 @@ async function marcarDevueltoCC(id) {
       <button class="btn bsuc" id="dev-btn-save" onclick="confirmarDevueltoCC(${id})">✅ Confirmar devolución</button>
     </div>`;
 
-  // Reutilizar el modal contenedor existente
-  let modal = $('modal-cc-devuelto');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'modal-cc-devuelto';
-    modal.className = 'modal';
-    modal.innerHTML = `<div class="mdl" style="max-width:520px"><div class="mdl-body" id="modal-cc-devuelto-body"></div></div>`;
-    document.body.appendChild(modal);
-  }
   $('modal-cc-devuelto-body').innerHTML = modalHtml;
   openModal('modal-cc-devuelto');
   // Validación en vivo
