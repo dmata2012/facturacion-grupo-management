@@ -6427,13 +6427,15 @@ function renderDetalleFondoCC() {
         if (esPendiente && w) botones += '<button class="btn bo bsm" style="padding:6px 8px;background:#facc15;color:#78350f;border-color:#ca8a04;font-weight:900" onclick="marcarDevueltoCC('+m.id+')" title="Marcar como devuelto (registra entrada y limpia pendiente)">💰</button> ';
         if (w) botones += '<button class="btn bg bsm" style="padding:6px 8px" onclick="openMovCC(\''+m.tipo+'\','+m.id+')" title="Editar movimiento">✏️</button> ';
         if (w) botones += '<button class="btn bd bsm" style="padding:6px 8px" onclick="eliminarMovCC('+m.id+')" title="Eliminar movimiento">🗑</button>';
-        return `<tr>
+        const trStyle = esPendiente ? 'background:#dbeafe;font-weight:800;color:#1e40af' : '';
+        const conceptoStyle = esPendiente ? 'color:#1e3a8a;font-weight:800' : '';
+        return `<tr style="${trStyle}">
           <td>${fmtDate(m.fecha)}</td>
           <td><span style="display:inline-flex;align-items:center;gap:3px;background:${es?'#dcfce7':'#fee2e2'};color:${es?'#166534':'#991b1b'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">${es?'📥 Entrada':'📤 Salida'}</span></td>
           <td>${m.categoria||'—'}</td>
-          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.concepto||''}${m.tipo_gasto?' · '+m.tipo_gasto:''}">${esPendiente?'<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fbbf24;padding:1px 6px;border-radius:10px;font-size:9.5px;font-weight:800;margin-right:4px;vertical-align:middle" title="Reembolso pendiente de caja">💸 REEMB. PEND.</span>':''}${m.concepto||''}</td>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${conceptoStyle}" title="${m.concepto||''}${m.tipo_gasto?' · '+m.tipo_gasto:''}">${esPendiente?'<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fbbf24;padding:1px 6px;border-radius:10px;font-size:9.5px;font-weight:800;margin-right:4px;vertical-align:middle" title="Reembolso pendiente de caja">💸 REEMB. PEND.</span>':''}${m.concepto||''}</td>
           <td>${m.beneficiario||'—'}</td>
-          <td style="text-align:right;font-weight:700;color:${es?'#166534':'#991b1b'}">${es?'+':'−'}${fmt(m.monto)}</td>
+          <td style="text-align:right;font-weight:800;color:${esPendiente?'#1e40af':(es?'#166534':'#991b1b')}">${es?'+':'−'}${fmt(m.monto)}</td>
           <td style="text-align:right;font-weight:800;color:${saldoAcum<0?'#dc2626':'var(--dark)'}">${fmt(saldoAcum)}</td>
           <td style="white-space:nowrap">${botones}</td>
         </tr>`;
