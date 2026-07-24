@@ -4986,6 +4986,7 @@ function renderAsistencia(d) {
         <th style="padding:6px 4px;background:#dbeafe;border-bottom:2px solid #2563eb;color:#1e40af;font-weight:900">V</th>
         <th style="padding:6px 4px;background:#fef3c7;border-bottom:2px solid #d97706;color:#92400e;font-weight:900">P/G</th>
         <th style="padding:6px 4px;background:#f3e8ff;border-bottom:2px solid #9333ea;color:#6b21a8;font-weight:900">In</th>
+        <th style="padding:6px 4px;background:#f1f5f9;border-bottom:2px solid #64748b;color:#334155;font-weight:900">D</th>
       </tr>
     </thead><tbody>`;
   d.empleados.forEach(e => {
@@ -5008,6 +5009,7 @@ function renderAsistencia(d) {
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#1e40af">${e.totales.V}</td>`;
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#92400e">${e.totales['P/G']}</td>`;
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#6b21a8">${e.totales.In}</td>`;
+    html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#334155">${e.totales.D}</td>`;
     html += `</tr>`;
   });
   html += `</tbody></table></div>
@@ -5030,7 +5032,7 @@ function exportarAsistenciaExcel() {
   const header = ['#','Colaborador','Puesto','Departamento', ...d.dias.map(f => {
     const dt = new Date(f+'T12:00:00');
     return `${String(dt.getDate()).padStart(2,'0')}-${['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dt.getDay()]}`;
-  }), 'A','F','V','P/G','In'];
+  }), 'A','F','V','P/G','In','D'];
   aoa.push(header);
   d.empleados.forEach(e => {
     aoa.push([
@@ -5039,11 +5041,11 @@ function exportarAsistenciaExcel() {
       e.puesto||'',
       e.departamento||'',
       ...d.dias.map(f => e.celdas[f]),
-      e.totales.A, e.totales.F, e.totales.V, e.totales['P/G'], e.totales.In
+      e.totales.A, e.totales.F, e.totales.V, e.totales['P/G'], e.totales.In, e.totales.D
     ]);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{wch:6},{wch:32},{wch:20},{wch:16},...d.dias.map(()=>({wch:5})),{wch:5},{wch:5},{wch:5},{wch:6},{wch:5}];
+  ws['!cols'] = [{wch:6},{wch:32},{wch:20},{wch:16},...d.dias.map(()=>({wch:5})),{wch:5},{wch:5},{wch:5},{wch:6},{wch:5},{wch:5}];
   XLSX.utils.book_append_sheet(wb, ws, 'Asistencia');
   XLSX.writeFile(wb, `Asistencia_${d.desde}_a_${d.hasta}.xlsx`);
 }
