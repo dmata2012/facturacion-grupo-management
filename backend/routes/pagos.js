@@ -136,7 +136,7 @@ router.get('/factura/:factura_id', async (req, res) => {
 });
 
 // POST /api/pagos
-router.post('/', requireRol('admin', 'capturista'), async (req, res) => {
+router.post('/', requireRol('admin', 'capturista', 'gerente'), async (req, res) => {
   try {
     const { factura_id, fecha_pago, monto, forma_pago, referencia, notas } = req.body;
     if (!factura_id || !fecha_pago || !monto) return res.status(400).json({ error: 'Factura, fecha y monto requeridos.' });
@@ -167,7 +167,7 @@ router.post('/', requireRol('admin', 'capturista'), async (req, res) => {
 });
 
 // PUT /api/pagos/:id
-router.put('/:id', requireRol('admin', 'capturista'), async (req, res) => {
+router.put('/:id', requireRol('admin', 'capturista', 'gerente'), async (req, res) => {
   try {
     const { fecha_pago, monto, forma_pago, referencia, notas } = req.body;
     if (!fecha_pago || !monto) return res.status(400).json({ error: 'Fecha y monto requeridos.' });
@@ -200,7 +200,7 @@ router.put('/:id', requireRol('admin', 'capturista'), async (req, res) => {
 });
 
 // DELETE /api/pagos/:id
-router.delete('/:id', requireRol('admin', 'capturista'), async (req, res) => {
+router.delete('/:id', requireRol('admin', 'capturista', 'gerente'), async (req, res) => {
   try {
     const r = await query(`DELETE FROM fac_pagos WHERE id=$1 RETURNING factura_id`, [req.params.id]);
     if (r.rows.length) await recalcularEstatus(r.rows[0].factura_id);

@@ -657,6 +657,7 @@ function makeChart(key, ctx, cfg) {
 }
 
 function canWrite() { return ME && ['admin','capturista','tesoreria'].includes(ME.rol); }
+function canFacturar() { return ME && ['admin','capturista','tesoreria','gerente'].includes(ME.rol); }
 function canAdmin() { return ME && ME.rol === 'admin'; }
 function isCapturista()        { return ME && ME.rol === 'capturista'; }
 function isTesoreria()         { return ME && ME.rol === 'tesoreria'; }
@@ -1247,7 +1248,7 @@ async function facturas(resetPage = true) {
       <div class="page-title">Facturas</div>
       <div class="page-sub">Gestión y seguimiento de comprobantes fiscales</div>
     </div>
-    ${canWrite() ? `<div style="display:flex;gap:8px"><button class="btn bo" onclick="openImportarXML()">📥 Importar XMLs</button><button class="btn bs" onclick="openFactura()">+ Nueva factura</button></div>` : ''}
+    ${canFacturar() ? `<div style="display:flex;gap:8px"><button class="btn bo" onclick="openImportarXML()">📥 Importar XMLs</button><button class="btn bs" onclick="openFactura()">+ Nueva factura</button></div>` : ''}
   </div>
   <div class="card">
     <div class="filters">
@@ -1311,10 +1312,10 @@ async function loadFacturas() {
               ? '<span title="Desglose cuadrado — factura bloqueada" style="display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:20px;padding:3px 10px;color:#166534;font-size:12px;font-weight:800">✔ CUADRADA</span>'
               : badgeEstatus(f.estatus))}</td>
         <td style="white-space:nowrap">
-          ${canWrite() && !f.desglose_validado ? `<button class="btn bo bsm" onclick="editFactura(${f.id})" title="Editar factura">✏️</button>` : ''}
+          ${canFacturar() && !f.desglose_validado ? `<button class="btn bo bsm" onclick="editFactura(${f.id})" title="Editar factura">✏️</button>` : ''}
           ${(f.cliente_aplica_desglose !== false) ? `<button class="btn bg bsm" onclick="openRH(${f.id})" title="Ver/editar desglose">Desg</button>` : ''}
           <button class="btn bsuc bsm" onclick="openPago(${f.id})" title="Registrar pago">💲</button>
-          ${canWrite()&&f.estatus!=='cancelada'&&!f.desglose_validado?`<button class="btn bd bsm" onclick="cancelarFactura(${f.id})" title="Cancelar factura">✕</button>`:''}
+          ${canFacturar()&&f.estatus!=='cancelada'&&!f.desglose_validado?`<button class="btn bd bsm" onclick="cancelarFactura(${f.id})" title="Cancelar factura">✕</button>`:''}
           ${canAdmin()&&!f.desglose_validado?`<button class="btn bd bsm" onclick="eliminarFactura(${f.id})" title="Eliminar factura" style="background:#fff0f0;border-color:#ffd7d7">🗑️</button>`:''}
           ${f.desglose_validado?`<span title="Factura bloqueada — desglose cuadrado" style="color:var(--muted);font-size:11px;font-style:italic">🔒 bloqueada</span>`:''}
         </td>
@@ -1674,7 +1675,7 @@ async function detalleFactura(id) {
       </tbody></table>
       <div class="rh-total"><span>Saldo pendiente:</span><span style="${parseFloat(f.saldo)>0?'color:var(--danger)':''}">${fmt(f.saldo)}</span></div>`
       : '<p class="empty">Sin pagos registrados.</p>'}
-      ${canWrite()&&parseFloat(f.saldo)>0?`<div style="margin-top:10px"><button class="btn bsuc bsm" onclick="closeModal('modal-detalle-factura');openPago(${id})">💲 Registrar pago</button></div>`:''}
+      ${canFacturar()&&parseFloat(f.saldo)>0?`<div style="margin-top:10px"><button class="btn bsuc bsm" onclick="closeModal('modal-detalle-factura');openPago(${id})">💲 Registrar pago</button></div>`:''}
     </div>
     <div class="tab-panel" id="dtab-rh">
       ${f.desglose?.length ? `<table><thead><tr><th>Concepto</th><th>Monto</th><th>Notas</th></tr></thead><tbody>
@@ -1686,7 +1687,7 @@ async function detalleFactura(id) {
       </div>` : '<p class="empty">Sin desglose capturado.</p>'}
     </div>
     <div class="form-actions">
-      ${canWrite()?`<button class="btn bg bsm" onclick="closeModal('modal-detalle-factura');openRH(${id})">Editar desglose</button>
+      ${canFacturar()?`<button class="btn bg bsm" onclick="closeModal('modal-detalle-factura');openRH(${id})">Editar desglose</button>
       <button class="btn bsuc bsm" onclick="closeModal('modal-detalle-factura');openPago(${id})">Registrar pago</button>`:''}
       <button class="btn bo" onclick="closeModal('modal-detalle-factura')">Cerrar</button>
     </div>`;

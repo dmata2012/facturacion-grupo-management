@@ -104,7 +104,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // ── CREAR ─────────────────────────────────────
-router.post('/', requireRol('admin', 'capturista'),
+router.post('/', requireRol('admin', 'capturista', 'gerente'),
   upload.fields([{ name: 'pdf', maxCount: 1 }, { name: 'xml', maxCount: 1 }]),
   async (req, res) => {
     try {
@@ -129,7 +129,7 @@ router.post('/', requireRol('admin', 'capturista'),
 );
 
 // ── ACTUALIZAR ────────────────────────────────
-router.put('/:id', requireRol('admin', 'capturista'), async (req, res) => {
+router.put('/:id', requireRol('admin', 'capturista', 'gerente'), async (req, res) => {
   try {
     const { cliente_id, empresa_receptora_id, folio, uuid_cfdi, tipo_comprobante, fecha_emision, fecha_vencimiento, subtotal, iva, total, moneda, concepto, estatus } = req.body;
     await query(
@@ -157,7 +157,7 @@ router.get('/:id/desglose', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/:id/desglose', requireRol('admin', 'capturista'), async (req, res) => {
+router.put('/:id/desglose', requireRol('admin', 'capturista', 'gerente'), async (req, res) => {
   try {
     const { partidas } = req.body; // [{ concepto_id, concepto, monto, notas }]
     const facId = req.params.id;
@@ -187,7 +187,7 @@ router.put('/:id/desglose', requireRol('admin', 'capturista'), async (req, res) 
 });
 
 // ── IMPORTAR MASIVO XML ───────────────────────
-router.post('/importar-masivo', requireRol('admin', 'capturista'), async (req, res) => {
+router.post('/importar-masivo', requireRol('admin', 'capturista', 'gerente'), async (req, res) => {
   const { facturas: items } = req.body;
   if (!Array.isArray(items) || !items.length)
     return res.status(400).json({ error: 'No hay facturas para importar.' });
@@ -283,7 +283,7 @@ router.post('/importar-masivo', requireRol('admin', 'capturista'), async (req, r
 });
 
 // ── CANCELAR ──────────────────────────────────
-router.patch('/:id/cancelar', requireRol('admin', 'capturista'), async (req, res) => {
+router.patch('/:id/cancelar', requireRol('admin', 'capturista', 'gerente'), async (req, res) => {
   try {
     await query(`UPDATE fac_facturas SET estatus='cancelada',actualizado_en=NOW() WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
