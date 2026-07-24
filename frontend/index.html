@@ -6423,10 +6423,10 @@ function renderDetalleFondoCC() {
         const esPendiente = /reembolso\s*pendiente/i.test(m.tipo_gasto||'');
         const w = canWrite();
         let botones = '';
-        if (esPendiente) botones += '<button class="btn bo bsm" onclick="imprimirValeCC('+m.id+')" title="Generar vale de caja imprimible">🖨 Vale</button> ';
-        if (esPendiente && w) botones += '<button class="btn bo bsm" style="background:#facc15;color:#78350f;border-color:#ca8a04;font-weight:900" onclick="marcarDevueltoCC('+m.id+')" title="Registrar devolución del préstamo y limpiar el pendiente">💰 Devuelto</button> ';
-        if (w) botones += '<button class="btn bg bsm" onclick="openMovCC(\''+m.tipo+'\','+m.id+')">✏️</button> ';
-        if (w) botones += '<button class="btn bd bsm" onclick="eliminarMovCC('+m.id+')">🗑</button>';
+        if (esPendiente) botones += '<button class="btn bo bsm" style="padding:6px 8px" onclick="imprimirValeCC('+m.id+')" title="Imprimir vale de caja">🖨</button> ';
+        if (esPendiente && w) botones += '<button class="btn bo bsm" style="padding:6px 8px;background:#facc15;color:#78350f;border-color:#ca8a04;font-weight:900" onclick="marcarDevueltoCC('+m.id+')" title="Marcar como devuelto (registra entrada y limpia pendiente)">💰</button> ';
+        if (w) botones += '<button class="btn bg bsm" style="padding:6px 8px" onclick="openMovCC(\''+m.tipo+'\','+m.id+')" title="Editar movimiento">✏️</button> ';
+        if (w) botones += '<button class="btn bd bsm" style="padding:6px 8px" onclick="eliminarMovCC('+m.id+')" title="Eliminar movimiento">🗑</button>';
         return `<tr>
           <td>${fmtDate(m.fecha)}</td>
           <td><span style="display:inline-flex;align-items:center;gap:3px;background:${es?'#dcfce7':'#fee2e2'};color:${es?'#166534':'#991b1b'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">${es?'📥 Entrada':'📤 Salida'}</span></td>
