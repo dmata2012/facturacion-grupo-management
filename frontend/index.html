@@ -4167,7 +4167,7 @@ async function checador() {
           <span><span style="display:inline-block;width:22px;text-align:center;background:#dbeafe;color:#1e40af;font-weight:900;border-radius:4px;padding:2px 4px">V</span> Vacaciones</span>
           <span><span style="display:inline-block;width:32px;text-align:center;background:#fef3c7;color:#92400e;font-weight:900;border-radius:4px;padding:2px 4px">P/G</span> Permiso con goce</span>
           <span><span style="display:inline-block;width:22px;text-align:center;background:#f3e8ff;color:#6b21a8;font-weight:900;border-radius:4px;padding:2px 4px">In</span> Incapacidad</span>
-          <span><span style="display:inline-block;width:22px;text-align:center;background:#f1f5f9;color:#64748b;font-weight:900;border-radius:4px;padding:2px 4px">D</span> Descanso</span>
+          <span><span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:#dc2626;color:#fff;font-weight:900;border-radius:50%;box-shadow:0 0 0 1.5px #b91c1c inset">D</span> Descanso</span>
         </div>
         <div id="asist-body"><p class="empty">Selecciona un rango para generar la lista de asistencia.</p></div>
       </div>
@@ -4947,7 +4947,7 @@ const ASIST_COLOR = {
   'V':   { bg:'#dbeafe', fg:'#1e40af' },
   'P/G': { bg:'#fef3c7', fg:'#92400e' },
   'In':  { bg:'#f3e8ff', fg:'#6b21a8' },
-  'D':   { bg:'#f1f5f9', fg:'#64748b' }
+  'D':   { bg:'#dc2626', fg:'#fff', circle:true }
 };
 
 async function cargarAsistencia() {
@@ -5000,9 +5000,10 @@ function renderAsistencia(d) {
       const c = ASIST_COLOR[cod] || { bg:'#fff', fg:'#000' };
       const dt = new Date(f+'T12:00:00');
       const esDom = dt.getDay() === 0;
-      html += `<td style="padding:0;text-align:center;background:${esDom?'#fef2f2':'transparent'}">
-        <div style="display:inline-block;min-width:22px;padding:3px 4px;border-radius:4px;background:${c.bg};color:${c.fg};font-weight:900;font-size:11px" title="${fmtDate(f)}: ${cod}">${cod}</div>
-      </td>`;
+      const chip = c.circle
+        ? `<div style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:${c.bg};color:${c.fg};font-weight:900;font-size:11px;box-shadow:0 0 0 1.5px #b91c1c inset" title="${fmtDate(f)}: Descanso">${cod}</div>`
+        : `<div style="display:inline-block;min-width:22px;padding:3px 4px;border-radius:4px;background:${c.bg};color:${c.fg};font-weight:900;font-size:11px" title="${fmtDate(f)}: ${cod}">${cod}</div>`;
+      html += `<td style="padding:2px;text-align:center;background:${esDom?'#fef2f2':'transparent'}">${chip}</td>`;
     });
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#166534">${e.totales.A}</td>`;
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#991b1b">${e.totales.F}</td>`;
