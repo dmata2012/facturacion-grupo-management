@@ -6431,18 +6431,18 @@ function renderDetalleFondoCC() {
           <td style="white-space:nowrap">
             ${(() => {
               const esPendiente = /reembolso\s*pendiente/i.test(m.tipo_gasto||'');
-              let html = '';
+              const btns = [];
               if (esPendiente) {
-                html += `<button class="btn bo bsm" onclick="imprimirValeCC(${m.id})" title="Generar vale de caja imprimible">🖨 Vale</button> `;
+                btns.push(`<button class="btn bo bsm" onclick="imprimirValeCC(${m.id})" title="Generar vale de caja imprimible">🖨 Vale</button>`);
                 if (canWrite()) {
-                  html += `<button class="btn bsm" style="background:#facc15;color:#78350f;border:1.5px solid #ca8a04;font-weight:900" onclick="marcarDevueltoCC(${m.id})" title="Registrar devolución del préstamo y limpiar el pendiente">💰 Devuelto</button> `;
+                  btns.push(`<button class="btn bo bsm" style="background:#facc15 !important;color:#78350f !important;border-color:#ca8a04 !important;font-weight:900" onclick="marcarDevueltoCC(${m.id})" title="Registrar devolución del préstamo y limpiar el pendiente">💰 Devuelto</button>`);
                 }
               }
               if (canWrite()) {
-                html += `<button class="btn bg bsm" onclick="openMovCC('${m.tipo}',${m.id})">✏️</button> `;
-                html += `<button class="btn bd bsm" onclick="eliminarMovCC(${m.id})">🗑</button>`;
+                btns.push(`<button class="btn bg bsm" onclick="openMovCC('${m.tipo}',${m.id})">✏️</button>`);
+                btns.push(`<button class="btn bd bsm" onclick="eliminarMovCC(${m.id})">🗑</button>`);
               }
-              return html;
+              return btns.join(' ');
             })()}
           </td>
         </tr>`;
