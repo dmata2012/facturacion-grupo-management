@@ -181,6 +181,111 @@ router.get('/reporte', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/checador/asistencia — matriz de asistencia por rango de fechas
+// Codigos por celda:
+//   A  = Asistencia (con registro de entrada)
+//   F  = Falta (sin registro y no aplica exclusion)
+//   V  = Vacaciones (solicitud aprobada tipo='vacaciones')
+//   P/G= Permiso con Goce (solicitud aprobada tipo='permiso_goce')
+//   In = Incapacidad (solicitud aprobada tipo='incapacidad')
+//   D  = Dia de descanso (segun empleado)
+//   -  = Sin datos (empleado inactivo o fuera de rango)
+router.get('/asistencia', async (req, res) => {
+  try {
+    const { desde, hasta, empleado_id, incluir_inactivos } = req.query;
+    if (!desde || !hasta) return res.status(400).json({ error: 'Se requieren desde y hasta (YYYY-MM-DD).' });
+
+    // Empleados
+    const paramsE = [];
+    let whereE = incluir_inactivos === 'true' ? '' : 'WHERE activo=TRUE';
+    if (empleado_id) {
+      paramsE.push(empleado_id);
+      whereE = whereE ? `${whereE} AND id=$${paramsE.length}` : `WHERE id=$${paramsE.length}`;
+    }
+    const empleados = await query(
+      `SELECT id, nombre, numero_colaborador, puesto, departamento, dias_descanso
+       FROM fac_empleados ${whereE} ORDER BY nombre`,
+      paramsE
+    );
+
+    // Registros del reloj en el rango
+    const regs = await query(
+      `SELECT empleado_id, fecha, hora_entrada, hora_salida, minutos_retardo
+       FROM fac_reloj_checador
+       WHERE fecha BETWEEN $1::date AND $2::date`,
+      [desde, hasta]
+    );
+
+    // Solicitudes aprobadas que caen dentro del rango
+    const sols = await query(
+      `SELECT empleado_id, fecha_inicio, fecha_fin, COALESCE(tipo,'vacaciones') AS tipo
+       FROM fac_vacaciones_solicitudes
+       WHERE estatus = 'aprobada'
+         AND daterange(fecha_inicio, fecha_fin, '[]') && daterange($1::date, $2::date, '[]')`,
+      [desde, hasta]
+    );
+
+    // Generar lista de dias
+    const dias = [];
+    const d0 = new Date(desde+'T12:00:00');
+    const d1 = new Date(hasta+'T12:00:00');
+    for (let d = new Date(d0); d <= d1; d.setDate(d.getDate()+1)) {
+      dias.push(d.toISOString().slice(0,10));
+    }
+
+    // Indexar registros y solicitudes
+    const regByEmpDia = {};   // { empleado_id: { fecha: {...} } }
+    regs.rows.forEach(r => {
+      const f = String(r.fecha).slice(0,10);
+      if (!regByEmpDia[r.empleado_id]) regByEmpDia[r.empleado_id] = {};
+      regByEmpDia[r.empleado_id][f] = r;
+    });
+    // Solicitudes: pre-expandir a un mapa empleado→fecha→tipo
+    const solByEmpDia = {};   // { empleado_id: { fecha: tipo } }
+    sols.rows.forEach(s => {
+      const fi = new Date(String(s.fecha_inicio).slice(0,10)+'T12:00:00');
+      const ff = new Date(String(s.fecha_fin).slice(0,10)+'T12:00:00');
+      for (let d = new Date(fi); d <= ff; d.setDate(d.getDate()+1)) {
+        const key = d.toISOString().slice(0,10);
+        if (!solByEmpDia[s.empleado_id]) solByEmpDia[s.empleado_id] = {};
+        solByEmpDia[s.empleado_id][key] = s.tipo;
+      }
+    });
+
+    const codigoTipoSolicitud = { vacaciones:'V', permiso_goce:'P/G', incapacidad:'In' };
+
+    // Construir matriz
+    const matriz = empleados.rows.map(e => {
+      const descanso = Array.isArray(e.dias_descanso) ? e.dias_descanso : [];
+      const celdas = {};
+      const totales = { A:0, F:0, V:0, 'P/G':0, In:0, D:0 };
+      dias.forEach(fecha => {
+        const dow = new Date(fecha+'T12:00:00').getDay(); // 0=Dom .. 6=Sab
+        const sol = solByEmpDia[e.id]?.[fecha];
+        const reg = regByEmpDia[e.id]?.[fecha];
+        let cod;
+        if (reg && reg.hora_entrada) cod = 'A';
+        else if (sol) cod = codigoTipoSolicitud[sol] || 'V';
+        else if (descanso.includes(dow)) cod = 'D';
+        else cod = 'F';
+        celdas[fecha] = cod;
+        if (totales[cod] !== undefined) totales[cod]++;
+      });
+      return {
+        empleado_id: e.id,
+        nombre: e.nombre,
+        numero_colaborador: e.numero_colaborador,
+        puesto: e.puesto,
+        departamento: e.departamento,
+        celdas,
+        totales
+      };
+    });
+
+    res.json({ desde, hasta, dias, empleados: matriz });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/checador/empleados — lista de empleados con configuración de horarios
 router.get('/empleados', async (req, res) => {
   try {

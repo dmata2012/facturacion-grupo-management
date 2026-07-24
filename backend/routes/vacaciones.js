@@ -32,6 +32,13 @@ const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
 
+// Migración idempotente: columna 'tipo' para clasificar solicitudes
+// vacaciones | permiso_goce | incapacidad
+(async () => {
+  try { await query(`ALTER TABLE fac_vacaciones_solicitudes ADD COLUMN IF NOT EXISTS tipo TEXT DEFAULT 'vacaciones'`); }
+  catch (e) { console.warn('Migración tipo solicitudes:', e.message); }
+})();
+
 // Tabla LFT (post-reforma 2023): años cumplidos → días de vacaciones
 function diasPorAnio(anio) {
   if (anio <= 0)  return 0;
@@ -240,7 +247,7 @@ router.post('/solicitudes', async (req, res) => {
   try {
     await client.query('BEGIN');
     const { empleado_id, fecha_solicitud, fecha_inicio, fecha_fin, dias_solicitados,
-            fecha_regreso, observaciones, estatus, distribucion } = req.body;
+            fecha_regreso, observaciones, estatus, distribucion, tipo } = req.body;
     if (!empleado_id || !fecha_inicio || !fecha_fin)
       return res.status(400).json({ error: 'Empleado y fechas son requeridas.' });
     const dias = parseFloat(dias_solicitados) || 0;
@@ -249,11 +256,16 @@ router.post('/solicitudes', async (req, res) => {
       return res.status(400).json({ error: 'Los días solicitados deben ser mayor a 0.' });
     }
 
+    // Tipo de solicitud: vacaciones (default) | permiso_goce | incapacidad
+    const tipoSol = ['vacaciones','permiso_goce','incapacidad'].includes(tipo) ? tipo : 'vacaciones';
+    const esVacaciones = tipoSol === 'vacaciones';
+
     // Distribuir días — manual si viene distribucion, o FIFO automática
+    // Solo vacaciones consume periodos. Permisos e incapacidades no descuentan.
     const est = estatus || 'aprobada';
     let asignaciones = [];
     let resumen = null;
-    if (est !== 'rechazada') {
+    if (est !== 'rechazada' && esVacaciones) {
       if (Array.isArray(distribucion) && distribucion.length) {
         // Distribución MANUAL: validar que cada periodo pertenece al empleado y tiene pendientes suficientes
         let sumaSolicitada = 0;
@@ -297,13 +309,14 @@ router.post('/solicitudes', async (req, res) => {
     }
 
     // Insertar solicitud
+    const resumenFinal = esVacaciones ? resumen : (tipoSol === 'permiso_goce' ? 'Permiso con goce de sueldo' : 'Incapacidad');
     const r = await client.query(
       `INSERT INTO fac_vacaciones_solicitudes(
          empleado_id, fecha_solicitud, fecha_inicio, fecha_fin, dias_solicitados,
-         fecha_regreso, periodos_aplicados, observaciones, estatus, creado_por
-       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+         fecha_regreso, periodos_aplicados, observaciones, estatus, tipo, creado_por
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [empleado_id, fecha_solicitud || new Date(), fecha_inicio, fecha_fin, dias,
-       fecha_regreso || null, resumen, observaciones || null, est, req.usuario.id]
+       fecha_regreso || null, resumenFinal, observaciones || null, est, tipoSol, req.usuario.id]
     );
     const solId = r.rows[0].id;
 

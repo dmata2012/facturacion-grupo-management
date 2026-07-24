@@ -4057,6 +4057,7 @@ async function checador() {
       <div class="tab active" onclick="showTab(this,'ch-tab-marcar')">✋ Marcar entrada/salida</div>
       <div class="tab" onclick="showTab(this,'ch-tab-hoy');cargarChecadorHoy()">📅 Registros de hoy</div>
       <div class="tab" onclick="showTab(this,'ch-tab-reporte');cargarChecadorReporte()">📊 Reporte por periodo</div>
+      <div class="tab" onclick="showTab(this,'ch-tab-asistencia');inicializarAsistencia()">📋 Lista de Asistencia</div>
     </div>`}
 
     <!-- PESTAÑA MARCAR -->
@@ -4129,6 +4130,45 @@ async function checador() {
           <input type="date" id="chr-hasta" onchange="cargarChecadorReporte()">
         </div>
         <div id="chr-body"><p class="empty">Selecciona filtros para ver el reporte.</p></div>
+      </div>
+    </div>
+
+    <!-- PESTAÑA LISTA DE ASISTENCIA -->
+    <div class="tab-panel" id="ch-tab-asistencia">
+      <div class="card">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--gray-d);display:block;margin-bottom:3px">RANGO PRESET</label>
+            <div style="display:flex;gap:4px;flex-wrap:wrap">
+              <button class="btn bo bsm" onclick="setAsistPreset('semana')">📅 Esta semana</button>
+              <button class="btn bo bsm" onclick="setAsistPreset('q1')">1ª quincena mes</button>
+              <button class="btn bo bsm" onclick="setAsistPreset('q2')">2ª quincena mes</button>
+              <button class="btn bo bsm" onclick="setAsistPreset('mes')">Este mes</button>
+              <button class="btn bo bsm" onclick="setAsistPreset('mesant')">Mes anterior</button>
+            </div>
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--gray-d);display:block;margin-bottom:3px">DESDE</label>
+            <input type="date" id="asist-desde" onchange="cargarAsistencia()">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--gray-d);display:block;margin-bottom:3px">HASTA</label>
+            <input type="date" id="asist-hasta" onchange="cargarAsistencia()">
+          </div>
+          <div style="margin-left:auto">
+            <button class="btn bs bsm" onclick="exportarAsistenciaExcel()">⬇ Descargar Excel</button>
+            <button class="btn bo bsm" onclick="window.print()" style="margin-left:4px">🖨 Imprimir</button>
+          </div>
+        </div>
+        <div id="asist-leyenda" style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;margin-bottom:10px;padding:8px 12px;background:var(--bg-alt);border-radius:8px">
+          <span><span style="display:inline-block;width:22px;text-align:center;background:#dcfce7;color:#166534;font-weight:900;border-radius:4px;padding:2px 4px">A</span> Asistencia</span>
+          <span><span style="display:inline-block;width:22px;text-align:center;background:#fee2e2;color:#991b1b;font-weight:900;border-radius:4px;padding:2px 4px">F</span> Falta</span>
+          <span><span style="display:inline-block;width:22px;text-align:center;background:#dbeafe;color:#1e40af;font-weight:900;border-radius:4px;padding:2px 4px">V</span> Vacaciones</span>
+          <span><span style="display:inline-block;width:32px;text-align:center;background:#fef3c7;color:#92400e;font-weight:900;border-radius:4px;padding:2px 4px">P/G</span> Permiso con goce</span>
+          <span><span style="display:inline-block;width:22px;text-align:center;background:#f3e8ff;color:#6b21a8;font-weight:900;border-radius:4px;padding:2px 4px">In</span> Incapacidad</span>
+          <span><span style="display:inline-block;width:22px;text-align:center;background:#f1f5f9;color:#64748b;font-weight:900;border-radius:4px;padding:2px 4px">D</span> Descanso</span>
+        </div>
+        <div id="asist-body"><p class="empty">Selecciona un rango para generar la lista de asistencia.</p></div>
       </div>
     </div>`;
 
@@ -4843,6 +4883,168 @@ async function eliminarChecador(id) {
     toast('Registro eliminado.');
     cargarChecadorHoy();
   } catch(e) { toast(e.message, 'err'); }
+}
+
+// ══ LISTA DE ASISTENCIA (matriz) ═══════════════════════════
+function inicializarAsistencia() {
+  const hoy = new Date();
+  const y = hoy.getFullYear(), m = hoy.getMonth();
+  const pad = n => String(n).padStart(2,'0');
+  const dia = hoy.getDate();
+  // Default: quincena en curso (1-15 o 16-fin de mes)
+  if (!$('asist-desde').value) {
+    if (dia <= 15) {
+      $('asist-desde').value = `${y}-${pad(m+1)}-01`;
+      $('asist-hasta').value = `${y}-${pad(m+1)}-15`;
+    } else {
+      const finMes = new Date(y, m+1, 0).getDate();
+      $('asist-desde').value = `${y}-${pad(m+1)}-16`;
+      $('asist-hasta').value = `${y}-${pad(m+1)}-${pad(finMes)}`;
+    }
+  }
+  cargarAsistencia();
+}
+
+function setAsistPreset(p) {
+  const hoy = new Date();
+  const y = hoy.getFullYear(), m = hoy.getMonth(), d = hoy.getDate();
+  const pad = n => String(n).padStart(2,'0');
+  let desde, hasta;
+  if (p === 'semana') {
+    // Lunes a domingo de la semana actual
+    const dw = hoy.getDay(); // 0=Dom
+    const lunes = new Date(hoy); lunes.setDate(d - (dw === 0 ? 6 : dw - 1));
+    const domingo = new Date(lunes); domingo.setDate(lunes.getDate() + 6);
+    desde = lunes.toISOString().slice(0,10);
+    hasta = domingo.toISOString().slice(0,10);
+  } else if (p === 'q1') {
+    desde = `${y}-${pad(m+1)}-01`;
+    hasta = `${y}-${pad(m+1)}-15`;
+  } else if (p === 'q2') {
+    const finMes = new Date(y, m+1, 0).getDate();
+    desde = `${y}-${pad(m+1)}-16`;
+    hasta = `${y}-${pad(m+1)}-${pad(finMes)}`;
+  } else if (p === 'mes') {
+    const finMes = new Date(y, m+1, 0).getDate();
+    desde = `${y}-${pad(m+1)}-01`;
+    hasta = `${y}-${pad(m+1)}-${pad(finMes)}`;
+  } else if (p === 'mesant') {
+    const finAnt = new Date(y, m, 0).getDate();
+    const mAnt = m === 0 ? 12 : m;
+    const yAnt = m === 0 ? y-1 : y;
+    desde = `${yAnt}-${pad(mAnt)}-01`;
+    hasta = `${yAnt}-${pad(mAnt)}-${pad(finAnt)}`;
+  }
+  $('asist-desde').value = desde;
+  $('asist-hasta').value = hasta;
+  cargarAsistencia();
+}
+
+const ASIST_COLOR = {
+  'A':   { bg:'#dcfce7', fg:'#166534' },
+  'F':   { bg:'#fee2e2', fg:'#991b1b' },
+  'V':   { bg:'#dbeafe', fg:'#1e40af' },
+  'P/G': { bg:'#fef3c7', fg:'#92400e' },
+  'In':  { bg:'#f3e8ff', fg:'#6b21a8' },
+  'D':   { bg:'#f1f5f9', fg:'#64748b' }
+};
+
+async function cargarAsistencia() {
+  const desde = $('asist-desde').value;
+  const hasta = $('asist-hasta').value;
+  if (!desde || !hasta) return;
+  if (desde > hasta) { toast('La fecha "desde" debe ser menor o igual a "hasta".', 'warn'); return; }
+  $('asist-body').innerHTML = '<p class="empty">Cargando...</p>';
+  try {
+    const d = await api(`/checador/asistencia?desde=${desde}&hasta=${hasta}`);
+    window._asistData = d;
+    renderAsistencia(d);
+  } catch(e) {
+    $('asist-body').innerHTML = `<p class="empty" style="color:var(--red)">Error: ${e.message}</p>`;
+  }
+}
+
+function renderAsistencia(d) {
+  const cont = $('asist-body');
+  if (!d.empleados.length) {
+    cont.innerHTML = '<p class="empty">Sin colaboradores activos.</p>';
+    return;
+  }
+  const fmtDiaCorto = (f) => {
+    const dt = new Date(f+'T12:00:00');
+    const dias = ['D','L','M','M','J','V','S'];
+    return `<div style="font-size:10px;font-weight:700;color:${dt.getDay()===0?'#dc2626':'#64748b'}">${dias[dt.getDay()]}</div><div style="font-size:11px;font-weight:900">${dt.getDate()}</div>`;
+  };
+  let html = `<div class="tscroll" style="max-height:70vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;min-width:100%">
+    <thead style="position:sticky;top:0;z-index:2;background:#fff">
+      <tr>
+        <th style="text-align:left;padding:6px 8px;background:#f8fafc;border-bottom:2px solid #cbd5e1;position:sticky;left:0;z-index:3;min-width:220px">Colaborador</th>
+        ${d.dias.map(f => `<th style="padding:2px;text-align:center;background:#f8fafc;border-bottom:2px solid #cbd5e1;min-width:28px">${fmtDiaCorto(f)}</th>`).join('')}
+        <th style="padding:6px 4px;background:#dcfce7;border-bottom:2px solid #16a34a;color:#166534;font-weight:900">A</th>
+        <th style="padding:6px 4px;background:#fee2e2;border-bottom:2px solid #dc2626;color:#991b1b;font-weight:900">F</th>
+        <th style="padding:6px 4px;background:#dbeafe;border-bottom:2px solid #2563eb;color:#1e40af;font-weight:900">V</th>
+        <th style="padding:6px 4px;background:#fef3c7;border-bottom:2px solid #d97706;color:#92400e;font-weight:900">P/G</th>
+        <th style="padding:6px 4px;background:#f3e8ff;border-bottom:2px solid #9333ea;color:#6b21a8;font-weight:900">In</th>
+      </tr>
+    </thead><tbody>`;
+  d.empleados.forEach(e => {
+    html += `<tr style="border-bottom:1px solid #e5e7eb">
+      <td style="padding:6px 8px;position:sticky;left:0;background:#fff;z-index:1;border-right:2px solid #e5e7eb">
+        <div style="font-weight:800;font-size:12px">${e.nombre}</div>
+        <div style="font-size:10px;color:#64748b">${e.numero_colaborador?'#'+e.numero_colaborador+' · ':''}${e.puesto||''}</div>
+      </td>`;
+    d.dias.forEach(f => {
+      const cod = e.celdas[f];
+      const c = ASIST_COLOR[cod] || { bg:'#fff', fg:'#000' };
+      const dt = new Date(f+'T12:00:00');
+      const esDom = dt.getDay() === 0;
+      html += `<td style="padding:0;text-align:center;background:${esDom?'#fef2f2':'transparent'}">
+        <div style="display:inline-block;min-width:22px;padding:3px 4px;border-radius:4px;background:${c.bg};color:${c.fg};font-weight:900;font-size:11px" title="${fmtDate(f)}: ${cod}">${cod}</div>
+      </td>`;
+    });
+    html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#166534">${e.totales.A}</td>`;
+    html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#991b1b">${e.totales.F}</td>`;
+    html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#1e40af">${e.totales.V}</td>`;
+    html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#92400e">${e.totales['P/G']}</td>`;
+    html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#6b21a8">${e.totales.In}</td>`;
+    html += `</tr>`;
+  });
+  html += `</tbody></table></div>
+    <div style="margin-top:10px;font-size:11px;color:var(--muted)">Rango: <strong>${fmtDate(d.desde)}</strong> — <strong>${fmtDate(d.hasta)}</strong> · ${d.empleados.length} colaboradores · ${d.dias.length} días</div>`;
+  cont.innerHTML = html;
+}
+
+function exportarAsistenciaExcel() {
+  const d = window._asistData;
+  if (!d) return toast('Primero genera la lista de asistencia.', 'warn');
+  if (typeof XLSX === 'undefined') return toast('Librería XLSX no disponible.', 'err');
+  const wb = XLSX.utils.book_new();
+  const aoa = [];
+  aoa.push([`LISTA DE ASISTENCIA — GRUPO MANAGEMENT`]);
+  aoa.push([`Rango: ${fmtDate(d.desde)} al ${fmtDate(d.hasta)}`]);
+  aoa.push([`Generado: ${new Date().toLocaleString('es-MX')}`]);
+  aoa.push([]);
+  aoa.push([`Códigos: A=Asistencia · F=Falta · V=Vacaciones · P/G=Permiso con Goce · In=Incapacidad · D=Descanso`]);
+  aoa.push([]);
+  const header = ['#','Colaborador','Puesto','Departamento', ...d.dias.map(f => {
+    const dt = new Date(f+'T12:00:00');
+    return `${String(dt.getDate()).padStart(2,'0')}-${['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dt.getDay()]}`;
+  }), 'A','F','V','P/G','In'];
+  aoa.push(header);
+  d.empleados.forEach(e => {
+    aoa.push([
+      e.numero_colaborador||'',
+      e.nombre,
+      e.puesto||'',
+      e.departamento||'',
+      ...d.dias.map(f => e.celdas[f]),
+      e.totales.A, e.totales.F, e.totales.V, e.totales['P/G'], e.totales.In
+    ]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:6},{wch:32},{wch:20},{wch:16},...d.dias.map(()=>({wch:5})),{wch:5},{wch:5},{wch:5},{wch:6},{wch:5}];
+  XLSX.utils.book_append_sheet(wb, ws, 'Asistencia');
+  XLSX.writeFile(wb, `Asistencia_${d.desde}_a_${d.hasta}.xlsx`);
 }
 
 async function verFotoChecador(id, tipo, nombre) {
@@ -5565,8 +5767,16 @@ async function openSolicitudVac(empIdPredef) {
     const emps = await api('/vacaciones/empleados');
     const today = new Date().toISOString().slice(0,10);
     $('modal-vac-sol-body').innerHTML = `
-      <h4>Nueva solicitud de vacaciones</h4>
+      <h4>Nueva solicitud</h4>
       <div class="fg">
+        <div class="fi full">
+          <label>Tipo de solicitud *</label>
+          <select id="vs-tipo" onchange="cambiarTipoSolicitud()">
+            <option value="vacaciones">🌴 Vacaciones (descuenta de días acumulados)</option>
+            <option value="permiso_goce">📝 Permiso con goce de sueldo (no descuenta días)</option>
+            <option value="incapacidad">🏥 Incapacidad (no descuenta días)</option>
+          </select>
+        </div>
         <div class="fi"><label>Colaborador *</label>
           <select id="vs-emp" onchange="cambiarModoDistribucion()">
             <option value="">— Seleccionar —</option>
@@ -5687,6 +5897,15 @@ async function cambiarModoDistribucion() {
     if (man)  man.style.display = 'block';
     await renderDistribucionManual();
   }
+}
+
+// Al cambiar tipo de solicitud, mostrar/ocultar panel de distribucion de dias
+function cambiarTipoSolicitud() {
+  const tipo = $('vs-tipo')?.value || 'vacaciones';
+  const esVac = tipo === 'vacaciones';
+  // Panel de distribucion solo aplica a vacaciones
+  const paneles = document.querySelectorAll('#modal-vac-sol-body .fi.full > div[style*="eff6ff"]');
+  paneles.forEach(p => { p.style.display = esVac ? '' : 'none'; });
 }
 
 async function renderDistribucionManual() {
@@ -5835,9 +6054,11 @@ async function previewDistribucionVac() {
 }
 
 async function guardarSolicitudVac() {
+  const tipo = $('vs-tipo')?.value || 'vacaciones';
   const modo = document.querySelector('input[name="vs-modo"]:checked')?.value || 'auto';
   const body = {
     empleado_id     : $('vs-emp').value,
+    tipo            : tipo,
     fecha_solicitud : $('vs-solicitud').value,
     fecha_inicio    : $('vs-ini').value,
     fecha_fin       : $('vs-fin').value,
@@ -5846,8 +6067,8 @@ async function guardarSolicitudVac() {
     observaciones   : $('vs-obs').value,
     estatus         : $('vs-est').value
   };
-  // Si el modo es manual, incluir la distribución explícita
-  if (modo === 'manual') {
+  // Si el modo es manual Y son vacaciones, incluir la distribución explícita
+  if (modo === 'manual' && tipo === 'vacaciones') {
     const distribucion = [];
     let suma = 0;
     document.querySelectorAll('[id^="vs-man-"][data-periodo]').forEach(inp => {
