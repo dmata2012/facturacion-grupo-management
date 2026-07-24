@@ -6304,6 +6304,7 @@ function renderDetalleFondoCC() {
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${canWrite()?`<button class="btn bo bsm" onclick="openFondoCC(${f.id})">✏️ Editar fondo</button>`:''}
         ${canAdmin()?`<button class="btn bo bsm" onclick="openPermisosCC(${f.id})">👥 Permisos</button>`:''}
+        <button class="btn bsm" style="background:linear-gradient(135deg,#d97706,#f59e0b);color:#fff;border:none;font-weight:800;box-shadow:0 2px 8px rgba(217,119,6,.3)" onclick="solicitarReembolsoCC()" title="Generar solicitud formal de reembolso para tesoreria (con desglose y comprobantes)">💰 Solicitar Reembolso</button>
         <button class="btn bg bsm" onclick="openInformeReembolsoCC()">📋 Generar informe</button>
         <button class="btn bg bsm" onclick="openReporteCategoriasCC()">📊 Por categoría</button>
         ${canAdmin()?`<button class="btn bd bsm" onclick="eliminarCajaCC(${f.id},'${(f.nombre||'').replace(/'/g,"\\'")}')" title="Eliminar caja permanentemente">🗑 Eliminar caja</button>`:''}
@@ -6753,6 +6754,38 @@ function excelReporteCategoriasCC() {
   XLSX.utils.book_append_sheet(wb, ws2, 'Detalle');
 
   XLSX.writeFile(wb, `Reporte_CajaChica_${(f.nombre||'').replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+// Atajo: abre el informe pre-configurado como SOLICITUD DE REEMBOLSO
+// (tipo=salida + rango desde la ultima reposicion + todos los salidas marcados)
+function solicitarReembolsoCC() {
+  const f = window._ccFondoActual;
+  if (!f) return;
+  const mov = f.movimientos || [];
+  if (!mov.length) return toast('No hay movimientos para solicitar reembolso.', 'warn');
+
+  // Fecha de la ultima reposicion/reembolso (para acotar el periodo)
+  const ultRepo = mov
+    .filter(m => m.tipo === 'entrada' && /reposici|reembolso/i.test(m.categoria||''))
+    .sort((a,b) => new Date(b.fecha) - new Date(a.fecha))[0];
+  const desde = ultRepo ? String(ultRepo.fecha).slice(0,10) : '';
+
+  openInformeReembolsoCC();
+  setTimeout(() => {
+    if ($('cci-tipo'))  $('cci-tipo').value  = 'salida';
+    if (desde && $('cci-desde')) $('cci-desde').value = desde;
+    if (typeof aplicarFiltroInformeCC === 'function') aplicarFiltroInformeCC();
+    // Mensaje contextual arriba del informe
+    const body = $('modal-cc-informe-body');
+    if (body) {
+      const banner = document.createElement('div');
+      banner.style.cssText = 'margin:0 0 12px;padding:10px 14px;background:#fef3c7;border:1.5px solid #fbbf24;border-radius:10px;color:#78350f;font-size:12px;font-weight:700;line-height:1.4';
+      banner.innerHTML = `💰 <strong>Modo: Solicitud de Reembolso</strong> — ${desde?`Desde la última reposición (${fmtDate(desde)}).`:'Se muestran todos los gastos.'} Revisa la selección y usa <strong>📋 Copiar</strong>, <strong>📧 Email</strong> o <strong>⬇ Excel</strong> para enviarlo a tesorería.`;
+      // Insertar despues del header cyan
+      const header = body.querySelector('div[style*="linear-gradient"]');
+      if (header && header.parentNode) header.parentNode.insertBefore(banner, header.nextSibling);
+    }
+  }, 60);
 }
 
 function openInformeReembolsoCC() {
