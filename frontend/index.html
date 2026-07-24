@@ -6259,7 +6259,11 @@ function renderDetalleFondoCC() {
   // Cálculos de reembolso
   const saldo    = parseFloat(k.saldo_actual)   || 0;
   const asignado = parseFloat(f.fondo_asignado) || 0;
-  const reembolso = Math.max(0, asignado - saldo);
+  const reembolsosPendientes = (f.movimientos||[])
+    .filter(m => m.tipo === 'salida' && m.tipo_gasto === 'Reembolso pendiente de caja')
+    .reduce((a,m) => a + parseFloat(m.monto||0), 0);
+  const reembolsoBruto = Math.max(0, asignado - saldo);
+  const reembolso = Math.max(0, reembolsoBruto - reembolsosPendientes);
   const pct = asignado > 0 ? Math.max(0, Math.min(100, (saldo/asignado)*100)) : 0;
   const estado = asignado === 0 ? {label:'Sin fondo asignado', color:'#6b7280', bg:'#f3f4f6', accent:'#9ca3af'}
                : pct >= 80      ? {label:'✅ Fondo completo',   color:'#166534', bg:'#dcfce7', accent:'#16a34a'}
@@ -6351,7 +6355,12 @@ function renderDetalleFondoCC() {
         <div style="text-align:center;background:${estado.bg};padding:14px;border-radius:10px;border:2px solid ${estado.accent}">
           <div style="font-size:10px;font-weight:800;color:${estado.color};text-transform:uppercase;letter-spacing:.6px">💰 Monto a Reembolsar</div>
           <div style="font-size:26px;font-weight:900;color:${estado.color};margin-top:2px">${fmt(reembolso)}</div>
-          <div style="font-size:10px;color:${estado.color};font-weight:700;margin-top:2px">Fondo Fijo − Saldo</div>
+          ${reembolsosPendientes > 0 ? `
+          <div style="font-size:10px;color:${estado.color};margin-top:4px;padding:4px 6px;background:rgba(255,255,255,.5);border-radius:6px;line-height:1.35">
+            <div>Bruto: <strong>${fmt(reembolsoBruto)}</strong></div>
+            <div style="color:#92400e">− Reemb. pendientes: <strong>${fmt(reembolsosPendientes)}</strong></div>
+          </div>` : `
+          <div style="font-size:10px;color:${estado.color};font-weight:700;margin-top:2px">Fondo Fijo − Saldo</div>`}
           ${reembolso > 0 && canWrite() ? `
           <button class="btn bsuc bsm" style="margin-top:8px;width:100%;font-size:11px" onclick="registrarReembolsoCC(${reembolso.toFixed(2)})">
             💰 Registrar reembolso
@@ -6970,8 +6979,12 @@ function regenerarInformeCC() {
     });
   }
 
-  // Cálculo del reembolso REAL = Fondo Fijo - Saldo Actual (lo que se necesita para restaurar)
-  const reembolsoReal = Math.max(0, asignado - saldoActual);
+  // Cálculo del reembolso REAL = (Fondo Fijo - Saldo Actual) - Reembolsos pendientes de caja
+  const reembPend = (f.movimientos||[])
+    .filter(m => m.tipo === 'salida' && m.tipo_gasto === 'Reembolso pendiente de caja')
+    .reduce((a,m) => a + parseFloat(m.monto||0), 0);
+  const reembolsoBrutoInf = Math.max(0, asignado - saldoActual);
+  const reembolsoReal = Math.max(0, reembolsoBrutoInf - reembPend);
 
   txt += `${LINE}\n`;
   if (tipoFiltro === 'todos') {
@@ -6983,7 +6996,11 @@ function regenerarInformeCC() {
   } else {
     txt += `🧾 Comprobantes seleccionados: ${fmt(totalAbs)}\n`;
     txt += `💰 *TOTAL A REEMBOLSAR: ${fmt(reembolsoReal)}*\n`;
-    txt += `   (Fondo Fijo ${fmt(asignado)} − Saldo actual ${fmt(saldoActual)})\n`;
+    if (reembPend > 0) {
+      txt += `   (Fondo Fijo ${fmt(asignado)} − Saldo actual ${fmt(saldoActual)} − Reemb. pendientes ${fmt(reembPend)})\n`;
+    } else {
+      txt += `   (Fondo Fijo ${fmt(asignado)} − Saldo actual ${fmt(saldoActual)})\n`;
+    }
   }
   txt += `${LINE}\n\n`;
 
@@ -6991,6 +7008,7 @@ function regenerarInformeCC() {
   txt += `${LINE}\n`;
   txt += `🎯 Fondo Fijo:        ${fmt(asignado)}\n`;
   txt += `💵 Saldo actual:      ${fmt(saldoActual)}\n`;
+  if (reembPend > 0) txt += `💸 Reemb. pendientes: ${fmt(reembPend)}  (no se piden a tesorería)\n`;
   if (tipoFiltro === 'salida') {
     txt += `💰 Reembolso a pedir: ${fmt(reembolsoReal)}\n`;
     txt += `📈 Saldo tras cobro:  ${fmt(asignado)}  (fondo al 100%)\n`;
@@ -7100,8 +7118,12 @@ function excelInformeCC() {
     m.notas || '',
     parseFloat(m.monto)
   ]));
-  // Cálculo del reembolso REAL = Fondo Fijo - Saldo Actual
-  const reembolsoReal = Math.max(0, asignado - saldoActual);
+  // Cálculo del reembolso REAL = (Fondo Fijo - Saldo Actual) - Reembolsos pendientes de caja
+  const reembPendXls = (f.movimientos||[])
+    .filter(m => m.tipo === 'salida' && m.tipo_gasto === 'Reembolso pendiente de caja')
+    .reduce((a,m) => a + parseFloat(m.monto||0), 0);
+  const reembolsoBrutoXls = Math.max(0, asignado - saldoActual);
+  const reembolsoReal = Math.max(0, reembolsoBrutoXls - reembPendXls);
 
   aoa.push([]);
   if (tipoFiltro === 'todos') {
@@ -7113,12 +7135,15 @@ function excelInformeCC() {
   } else {
     aoa.push(['','','','','','','','','','Comprobantes seleccionados:', parseFloat(totSalidas.toFixed(2))]);
     aoa.push(['','','','','','','','','','TOTAL A REEMBOLSAR:',         parseFloat(reembolsoReal.toFixed(2))]);
-    aoa.push(['','','','','','','','','','(Fondo Fijo − Saldo actual)', '']);
+    aoa.push(['','','','','','','','','', reembPendXls > 0
+      ? `(Fondo Fijo − Saldo actual − Reemb. pendientes ${reembPendXls.toFixed(2)})`
+      : '(Fondo Fijo − Saldo actual)', '']);
   }
   aoa.push([]);
   aoa.push(['RESUMEN FINANCIERO']);
   aoa.push(['Fondo Fijo:',    parseFloat(asignado.toFixed(2))]);
   aoa.push(['Saldo actual:',  parseFloat(saldoActual.toFixed(2))]);
+  if (reembPendXls > 0) aoa.push(['Reembolsos pendientes de caja:', parseFloat(reembPendXls.toFixed(2))]);
   if (tipoFiltro === 'salida') {
     aoa.push(['Reembolso a pedir:',   parseFloat(reembolsoReal.toFixed(2))]);
     aoa.push(['Saldo tras cobro:',    parseFloat(asignado.toFixed(2))]);
