@@ -5691,7 +5691,20 @@ async function toggleValidarUbicacion(nuevo) {
 
 async function openConfigPINs() {
   try {
-    const emps = await api('/checador/empleados');
+    const [emps, ubis] = await Promise.all([
+      api('/checador/empleados'),
+      api('/checador/ubicaciones')
+    ]);
+    window._ubisAll = ubis;
+    // Pre-cargar asignaciones actuales de todos los empleados
+    const asigMap = {};
+    await Promise.all(emps.map(async e => {
+      try {
+        const r = await api(`/checador/empleados/${e.id}/ubicaciones`);
+        asigMap[e.id] = new Set(r.ubicacion_ids || []);
+      } catch { asigMap[e.id] = new Set(); }
+    }));
+    window._empUbisMap = asigMap;
     const DIAS = [
       { n:1, l:'L' }, { n:2, l:'M' }, { n:3, l:'X' },
       { n:4, l:'J' }, { n:5, l:'V' }, { n:6, l:'S' }, { n:0, l:'D' }
@@ -5699,9 +5712,10 @@ async function openConfigPINs() {
     const parseDD = s => new Set(String(s||'').split(',').filter(x=>x!=='').map(x=>parseInt(x)));
     $('modal-cambiar-clave-body').innerHTML = `
       <button onclick="closeModal('modal-cambiar-clave')" style="position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;border:2px solid var(--border);background:#fff;cursor:pointer;font-size:14px;font-weight:800;color:var(--muted)">✕</button>
-      <h4>⚙ Configurar Horarios y PINs</h4>
+      <h4>⚙ Configurar Horarios, PINs y Ubicaciones</h4>
       <div class="ibox info" style="margin-bottom:12px;font-size:12px">
-        Asigna a cada colaborador su <strong>horario de oficina</strong>, <strong>días de descanso</strong> y <strong>PIN</strong> del checador. El retardo se calcula solo en días laborales.
+        Asigna a cada colaborador su <strong>horario</strong>, <strong>días de descanso</strong>, <strong>PIN</strong> y las <strong>ubicaciones autorizadas</strong> desde las que puede marcar entrada.
+        <br><small style="color:var(--muted)">📍 Si dejas la lista de ubicaciones vacía para un colaborador, podrá marcar desde <strong>cualquiera</strong> de las ubicaciones globales activas.</small>
       </div>
       <div style="max-height:440px;overflow-y:auto">
         <table style="width:100%;font-size:12px;border-collapse:collapse">
@@ -5710,13 +5724,15 @@ async function openConfigPINs() {
               <th style="text-align:left;padding:8px">Colaborador</th>
               <th style="padding:8px">Entrada</th>
               <th style="padding:8px">Salida</th>
-              <th style="padding:8px">Días de descanso</th>
+              <th style="padding:8px">Descanso</th>
               <th style="padding:8px">PIN</th>
+              <th style="padding:8px;text-align:left">📍 Ubicaciones autorizadas</th>
               <th style="padding:8px"></th>
             </tr>
           </thead>
           <tbody>${emps.map(e => {
             const dd = parseDD(e.dias_descanso);
+            const asignadas = asigMap[e.id] || new Set();
             return `<tr style="border-bottom:1px solid var(--border)">
               <td style="padding:8px">
                 <div style="font-weight:700">${e.nombre}</div>
@@ -5727,7 +5743,7 @@ async function openConfigPINs() {
               <td style="padding:8px">
                 <div style="display:flex;gap:3px" id="cpin-dd-${e.id}" data-empid="${e.id}">
                   ${DIAS.map(d => `
-                    <label style="cursor:pointer;display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:${dd.has(d.n)?'#fca5a5':'#f3f4f6'};color:${dd.has(d.n)?'#991b1b':'var(--muted)'};font-weight:800;font-size:11px;transition:all .15s"
+                    <label style="cursor:pointer;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:${dd.has(d.n)?'#fca5a5':'#f3f4f6'};color:${dd.has(d.n)?'#991b1b':'var(--muted)'};font-weight:800;font-size:10px"
                            title="${['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'][d.n]}">
                       <input type="checkbox" data-dia="${d.n}" ${dd.has(d.n)?'checked':''}
                              onchange="this.parentElement.style.background=this.checked?'#fca5a5':'#f3f4f6';this.parentElement.style.color=this.checked?'#991b1b':'var(--muted)'"
@@ -5736,17 +5752,32 @@ async function openConfigPINs() {
                     </label>`).join('')}
                 </div>
               </td>
-              <td style="padding:8px"><input type="text" id="cpin-${e.id}" placeholder="****" maxlength="10" value="${e.pin_checador||''}" style="width:90px;text-align:center;letter-spacing:3px;font-weight:800"></td>
-              <td style="padding:8px"><button class="btn bs bsm" onclick="guardarPINEmp(${e.id})">💾</button></td>
+              <td style="padding:8px"><input type="text" id="cpin-${e.id}" placeholder="****" maxlength="10" value="${e.pin_checador||''}" style="width:80px;text-align:center;letter-spacing:3px;font-weight:800"></td>
+              <td style="padding:8px;max-width:280px">
+                <div id="cubi-${e.id}" style="display:flex;flex-wrap:wrap;gap:4px">
+                  ${ubis.length ? ubis.map(u => {
+                    const asig = asignadas.has(u.id);
+                    return `<label style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:14px;background:${asig?'#dcfce7':'#f3f4f6'};color:${asig?'#166534':'var(--muted)'};border:1px solid ${asig?'#86efac':'var(--border)'};font-size:10.5px;font-weight:700"
+                             title="${u.nombre}">
+                      <input type="checkbox" data-ubi="${u.id}" ${asig?'checked':''}
+                             onchange="this.parentElement.style.background=this.checked?'#dcfce7':'#f3f4f6';this.parentElement.style.color=this.checked?'#166534':'var(--muted)';this.parentElement.style.borderColor=this.checked?'#86efac':'var(--border)'"
+                             style="display:none">
+                      📍 ${u.nombre}
+                    </label>`;
+                  }).join('') : '<span style="font-size:10.5px;color:var(--muted);font-style:italic">Sin ubicaciones registradas</span>'}
+                </div>
+              </td>
+              <td style="padding:8px"><button class="btn bs bsm" onclick="guardarPINEmp(${e.id})" title="Guardar todos los cambios de esta fila">💾</button></td>
             </tr>`;
           }).join('')}</tbody>
         </table>
       </div>
       <div style="margin-top:10px;padding:10px;background:var(--bg-alt);border-radius:8px;font-size:11px;color:var(--muted)">
-        <strong>Leyenda:</strong> L=Lunes · M=Martes · X=Miércoles · J=Jueves · V=Viernes · S=Sábado · D=Domingo. Marca los días que son descanso para ese colaborador (por defecto: D domingo).
+        <strong>Leyenda descanso:</strong> L=Lunes · M=Martes · X=Miércoles · J=Jueves · V=Viernes · S=Sábado · D=Domingo (por defecto).
+        <br><strong>📍 Ubicaciones:</strong> Deja vacío para permitir cualquier ubicación global. Marca las específicas si el colaborador solo puede marcar en ciertas sucursales.
       </div>
       <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-cambiar-clave')">Cerrar</button></div>`;
-    $('modal-cambiar-clave').querySelector('.modal').style.width = 'min(900px,96vw)';
+    $('modal-cambiar-clave').querySelector('.modal').style.width = 'min(1200px,96vw)';
     openModal('modal-cambiar-clave');
   } catch(e) { toast(e.message, 'err'); }
 }
@@ -5760,6 +5791,11 @@ async function guardarPINEmp(empId) {
   const dias = cont
     ? [...cont.querySelectorAll('input[type="checkbox"]:checked')].map(cb => parseInt(cb.dataset.dia)).sort()
     : [];
+  // Ubicaciones autorizadas marcadas
+  const contU = $(`cubi-${empId}`);
+  const ubicacion_ids = contU
+    ? [...contU.querySelectorAll('input[type="checkbox"]:checked')].map(cb => parseInt(cb.dataset.ubi))
+    : [];
   try {
     await api(`/checador/empleado/${empId}/pin`, {
       method: 'PUT',
@@ -5769,6 +5805,10 @@ async function guardarPINEmp(empId) {
         hora_salida_esperada : horaSal,
         dias_descanso        : dias.join(',')
       })
+    });
+    await api(`/checador/empleados/${empId}/ubicaciones`, {
+      method: 'PUT',
+      body: JSON.stringify({ ubicacion_ids })
     });
     toast('Configuración guardada.');
   } catch(e) { toast(e.message, 'err'); }

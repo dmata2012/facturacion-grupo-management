@@ -137,10 +137,37 @@ function distanciaMetros(lat1, lng1, lat2, lng2) {
   return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
 }
 
-// Devuelve la ubicación autorizada más cercana, o null si el usuario está fuera de todas
-async function ubicacionCercana(lat, lng) {
+// Migración idempotente: asignación de ubicaciones autorizadas por empleado
+(async () => {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS fac_empleado_ubicaciones (
+        empleado_id INT NOT NULL REFERENCES fac_empleados(id) ON DELETE CASCADE,
+        ubicacion_id INT NOT NULL REFERENCES fac_checador_ubicaciones(id) ON DELETE CASCADE,
+        PRIMARY KEY (empleado_id, ubicacion_id)
+      )`);
+  } catch (e) { console.warn('Migración fac_empleado_ubicaciones:', e.message); }
+})();
+
+// Devuelve la ubicación autorizada más cercana para un empleado.
+// Si el empleado tiene ubicaciones asignadas explícitamente, solo esas cuentan.
+// Si NO tiene asignaciones, se permiten TODAS las ubicaciones activas (backward compatible).
+async function ubicacionCercana(lat, lng, empleadoId) {
   if (lat == null || lng == null) return null;
-  const ubis = await query(`SELECT * FROM fac_checador_ubicaciones WHERE activo=TRUE`);
+  let ubis;
+  if (empleadoId) {
+    const asig = await query(
+      `SELECT u.* FROM fac_checador_ubicaciones u
+       JOIN fac_empleado_ubicaciones eu ON eu.ubicacion_id = u.id
+       WHERE u.activo = TRUE AND eu.empleado_id = $1`,
+      [empleadoId]
+    );
+    ubis = asig.rows.length
+      ? { rows: asig.rows }
+      : await query(`SELECT * FROM fac_checador_ubicaciones WHERE activo=TRUE`);
+  } else {
+    ubis = await query(`SELECT * FROM fac_checador_ubicaciones WHERE activo=TRUE`);
+  }
   let mejor = null;
   for (const u of ubis.rows) {
     const d = distanciaMetros(lat, lng, parseFloat(u.latitud), parseFloat(u.longitud));
@@ -149,6 +176,15 @@ async function ubicacionCercana(lat, lng) {
     }
   }
   return mejor;
+}
+
+// GET /api/checador/empleados/:id/ubicaciones — obtener ubicaciones asignadas
+async function _getEmpUbicaciones(empId) {
+  const r = await query(
+    `SELECT ubicacion_id FROM fac_empleado_ubicaciones WHERE empleado_id=$1`,
+    [empId]
+  );
+  return r.rows.map(x => x.ubicacion_id);
 }
 
 // Config global: validar ubicación obligatoria
@@ -202,6 +238,30 @@ router.delete('/ubicaciones/:id', requireRol('admin'), async (req, res) => {
   try {
     await query(`DELETE FROM fac_checador_ubicaciones WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/checador/empleados/:id/ubicaciones — devuelve ids de ubicaciones asignadas
+router.get('/empleados/:id/ubicaciones', async (req, res) => {
+  try {
+    const ids = await _getEmpUbicaciones(req.params.id);
+    res.json({ ubicacion_ids: ids });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/checador/empleados/:id/ubicaciones — reemplaza el conjunto asignado
+// Body: { ubicacion_ids: [1,2,3] }  (array vacío = quitar todas las restricciones)
+router.put('/empleados/:id/ubicaciones', requireRol('admin', 'capturista'), async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body.ubicacion_ids) ? req.body.ubicacion_ids.map(Number).filter(n => Number.isInteger(n) && n > 0) : [];
+    await query(`DELETE FROM fac_empleado_ubicaciones WHERE empleado_id=$1`, [req.params.id]);
+    for (const uid of ids) {
+      await query(
+        `INSERT INTO fac_empleado_ubicaciones(empleado_id, ubicacion_id) VALUES($1,$2) ON CONFLICT DO NOTHING`,
+        [req.params.id, uid]
+      );
+    }
+    res.json({ ok: true, count: ids.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -501,7 +561,7 @@ router.post('/entrada', async (req, res) => {
       if (lat == null || lng == null) {
         return res.status(400).json({ error: 'Ubicación requerida. Autoriza el acceso al GPS en tu navegador.' });
       }
-      ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng));
+      ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng), empleado_id);
       if (!ubiInfo) {
         return res.status(403).json({
           error: 'Estás fuera del área autorizada de trabajo. Solo puedes marcar entrada dentro de una ubicación registrada.'
@@ -509,7 +569,7 @@ router.post('/entrada', async (req, res) => {
       }
     } else if (lat != null && lng != null) {
       // Guardar ubicación aunque no sea obligatoria
-      ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng));
+      ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng), empleado_id);
     }
 
     const emp = await query(
@@ -625,14 +685,14 @@ router.post('/salida', async (req, res) => {
       if (lat == null || lng == null) {
         return res.status(400).json({ error: 'Ubicación requerida. Autoriza el acceso al GPS en tu navegador.' });
       }
-      ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng));
+      ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng), empleado_id);
       if (!ubiInfo) {
         return res.status(403).json({
           error: 'Estás fuera del área autorizada de trabajo. Solo puedes marcar salida dentro de una ubicación registrada.'
         });
       }
     } else if (lat != null && lng != null) {
-      ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng));
+      ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng), empleado_id);
     }
 
     const emp = await query(
