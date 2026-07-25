@@ -181,6 +181,45 @@ router.get('/reporte', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Migración idempotente: tabla de overrides/notas manuales por celda
+(async () => {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS fac_asistencia_ajustes (
+        id SERIAL PRIMARY KEY,
+        empleado_id INT NOT NULL REFERENCES fac_empleados(id) ON DELETE CASCADE,
+        fecha DATE NOT NULL,
+        codigo TEXT,
+        notas TEXT,
+        creado_por INT,
+        actualizado_en TIMESTAMP DEFAULT NOW(),
+        UNIQUE(empleado_id, fecha)
+      )`);
+  } catch (e) { console.warn('Migración ajustes asistencia:', e.message); }
+})();
+
+// POST /api/checador/asistencia/ajuste — insertar o actualizar override + nota
+router.post('/asistencia/ajuste', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
+  try {
+    const { empleado_id, fecha, codigo, notas } = req.body;
+    if (!empleado_id || !fecha) return res.status(400).json({ error: 'empleado_id y fecha requeridos.' });
+    const cod = (codigo && codigo !== 'auto') ? String(codigo).trim() : null;
+    const not = (notas || '').trim() || null;
+    if (!cod && !not) {
+      // Si ambos vacíos, borrar el override
+      await query(`DELETE FROM fac_asistencia_ajustes WHERE empleado_id=$1 AND fecha=$2`, [empleado_id, fecha]);
+      return res.json({ ok: true, deleted: true });
+    }
+    await query(`
+      INSERT INTO fac_asistencia_ajustes(empleado_id, fecha, codigo, notas, creado_por, actualizado_en)
+      VALUES($1,$2,$3,$4,$5,NOW())
+      ON CONFLICT(empleado_id, fecha) DO UPDATE
+      SET codigo=EXCLUDED.codigo, notas=EXCLUDED.notas, actualizado_en=NOW()
+    `, [empleado_id, fecha, cod, not, req.usuario.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/checador/asistencia — matriz de asistencia por rango de fechas
 // Codigos por celda:
 //   A  = Asistencia (con registro de entrada)
@@ -225,6 +264,14 @@ router.get('/asistencia', async (req, res) => {
       [desde, hasta]
     );
 
+    // Ajustes/overrides manuales del rango
+    const ajus = await query(
+      `SELECT empleado_id, fecha, codigo, notas
+       FROM fac_asistencia_ajustes
+       WHERE fecha BETWEEN $1::date AND $2::date`,
+      [desde, hasta]
+    );
+
     // Generar lista de dias
     const dias = [];
     const d0 = new Date(desde+'T12:00:00');
@@ -251,6 +298,13 @@ router.get('/asistencia', async (req, res) => {
         solByEmpDia[s.empleado_id][key] = s.tipo;
       }
     });
+    // Ajustes manuales: { empleado_id: { fecha: {codigo, notas} } }
+    const ajusByEmpDia = {};
+    ajus.rows.forEach(a => {
+      const f = String(a.fecha).slice(0,10);
+      if (!ajusByEmpDia[a.empleado_id]) ajusByEmpDia[a.empleado_id] = {};
+      ajusByEmpDia[a.empleado_id][f] = { codigo: a.codigo, notas: a.notas };
+    });
 
     const codigoTipoSolicitud = { vacaciones:'V', permiso_goce:'P/G', incapacidad:'In' };
 
@@ -261,17 +315,20 @@ router.get('/asistencia', async (req, res) => {
         ? e.dias_descanso
         : [0]; // 0 = domingo
       const celdas = {};
-      const totales = { A:0, F:0, V:0, 'P/G':0, In:0, D:0 };
+      const totales = { A:0, F:0, FJ:0, V:0, 'P/G':0, In:0, D:0 };
       dias.forEach(fecha => {
         const dow = new Date(fecha+'T12:00:00').getDay(); // 0=Dom .. 6=Sab
         const sol = solByEmpDia[e.id]?.[fecha];
         const reg = regByEmpDia[e.id]?.[fecha];
+        const aj  = ajusByEmpDia[e.id]?.[fecha];
         let cod;
-        if (reg && reg.hora_entrada) cod = 'A';
+        // Prioridad: override manual > registro > solicitud > descanso > falta
+        if (aj && aj.codigo) cod = aj.codigo;
+        else if (reg && reg.hora_entrada) cod = 'A';
         else if (sol) cod = codigoTipoSolicitud[sol] || 'V';
         else if (descanso.includes(dow)) cod = 'D';
         else cod = 'F';
-        celdas[fecha] = cod;
+        celdas[fecha] = { c: cod, n: aj?.notas || null };
         if (totales[cod] !== undefined) totales[cod]++;
       });
       return {
