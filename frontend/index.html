@@ -4385,23 +4385,35 @@ async function renderChecadorTablet() {
         .tab-hero .h .sec { font-size:34px;top:8px }
       }
       .glass { background:rgba(30,41,59,.5);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(148,163,184,.12);border-radius:24px }
-      .search-wrap { width:100%;max-width:520px }
-      .search-box { display:flex;align-items:center;gap:14px;background:rgba(15,23,42,.7);border:1px solid rgba(148,163,184,.18);border-radius:16px;padding:18px 22px;transition:all .2s }
+      .search-wrap { width:100%;max-width:1100px;padding:0 20px }
+      .search-box { display:flex;align-items:center;gap:14px;background:rgba(15,23,42,.7);border:1px solid rgba(148,163,184,.18);border-radius:16px;padding:16px 22px;transition:all .2s;max-width:520px;margin:0 auto }
       .search-box:focus-within { border-color:#3b82f6;background:rgba(15,23,42,.9);box-shadow:0 0 0 4px rgba(59,130,246,.15) }
       .search-box input { flex:1;background:none;border:none;color:#f1f5f9;font-size:15px;outline:none;font-weight:500 }
       .search-box input::placeholder { color:#64748b;letter-spacing:.5px }
       .search-box .ic { color:#64748b;font-size:20px }
-      .emp-list { margin-top:12px;max-height:360px;overflow-y:auto;background:rgba(15,23,42,.85);border:1px solid rgba(148,163,184,.15);border-radius:16px }
+      /* Grid 2 columnas con todos los empleados */
+      .emp-list { margin-top:16px;display:grid;grid-template-columns:repeat(2,1fr);gap:10px;max-height:calc(100vh - 380px);overflow-y:auto;padding:4px 2px }
       .emp-list::-webkit-scrollbar { width:8px }
       .emp-list::-webkit-scrollbar-thumb { background:rgba(148,163,184,.2);border-radius:4px }
-      .emp-row { display:flex;align-items:center;gap:14px;padding:14px 20px;cursor:pointer;transition:background .15s;border-bottom:1px solid rgba(148,163,184,.08) }
-      .emp-row:last-child { border-bottom:none }
-      .emp-row:hover { background:rgba(59,130,246,.1) }
+      @media (max-width:900px) { .emp-list { grid-template-columns:1fr } }
+      /* Cada empleado como card individual */
+      .emp-row { display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;transition:all .2s;background:rgba(15,23,42,.85);border:1.5px solid rgba(148,163,184,.15);border-radius:12px;position:relative;overflow:hidden }
+      .emp-row:hover { background:rgba(59,130,246,.15);border-color:#3b82f6;transform:translateY(-1px);box-shadow:0 4px 12px rgba(59,130,246,.25) }
+      .emp-row.done-entrada { background:rgba(22,163,74,.15);border-color:#16a34a;opacity:.75 }
+      .emp-row.done-entrada:hover { background:rgba(22,163,74,.25);border-color:#22c55e;opacity:1 }
+      .emp-row.done-completa { background:rgba(59,130,246,.08);border-color:rgba(59,130,246,.3);opacity:.5;filter:grayscale(.3) }
+      .emp-row.done-completa:hover { opacity:.85 }
+      .emp-row.done-completa::after { content:'✓ COMPLETO';position:absolute;top:6px;right:8px;font-size:9px;color:#60a5fa;font-weight:800;letter-spacing:1px }
+      .emp-row.done-entrada::after { content:'● TRABAJANDO';position:absolute;top:6px;right:8px;font-size:9px;color:#22c55e;font-weight:800;letter-spacing:1px;animation:pulseDot 1.8s infinite }
       .emp-avatar { width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:15px;flex-shrink:0;overflow:hidden }
+      .emp-row.done-entrada .emp-avatar { background:linear-gradient(135deg,#16a34a,#22c55e) }
+      .emp-row.done-completa .emp-avatar { background:linear-gradient(135deg,#475569,#64748b) }
       .emp-avatar img { width:100%;height:100%;object-fit:cover }
       .emp-info { flex:1;min-width:0 }
-      .emp-name { font-size:15px;font-weight:700;color:#f1f5f9 }
-      .emp-role { font-size:12px;color:#94a3b8;margin-top:2px }
+      .emp-name { font-size:14px;font-weight:800;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis }
+      .emp-role { font-size:11px;color:#94a3b8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis }
+      .emp-hora { font-size:10px;color:#22c55e;margin-top:2px;font-weight:700;font-family:'Consolas',monospace }
+      .emp-row.done-completa .emp-hora { color:#60a5fa }
       .emp-pin-badge { font-size:11px;color:#a78bfa;background:rgba(139,92,246,.15);padding:3px 8px;border-radius:20px;font-weight:700 }
 
       .user-panel { display:flex;flex-direction:column;align-items:center;gap:20px;width:100%;max-width:520px;animation:fadeInUp .35s ease }
@@ -4507,6 +4519,17 @@ function renderTabSearch() {
     </div>`;
   renderTabEmpList();
   setTimeout(() => $('tab-search')?.focus(), 100);
+  // Polling: refrescar registros del día cada 30s para que las cards reflejen otros marcadores
+  if (window._tabPollTimer) clearInterval(window._tabPollTimer);
+  window._tabPollTimer = setInterval(async () => {
+    if (!$('tab-emp-list')) { clearInterval(window._tabPollTimer); return; }
+    try {
+      const hoy = new Date().toISOString().slice(0,10);
+      const d = await api('/checador/hoy?fecha=' + hoy);
+      window._tabRegistrosHoy = d;
+      renderTabEmpList();
+    } catch(e) {}
+  }, 30000);
 }
 
 function iniciales(n) { return (n||'?').trim().split(/\s+/).slice(0,2).map(s=>s[0]).join('').toUpperCase(); }
@@ -4514,25 +4537,43 @@ function iniciales(n) { return (n||'?').trim().split(/\s+/).slice(0,2).map(s=>s[
 function renderTabEmpList() {
   const q = ($('tab-search')?.value || '').toLowerCase().trim();
   const emps = window._tabEmps || [];
-  let lista;
+  const regs = window._tabRegistrosHoy?.registros || [];
+  // Indexar registros de hoy por empleado_id
+  const regByEmp = {};
+  regs.forEach(r => { regByEmp[r.empleado_id] = r; });
+  // Mostrar TODOS los empleados; el buscador solo filtra
+  let lista = emps;
   if (q) {
-    lista = emps.filter(e => (e.nombre||'').toLowerCase().includes(q) || String(e.id).includes(q) || String(e.numero_colaborador||'').toLowerCase().includes(q)).slice(0, 12);
-  } else {
-    // Los 5 con marca más reciente (o los primeros 5)
-    lista = emps.slice(0, 5);
+    lista = emps.filter(e =>
+      (e.nombre||'').toLowerCase().includes(q) ||
+      String(e.id).includes(q) ||
+      String(e.numero_colaborador||'').toLowerCase().includes(q)
+    );
   }
   const cont = $('tab-emp-list');
   if (!cont) return;
-  if (!lista.length) { cont.innerHTML = `<div style="padding:22px;text-align:center;color:#64748b;font-size:13px">Sin resultados</div>`; return; }
-  cont.innerHTML = lista.map(e => `
-    <div class="emp-row" onclick="seleccionarEmpleadoTablet(${e.id})">
+  if (!lista.length) { cont.innerHTML = `<div style="padding:22px;text-align:center;color:#64748b;font-size:13px;grid-column:1/-1">Sin resultados</div>`; return; }
+  cont.innerHTML = lista.map(e => {
+    const reg = regByEmp[e.id];
+    let claseEstado = '';
+    let horaInfo = '';
+    if (reg?.hora_entrada && reg?.hora_salida) {
+      claseEstado = 'done-completa';
+      horaInfo = `<div class="emp-hora">🕐 ${String(reg.hora_entrada).slice(0,5)} → ${String(reg.hora_salida).slice(0,5)}</div>`;
+    } else if (reg?.hora_entrada) {
+      claseEstado = 'done-entrada';
+      horaInfo = `<div class="emp-hora">📥 Entrada ${String(reg.hora_entrada).slice(0,5)}</div>`;
+    }
+    return `
+    <div class="emp-row ${claseEstado}" onclick="seleccionarEmpleadoTablet(${e.id})">
       <div class="emp-avatar">${iniciales(e.nombre)}</div>
       <div class="emp-info">
         <div class="emp-name">${e.nombre}</div>
         <div class="emp-role">${e.numero_colaborador?'#'+e.numero_colaborador+' · ':''}${e.puesto||'Sin puesto'}</div>
+        ${horaInfo}
       </div>
-      ${e.tiene_pin?'<div class="emp-pin-badge">🔐 PIN</div>':''}
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function seleccionarEmpleadoTablet(empId) {
