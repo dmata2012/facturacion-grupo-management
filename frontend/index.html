@@ -4810,18 +4810,30 @@ async function openNotificacionesCH() {
 
 function renderNotifCH(notifs) {
   const emps = window._notifEmps || [];
+  const estadoBadge = {
+    activa:     '<span style="color:#166534;background:#dcfce7;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:800">● ACTIVA</span>',
+    programada: '<span style="color:#1e40af;background:#dbeafe;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:800">⏳ PROGRAMADA</span>',
+    vencida:    '<span style="color:#991b1b;background:#fee2e2;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:800">🕒 VENCIDA</span>',
+    pausada:    '<span style="color:#64748b;background:#f1f5f9;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:800">⏸ PAUSADA</span>'
+  };
   const filas = notifs.map(n => {
     const pri = n.prioridad === 'urgente' ? '🚨 Urgente'
               : n.prioridad === 'importante' ? '⚠️ Importante'
               : '💬 Info';
     const dest = n.empleado_nombre ? n.empleado_nombre : '👥 Todos los colaboradores';
-    const estado = n.activa ? '<span style="color:#16a34a;font-weight:700">● activa</span>' : '<span style="color:var(--muted)">○ inactiva</span>';
-    const vence = n.vence_en_str ? `<div style="font-size:10px;color:var(--muted)">Vence: ${fmtDate(n.vence_en_str)}</div>` : '';
+    const estado = estadoBadge[n.estado_actual] || estadoBadge.activa;
+    // Rango de vigencia (inicia — vence)
+    let vigencia = '';
+    if (n.inicia_en_str || n.vence_en_str) {
+      const ini = n.inicia_en_str ? fmtDate(n.inicia_en_str) : 'hoy';
+      const ven = n.vence_en_str  ? fmtDate(n.vence_en_str)  : 'sin límite';
+      vigencia = `<div style="font-size:10px;color:var(--muted);margin-top:3px">📅 ${ini} → ${ven}</div>`;
+    }
     return `<tr style="border-bottom:1px solid var(--border)">
       <td style="padding:8px;font-size:11px;color:var(--muted);white-space:nowrap">${n.creado_en_str||''}</td>
       <td style="padding:8px;font-size:12px;font-weight:700">${dest}</td>
       <td style="padding:8px;font-size:11px">${pri}</td>
-      <td style="padding:8px;font-size:12px;max-width:280px">${(n.mensaje||'').replace(/</g,'&lt;')}${vence}</td>
+      <td style="padding:8px;font-size:12px;max-width:280px">${(n.mensaje||'').replace(/</g,'&lt;')}${vigencia}</td>
       <td style="padding:8px;text-align:center;font-size:11px">${n.n_vistas} 👁</td>
       <td style="padding:8px">${estado}</td>
       <td style="padding:8px;white-space:nowrap">
@@ -4858,7 +4870,11 @@ function renderNotifCH(notifs) {
           </select>
         </div>
         <div class="fi">
-          <label>Vence <span style="color:var(--muted);font-weight:400;font-size:10.5px">(opcional)</span></label>
+          <label>📅 Inicia <span style="color:var(--muted);font-weight:400;font-size:10.5px">(opcional — hoy si vacío)</span></label>
+          <input type="date" id="nf-inicia">
+        </div>
+        <div class="fi">
+          <label>📅 Vence <span style="color:var(--muted);font-weight:400;font-size:10.5px">(opcional — sin límite si vacío)</span></label>
           <input type="date" id="nf-vence">
         </div>
         <div class="fi full">
@@ -4889,13 +4905,17 @@ function renderNotifCH(notifs) {
 async function crearNotifCH() {
   const empleado_id = $('nf-emp').value || null;
   const prioridad   = $('nf-pri').value || 'info';
+  const inicia_en   = $('nf-inicia').value || null;
   const vence_en    = $('nf-vence').value || null;
   const mensaje     = ($('nf-msg').value||'').trim();
   if (!mensaje) return toast('Mensaje requerido.', 'warn');
+  if (inicia_en && vence_en && inicia_en > vence_en) {
+    return toast('La fecha de inicio debe ser menor o igual a la de vencimiento.', 'warn');
+  }
   try {
     await api('/checador/notificaciones', {
       method: 'POST',
-      body: JSON.stringify({ empleado_id, prioridad, vence_en, mensaje })
+      body: JSON.stringify({ empleado_id, prioridad, inicia_en, vence_en, mensaje })
     });
     toast('Notificación creada.');
     openNotificacionesCH();

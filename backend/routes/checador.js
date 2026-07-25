@@ -18,6 +18,8 @@ router.use(verificarToken);
         creado_en TIMESTAMP DEFAULT NOW(),
         activa BOOLEAN DEFAULT TRUE
       )`);
+    // Columna 'inicia_en' agregada en una segunda pasada para tablas existentes
+    await query(`ALTER TABLE fac_checador_notificaciones ADD COLUMN IF NOT EXISTS inicia_en DATE`);
     await query(`
       CREATE TABLE IF NOT EXISTS fac_checador_notif_vistas (
         notificacion_id INT REFERENCES fac_checador_notificaciones(id) ON DELETE CASCADE,
@@ -36,7 +38,8 @@ async function notificacionesPendientes(empleadoId) {
     FROM fac_checador_notificaciones n
     LEFT JOIN fac_usuarios u ON u.id = n.creado_por
     WHERE n.activa = TRUE
-      AND (n.vence_en IS NULL OR n.vence_en >= CURRENT_DATE)
+      AND (n.inicia_en IS NULL OR n.inicia_en <= CURRENT_DATE)
+      AND (n.vence_en  IS NULL OR n.vence_en  >= CURRENT_DATE)
       AND (n.empleado_id IS NULL OR n.empleado_id = $1)
       AND NOT EXISTS (
         SELECT 1 FROM fac_checador_notif_vistas v
@@ -54,9 +57,16 @@ router.get('/notificaciones', requireRol('admin', 'capturista'), async (req, res
   try {
     const r = await query(`
       SELECT n.*, TO_CHAR(n.creado_en,'YYYY-MM-DD HH24:MI') AS creado_en_str,
-             TO_CHAR(n.vence_en,'YYYY-MM-DD') AS vence_en_str,
+             TO_CHAR(n.inicia_en,'YYYY-MM-DD') AS inicia_en_str,
+             TO_CHAR(n.vence_en, 'YYYY-MM-DD') AS vence_en_str,
              e.nombre AS empleado_nombre, u.nombre AS creado_por_nombre,
-             (SELECT COUNT(*) FROM fac_checador_notif_vistas v WHERE v.notificacion_id=n.id)::int AS n_vistas
+             (SELECT COUNT(*) FROM fac_checador_notif_vistas v WHERE v.notificacion_id=n.id)::int AS n_vistas,
+             CASE
+               WHEN n.activa = FALSE THEN 'pausada'
+               WHEN n.inicia_en IS NOT NULL AND n.inicia_en > CURRENT_DATE THEN 'programada'
+               WHEN n.vence_en  IS NOT NULL AND n.vence_en  < CURRENT_DATE THEN 'vencida'
+               ELSE 'activa'
+             END AS estado_actual
       FROM fac_checador_notificaciones n
       LEFT JOIN fac_empleados e ON e.id = n.empleado_id
       LEFT JOIN fac_usuarios  u ON u.id = n.creado_por
@@ -70,13 +80,16 @@ router.get('/notificaciones', requireRol('admin', 'capturista'), async (req, res
 // POST /api/checador/notificaciones — crear
 router.post('/notificaciones', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { empleado_id, mensaje, prioridad, vence_en } = req.body;
+    const { empleado_id, mensaje, prioridad, inicia_en, vence_en } = req.body;
     if (!mensaje || !mensaje.trim()) return res.status(400).json({ error: 'Mensaje requerido.' });
     const pri = ['info','importante','urgente'].includes(prioridad) ? prioridad : 'info';
+    if (inicia_en && vence_en && inicia_en > vence_en) {
+      return res.status(400).json({ error: 'La fecha de inicio debe ser menor o igual a la de vencimiento.' });
+    }
     const r = await query(
-      `INSERT INTO fac_checador_notificaciones(empleado_id, mensaje, prioridad, vence_en, creado_por)
-       VALUES($1,$2,$3,$4,$5) RETURNING *`,
-      [empleado_id || null, mensaje.trim(), pri, vence_en || null, req.usuario.id]
+      `INSERT INTO fac_checador_notificaciones(empleado_id, mensaje, prioridad, inicia_en, vence_en, creado_por)
+       VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [empleado_id || null, mensaje.trim(), pri, inicia_en || null, vence_en || null, req.usuario.id]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
