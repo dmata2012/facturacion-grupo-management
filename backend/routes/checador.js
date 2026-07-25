@@ -4,6 +4,115 @@ const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
 
+// Migración idempotente: notificaciones dirigidas a colaboradores para mostrar al marcar entrada
+(async () => {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS fac_checador_notificaciones (
+        id SERIAL PRIMARY KEY,
+        empleado_id INT REFERENCES fac_empleados(id) ON DELETE CASCADE,
+        mensaje TEXT NOT NULL,
+        prioridad TEXT DEFAULT 'info',
+        vence_en DATE,
+        creado_por INT,
+        creado_en TIMESTAMP DEFAULT NOW(),
+        activa BOOLEAN DEFAULT TRUE
+      )`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS fac_checador_notif_vistas (
+        notificacion_id INT REFERENCES fac_checador_notificaciones(id) ON DELETE CASCADE,
+        empleado_id INT REFERENCES fac_empleados(id) ON DELETE CASCADE,
+        vista_en TIMESTAMP DEFAULT NOW(),
+        PRIMARY KEY (notificacion_id, empleado_id)
+      )`);
+  } catch (e) { console.warn('Migración notificaciones:', e.message); }
+})();
+
+// Helper: obtener notificaciones pendientes para un empleado (no vistas y activas)
+async function notificacionesPendientes(empleadoId) {
+  const r = await query(`
+    SELECT n.id, n.mensaje, n.prioridad, TO_CHAR(n.creado_en,'YYYY-MM-DD HH24:MI') AS creado_en,
+           u.nombre AS de
+    FROM fac_checador_notificaciones n
+    LEFT JOIN fac_usuarios u ON u.id = n.creado_por
+    WHERE n.activa = TRUE
+      AND (n.vence_en IS NULL OR n.vence_en >= CURRENT_DATE)
+      AND (n.empleado_id IS NULL OR n.empleado_id = $1)
+      AND NOT EXISTS (
+        SELECT 1 FROM fac_checador_notif_vistas v
+        WHERE v.notificacion_id = n.id AND v.empleado_id = $1
+      )
+    ORDER BY
+      CASE n.prioridad WHEN 'urgente' THEN 1 WHEN 'importante' THEN 2 ELSE 3 END,
+      n.creado_en DESC
+  `, [empleadoId]);
+  return r.rows;
+}
+
+// GET /api/checador/notificaciones — listado admin
+router.get('/notificaciones', requireRol('admin', 'capturista'), async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT n.*, TO_CHAR(n.creado_en,'YYYY-MM-DD HH24:MI') AS creado_en_str,
+             TO_CHAR(n.vence_en,'YYYY-MM-DD') AS vence_en_str,
+             e.nombre AS empleado_nombre, u.nombre AS creado_por_nombre,
+             (SELECT COUNT(*) FROM fac_checador_notif_vistas v WHERE v.notificacion_id=n.id)::int AS n_vistas
+      FROM fac_checador_notificaciones n
+      LEFT JOIN fac_empleados e ON e.id = n.empleado_id
+      LEFT JOIN fac_usuarios  u ON u.id = n.creado_por
+      ORDER BY n.creado_en DESC
+      LIMIT 200
+    `);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/checador/notificaciones — crear
+router.post('/notificaciones', requireRol('admin', 'capturista'), async (req, res) => {
+  try {
+    const { empleado_id, mensaje, prioridad, vence_en } = req.body;
+    if (!mensaje || !mensaje.trim()) return res.status(400).json({ error: 'Mensaje requerido.' });
+    const pri = ['info','importante','urgente'].includes(prioridad) ? prioridad : 'info';
+    const r = await query(
+      `INSERT INTO fac_checador_notificaciones(empleado_id, mensaje, prioridad, vence_en, creado_por)
+       VALUES($1,$2,$3,$4,$5) RETURNING *`,
+      [empleado_id || null, mensaje.trim(), pri, vence_en || null, req.usuario.id]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/checador/notificaciones/:id — activar/desactivar
+router.put('/notificaciones/:id', requireRol('admin', 'capturista'), async (req, res) => {
+  try {
+    const { activa } = req.body;
+    await query(`UPDATE fac_checador_notificaciones SET activa=$1 WHERE id=$2`, [!!activa, req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/checador/notificaciones/:id
+router.delete('/notificaciones/:id', requireRol('admin', 'capturista'), async (req, res) => {
+  try {
+    await query(`DELETE FROM fac_checador_notificaciones WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/checador/notificaciones/:id/vista — marcar como vista por el empleado
+router.post('/notificaciones/:id/vista', async (req, res) => {
+  try {
+    const { empleado_id } = req.body;
+    if (!empleado_id) return res.status(400).json({ error: 'empleado_id requerido.' });
+    await query(
+      `INSERT INTO fac_checador_notif_vistas(notificacion_id, empleado_id)
+       VALUES($1,$2) ON CONFLICT DO NOTHING`,
+      [req.params.id, empleado_id]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Fórmula de Haversine — distancia en metros entre 2 coords lat/lng
 function distanciaMetros(lat1, lng1, lat2, lng2) {
   const R = 6371000; // radio Tierra en metros
@@ -475,12 +584,17 @@ router.post('/entrada', async (req, res) => {
       );
     }
 
+    // Traer notificaciones pendientes para este empleado
+    let notificaciones = [];
+    try { notificaciones = await notificacionesPendientes(empleado_id); } catch(e) {}
+
     res.json({
       ok: true, empleado: emp.rows[0].nombre, hora: horaAhora,
       retardo_minutos: minutosRetardo,
       es_descanso: esDescanso,
       en_vacaciones: enVacaciones,
-      ubicacion: ubiInfo ? { nombre: ubiInfo.nombre, distancia: ubiInfo.distancia } : null
+      ubicacion: ubiInfo ? { nombre: ubiInfo.nombre, distancia: ubiInfo.distancia } : null,
+      notificaciones
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

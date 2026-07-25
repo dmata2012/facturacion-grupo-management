@@ -548,6 +548,8 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-vac-editar-tomados"><div class="modal modal-sm" id="modal-vac-editar-tomados-body"></div></div>
 <div class="overlay" id="modal-cc-permisos"><div class="modal" id="modal-cc-permisos-body"></div></div>
 <div class="overlay" id="modal-asist-cell"><div class="modal modal-sm" id="modal-asist-cell-body"></div></div>
+<div class="overlay" id="modal-notif-ch"><div class="modal" style="width:min(720px,96vw)" id="modal-notif-ch-body"></div></div>
+<div class="overlay" id="modal-notif-show"><div class="modal modal-sm" id="modal-notif-show-body"></div></div>
 <div class="overlay" id="modal-camara-ch" style="align-items:center;justify-content:center">
   <div class="modal" style="width:min(480px,96vw);padding:16px;background:#0f172a;color:#fff">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -4050,7 +4052,8 @@ async function checador() {
         <div class="page-title">🕐 Reloj Checador</div>
         <div class="page-sub">${soloMarcar?'Marca tu entrada o salida':'Registro de entradas y salidas del personal'}</div>
       </div>
-      ${canAdmin()?`<div style="display:flex;gap:6px">
+      ${canAdmin()?`<div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn bo bsm" onclick="openNotificacionesCH()">🔔 Notificaciones</button>
         <button class="btn bo bsm" onclick="openUbicacionesCH()">📍 Ubicaciones</button>
         <button class="btn bo bsm" onclick="openConfigPINs()">⚙ Configurar PINs</button>
       </div>`:''}
@@ -4676,7 +4679,14 @@ async function ejecutarChecadaTablet(tipo) {
     flashTablet('ok', `✅ ${tipo==='entrada'?'Entrada':'Salida'} registrada — ${r.hora?.slice(0,5)}`);
     // Refrescar registros del día para próxima predicción
     try { window._tabRegistrosHoy = await api('/checador/hoy?fecha=' + fecha_local); } catch{}
-    setTimeout(renderTabSearch, 2200);
+    // Si hay notificaciones pendientes, mostrarlas antes de volver al home
+    if (Array.isArray(r.notificaciones) && r.notificaciones.length) {
+      setTimeout(() => mostrarNotificacionesEmp(r.empleado, emp.id, r.notificaciones), 1400);
+      // El modal captura la atención; el reset al home ocurre al cerrarlo
+      window._tabPostNotif = () => setTimeout(renderTabSearch, 400);
+    } else {
+      setTimeout(renderTabSearch, 2200);
+    }
   } catch(e) {
     flashTablet('err', `⚠ ${e.message}`);
     setTimeout(() => seleccionarEmpleadoTablet(emp.id), 2200);
@@ -4729,9 +4739,186 @@ async function marcarChecador(tipo) {
     if ($('ch-foto-input')) $('ch-foto-input').value = '';
     if ($('ch-foto-preview')) $('ch-foto-preview').innerHTML = '📷';
     if ($('ch-foto-msg')) $('ch-foto-msg').innerHTML = 'La foto se comprime y guarda para auditoría (auto-borra a 90 días).';
+    // Mostrar notificaciones pendientes si las hay
+    if (Array.isArray(r.notificaciones) && r.notificaciones.length) {
+      mostrarNotificacionesEmp(r.empleado, empleado_id, r.notificaciones);
+    }
   } catch(e) {
     if (msg) msg.innerHTML = `<span style="color:#dc2626">⚠ ${e.message}</span>`;
   }
+}
+
+// Muestra las notificaciones pendientes al colaborador tras marcar entrada
+function mostrarNotificacionesEmp(nombreEmp, empId, notifs) {
+  const priColor = { urgente:{bg:'#fee2e2',fg:'#991b1b',br:'#fca5a5',icon:'🚨'},
+                     importante:{bg:'#fef3c7',fg:'#92400e',br:'#fbbf24',icon:'⚠️'},
+                     info:{bg:'#dbeafe',fg:'#1e40af',br:'#93c5fd',icon:'💬'} };
+  const tarjetas = notifs.map(n => {
+    const c = priColor[n.prioridad] || priColor.info;
+    return `<div style="background:${c.bg};border:2px solid ${c.br};border-radius:12px;padding:14px 16px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:11px;font-weight:800;color:${c.fg};text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">
+        <span style="font-size:16px">${c.icon}</span> ${n.prioridad==='urgente'?'URGENTE':n.prioridad==='importante'?'IMPORTANTE':'INFORMACIÓN'}
+        <span style="margin-left:auto;font-weight:400;color:${c.fg};opacity:.7">${n.creado_en||''}</span>
+      </div>
+      <div style="font-size:14px;color:#111;line-height:1.5;white-space:pre-wrap">${(n.mensaje||'').replace(/</g,'&lt;')}</div>
+      ${n.de?`<div style="font-size:10.5px;color:${c.fg};margin-top:8px;opacity:.75">— De: ${n.de}</div>`:''}
+    </div>`;
+  }).join('');
+
+  $('modal-notif-show-body').innerHTML = `
+    <div style="margin:-28px -28px 20px;padding:20px 28px;background:linear-gradient(135deg,#0891b2,#06b6d4);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">🔔 Tienes ${notifs.length} mensaje${notifs.length!==1?'s':''}</div>
+      <div style="font-size:20px;font-weight:900;margin-top:4px">Hola, ${nombreEmp}</div>
+    </div>
+    <div style="max-height:60vh;overflow-y:auto">${tarjetas}</div>
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn bs" onclick="confirmarNotificacionesEmp(${empId}, ${JSON.stringify(notifs.map(n=>n.id))})">✅ Entendido — Cerrar</button>
+    </div>`;
+  openModal('modal-notif-show');
+}
+
+async function confirmarNotificacionesEmp(empId, ids) {
+  try {
+    await Promise.all(ids.map(id => api(`/checador/notificaciones/${id}/vista`, {
+      method: 'POST', body: JSON.stringify({ empleado_id: empId })
+    })));
+  } catch(e) {}
+  closeModal('modal-notif-show');
+  // Si estamos en modo tablet, ejecutar callback (regresar al home)
+  if (typeof window._tabPostNotif === 'function') {
+    const cb = window._tabPostNotif;
+    window._tabPostNotif = null;
+    cb();
+  }
+}
+
+// ══ NOTIFICACIONES — Admin UI ══════════════════
+async function openNotificacionesCH() {
+  $('modal-notif-ch-body').innerHTML = '<h4>🔔 Notificaciones a colaboradores</h4><p class="empty">Cargando...</p>';
+  openModal('modal-notif-ch');
+  try {
+    const [notifs, emps] = await Promise.all([
+      api('/checador/notificaciones'),
+      api('/checador/empleados')
+    ]);
+    window._notifEmps = emps;
+    renderNotifCH(notifs);
+  } catch(e) {
+    $('modal-notif-ch-body').innerHTML = `<p class="empty">Error: ${e.message}</p>`;
+  }
+}
+
+function renderNotifCH(notifs) {
+  const emps = window._notifEmps || [];
+  const filas = notifs.map(n => {
+    const pri = n.prioridad === 'urgente' ? '🚨 Urgente'
+              : n.prioridad === 'importante' ? '⚠️ Importante'
+              : '💬 Info';
+    const dest = n.empleado_nombre ? n.empleado_nombre : '👥 Todos los colaboradores';
+    const estado = n.activa ? '<span style="color:#16a34a;font-weight:700">● activa</span>' : '<span style="color:var(--muted)">○ inactiva</span>';
+    const vence = n.vence_en_str ? `<div style="font-size:10px;color:var(--muted)">Vence: ${fmtDate(n.vence_en_str)}</div>` : '';
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px;font-size:11px;color:var(--muted);white-space:nowrap">${n.creado_en_str||''}</td>
+      <td style="padding:8px;font-size:12px;font-weight:700">${dest}</td>
+      <td style="padding:8px;font-size:11px">${pri}</td>
+      <td style="padding:8px;font-size:12px;max-width:280px">${(n.mensaje||'').replace(/</g,'&lt;')}${vence}</td>
+      <td style="padding:8px;text-align:center;font-size:11px">${n.n_vistas} 👁</td>
+      <td style="padding:8px">${estado}</td>
+      <td style="padding:8px;white-space:nowrap">
+        <button class="btn bo bsm" style="padding:4px 8px" onclick="toggleNotifCH(${n.id},${!n.activa})">${n.activa?'⏸':'▶'}</button>
+        <button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarNotifCH(${n.id})">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  $('modal-notif-ch-body').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h4 style="margin:0;padding:0;border:none">🔔 Notificaciones a colaboradores</h4>
+      <button class="btn bo bsm" onclick="closeModal('modal-notif-ch')">✕ Cerrar</button>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 12px">Los mensajes se muestran al colaborador la próxima vez que marque entrada en el reloj checador. Una vez confirmados por el colaborador se marcan como vistos.</p>
+
+    <!-- Formulario compacto -->
+    <div style="background:var(--bg-alt);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">➕ Nueva notificación</div>
+      <div class="fg" style="gap:10px">
+        <div class="fi">
+          <label>Destinatario</label>
+          <select id="nf-emp">
+            <option value="">👥 Todos los colaboradores</option>
+            ${emps.map(e => `<option value="${e.id}">${e.numero_colaborador?'#'+e.numero_colaborador+' · ':''}${e.nombre}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fi">
+          <label>Prioridad</label>
+          <select id="nf-pri">
+            <option value="info">💬 Información</option>
+            <option value="importante">⚠️ Importante</option>
+            <option value="urgente">🚨 Urgente</option>
+          </select>
+        </div>
+        <div class="fi">
+          <label>Vence <span style="color:var(--muted);font-weight:400;font-size:10.5px">(opcional)</span></label>
+          <input type="date" id="nf-vence">
+        </div>
+        <div class="fi full">
+          <label>Mensaje *</label>
+          <textarea id="nf-msg" rows="3" maxlength="800" placeholder="Ej: Recordatorio: junta a las 10 am en sala 2 · Cambio de horario esta semana · Traer identificación oficial..."></textarea>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:10px">
+        <button class="btn bs bsm" onclick="crearNotifCH()">📨 Enviar notificación</button>
+      </div>
+    </div>
+
+    <div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📋 Historial (${notifs.length})</div>
+    ${notifs.length?`<div class="tscroll" style="max-height:400px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:#f8fafc;position:sticky;top:0">
+        <th style="padding:8px;text-align:left">Fecha</th>
+        <th style="padding:8px;text-align:left">Destinatario</th>
+        <th style="padding:8px;text-align:left">Prioridad</th>
+        <th style="padding:8px;text-align:left">Mensaje</th>
+        <th style="padding:8px;text-align:center">Vistas</th>
+        <th style="padding:8px;text-align:left">Estado</th>
+        <th style="padding:8px"></th>
+      </tr></thead>
+      <tbody>${filas}</tbody>
+    </table></div>`:'<p class="empty" style="text-align:center;padding:20px">Sin notificaciones registradas todavía.</p>'}`;
+}
+
+async function crearNotifCH() {
+  const empleado_id = $('nf-emp').value || null;
+  const prioridad   = $('nf-pri').value || 'info';
+  const vence_en    = $('nf-vence').value || null;
+  const mensaje     = ($('nf-msg').value||'').trim();
+  if (!mensaje) return toast('Mensaje requerido.', 'warn');
+  try {
+    await api('/checador/notificaciones', {
+      method: 'POST',
+      body: JSON.stringify({ empleado_id, prioridad, vence_en, mensaje })
+    });
+    toast('Notificación creada.');
+    openNotificacionesCH();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function toggleNotifCH(id, activa) {
+  try {
+    await api(`/checador/notificaciones/${id}`, {
+      method: 'PUT', body: JSON.stringify({ activa })
+    });
+    toast(activa?'Notificación reactivada.':'Notificación pausada.');
+    openNotificacionesCH();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarNotifCH(id) {
+  if (!await confirm2('¿Eliminar esta notificación? No se podrá recuperar.')) return;
+  try {
+    await api(`/checador/notificaciones/${id}`, { method: 'DELETE' });
+    toast('Notificación eliminada.');
+    openNotificacionesCH();
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 const fmtMin = m => {
