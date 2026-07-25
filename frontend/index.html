@@ -4136,37 +4136,6 @@ async function checador() {
     </div>
 
     <!-- PESTAÑA LISTA DE ASISTENCIA -->
-    <style>
-      @media print {
-        @page { size: A4 landscape; margin: 6mm }
-        html, body { background:#fff !important; margin:0 !important; padding:0 !important; overflow:visible !important; height:auto !important }
-        /* Ocultar toda la UI base */
-        .sidebar, .mobile-topbar, .page-header, .tabs, .filters,
-        #floating-logo, #ch-tab-marcar, #ch-tab-hoy, #ch-tab-reporte { display:none !important }
-        /* Mostrar solo la pestaña de asistencia */
-        .main-wrap, #content, .tab-panel { display:block !important; margin:0 !important; padding:0 !important; overflow:visible !important; max-width:none !important; width:100% !important }
-        #ch-tab-asistencia { display:block !important; padding:0 !important }
-        #ch-tab-asistencia .card { box-shadow:none !important; border:none !important; padding:0 !important; margin:0 !important; background:transparent !important }
-        /* Ocultar botones del header de asistencia */
-        #ch-tab-asistencia .btn, #ch-tab-asistencia [onclick*="setAsistPreset"] { display:none !important }
-        /* Ocultar el div de filtros/presets/exports (primer hijo de .card) */
-        #ch-tab-asistencia > .card > div:first-of-type { display:none !important }
-        /* Leyenda: compacta */
-        #asist-leyenda { display:flex !important; flex-wrap:wrap !important; gap:8px !important; background:#fff !important; padding:4px 0 !important; margin:0 0 6px !important; font-size:9px !important; border:0 !important }
-        /* Matriz: compacta para caber en una hoja */
-        #asist-body .tscroll { max-height:none !important; overflow:visible !important }
-        #asist-body table { font-size:8px !important; width:100% !important }
-        #asist-body th, #asist-body td { padding:1px 2px !important; border:.5px solid #cbd5e1 !important }
-        #asist-body thead th { position:static !important; background:#f1f5f9 !important; -webkit-print-color-adjust:exact; print-color-adjust:exact }
-        #asist-body td[style*="sticky"] { position:static !important; background:#fff !important }
-        /* Preservar colores impresos */
-        * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; color-adjust:exact !important }
-        /* Notas al pie sin cortarse */
-        #asist-notas-print { page-break-inside:avoid; margin-top:10px !important; font-size:9px !important }
-        #asist-notas-print table { font-size:9px !important }
-        #asist-notas-print th, #asist-notas-print td { padding:3px 5px !important }
-      }
-    </style>
     <div class="tab-panel" id="ch-tab-asistencia">
       <div class="card">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
@@ -4190,7 +4159,7 @@ async function checador() {
           </div>
           <div style="margin-left:auto">
             <button class="btn bs bsm" onclick="exportarAsistenciaExcel()">⬇ Descargar Excel</button>
-            <button class="btn bo bsm" onclick="window.print()" style="margin-left:4px">🖨 Imprimir</button>
+            <button class="btn bo bsm" onclick="imprimirAsistencia()" style="margin-left:4px">🖨 Imprimir</button>
           </div>
         </div>
         <div id="asist-leyenda" style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;margin-bottom:10px;padding:8px 12px;background:var(--bg-alt);border-radius:8px">
@@ -5148,6 +5117,148 @@ async function guardarAjusteAsist(empId, fecha) {
     closeModal('modal-asist-cell');
     cargarAsistencia();
   } catch(e) { toast(e.message, 'err'); }
+}
+
+function imprimirAsistencia() {
+  const d = window._asistData;
+  if (!d) return toast('Primero genera la lista de asistencia.', 'warn');
+
+  const dias = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  const colorFor = (cod) => ASIST_COLOR[cod] || { bg:'#fff', fg:'#000' };
+
+  // Cabezal fecha con día
+  const headDias = d.dias.map(f => {
+    const dt = new Date(f+'T12:00:00');
+    return `<th><div style="font-size:7px;color:#64748b">${dias[dt.getDay()]}</div><div>${dt.getDate()}</div></th>`;
+  }).join('');
+
+  const filas = d.empleados.map(e => {
+    const celdas = d.dias.map(f => {
+      const cel = e.celdas[f];
+      const cod = typeof cel === 'string' ? cel : (cel?.c || 'F');
+      const c = colorFor(cod);
+      if (cod === 'D') {
+        return `<td><div class="chip circle" style="background:${c.bg};color:${c.fg}">${cod}</div></td>`;
+      }
+      return `<td><div class="chip" style="background:${c.bg};color:${c.fg}">${cod}</div></td>`;
+    }).join('');
+    return `<tr>
+      <td class="nombre">
+        <div style="font-weight:800">${e.nombre}</div>
+        <div style="font-size:7px;color:#64748b">${e.numero_colaborador?'#'+e.numero_colaborador+' · ':''}${e.puesto||''}</div>
+      </td>
+      ${celdas}
+      <td class="tot" style="color:#166534">${e.totales.A}</td>
+      <td class="tot" style="color:#991b1b">${e.totales.F}</td>
+      <td class="tot" style="color:#9a3412">${e.totales.FJ||0}</td>
+      <td class="tot" style="color:#1e40af">${e.totales.V}</td>
+      <td class="tot" style="color:#92400e">${e.totales['P/G']}</td>
+      <td class="tot" style="color:#6b21a8">${e.totales.In}</td>
+      <td class="tot" style="color:#334155">${e.totales.D}</td>
+    </tr>`;
+  }).join('');
+
+  // Notas al pie
+  const notas = [];
+  d.empleados.forEach(e => d.dias.forEach(f => {
+    const c = e.celdas[f];
+    if (typeof c === 'object' && c?.n) notas.push({ nombre:e.nombre, fecha:f, codigo:c.c, nota:c.n });
+  }));
+  notas.sort((a,b) => a.fecha.localeCompare(b.fecha) || a.nombre.localeCompare(b.nombre));
+  const notasHtml = notas.length ? `
+    <div class="notas">
+      <div class="notas-titulo">📝 Notas y justificaciones (${notas.length})</div>
+      <table class="tbl-notas">
+        <thead><tr><th>Fecha</th><th>Colaborador</th><th>Cód.</th><th>Justificación</th></tr></thead>
+        <tbody>${notas.map(n => {
+          const c = colorFor(n.codigo);
+          return `<tr>
+            <td>${fmtDate(n.fecha)}</td>
+            <td>${n.nombre}</td>
+            <td style="text-align:center"><span style="display:inline-block;padding:1px 5px;border-radius:3px;background:${c.bg};color:${c.fg};font-weight:900;font-size:9px">${n.codigo}</span></td>
+            <td>${(n.nota||'').replace(/</g,'&lt;')}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>` : '';
+
+  const hoy = new Date().toLocaleDateString('es-MX', { day:'2-digit', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' });
+
+  const html = `<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<title>Lista de Asistencia — ${d.desde} a ${d.hasta}</title>
+<style>
+  @page { size: A4 landscape; margin: 6mm }
+  * { box-sizing:border-box; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important }
+  body { font-family:'Segoe UI',Arial,sans-serif; color:#111; margin:0; padding:8px 10px; font-size:9px }
+  .head { display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #dc2626; padding-bottom:6px; margin-bottom:8px }
+  .head h1 { margin:0; font-size:14px; letter-spacing:1px }
+  .head .sub { font-size:9px; color:#666 }
+  .leyenda { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; font-size:8px }
+  .leyenda span > span { display:inline-block; padding:1px 5px; border-radius:3px; font-weight:900; margin-right:2px }
+  table.matriz { width:100%; border-collapse:collapse; font-size:8px; table-layout:auto }
+  table.matriz th, table.matriz td { border:.5px solid #cbd5e1; padding:1px 2px; text-align:center; vertical-align:middle }
+  table.matriz thead th { background:#f1f5f9; font-weight:800 }
+  table.matriz td.nombre { text-align:left; padding:2px 4px; max-width:120px }
+  table.matriz td.tot { font-weight:900; background:#f8fafc }
+  .chip { display:inline-block; min-width:16px; padding:1px 3px; border-radius:3px; font-weight:900; font-size:8px }
+  .chip.circle { border-radius:50%; width:16px; height:16px; line-height:14px; padding:0; text-align:center }
+  .notas { margin-top:12px; page-break-inside:avoid }
+  .notas-titulo { font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:1px; border-top:1.5px solid #111; padding-top:6px; margin-bottom:5px }
+  table.tbl-notas { width:100%; border-collapse:collapse; font-size:9px }
+  table.tbl-notas th, table.tbl-notas td { border:.5px solid #cbd5e1; padding:3px 5px; text-align:left }
+  table.tbl-notas thead th { background:#f1f5f9; font-weight:800 }
+  .foot { margin-top:10px; text-align:center; font-size:7px; color:#666; text-transform:uppercase; letter-spacing:1.5px }
+  .actions { position:fixed; top:8px; right:8px; display:flex; gap:6px; z-index:100 }
+  .actions button { padding:8px 14px; border-radius:6px; border:none; cursor:pointer; font-weight:800; font-size:11px }
+  .actions .p { background:#dc2626; color:#fff }
+  .actions .c { background:#e5e7eb; color:#111 }
+  @media print { .actions { display:none } }
+</style></head>
+<body>
+  <div class="actions">
+    <button class="p" onclick="window.print()">🖨 Imprimir</button>
+    <button class="c" onclick="window.close()">Cerrar</button>
+  </div>
+  <div class="head">
+    <div>
+      <h1>LISTA DE ASISTENCIA — GRUPO MANAGEMENT</h1>
+      <div class="sub">Rango: <strong>${fmtDate(d.desde)}</strong> al <strong>${fmtDate(d.hasta)}</strong> · ${d.empleados.length} colaboradores · ${d.dias.length} días</div>
+    </div>
+    <div style="text-align:right;font-size:8px;color:#666">Impreso: ${hoy}</div>
+  </div>
+  <div class="leyenda">
+    <span><span style="background:#dcfce7;color:#166534">A</span>Asistencia</span>
+    <span><span style="background:#fee2e2;color:#991b1b">F</span>Falta</span>
+    <span><span style="background:#ffedd5;color:#9a3412">FJ</span>Falta justificada</span>
+    <span><span style="background:#dbeafe;color:#1e40af">V</span>Vacaciones</span>
+    <span><span style="background:#fef3c7;color:#92400e">P/G</span>Permiso con goce</span>
+    <span><span style="background:#f3e8ff;color:#6b21a8">In</span>Incapacidad</span>
+    <span><span class="chip circle" style="background:#dc2626;color:#fff">D</span>Descanso</span>
+  </div>
+  <table class="matriz">
+    <thead><tr>
+      <th style="text-align:left;padding-left:4px">Colaborador</th>
+      ${headDias}
+      <th style="background:#dcfce7;color:#166534">A</th>
+      <th style="background:#fee2e2;color:#991b1b">F</th>
+      <th style="background:#ffedd5;color:#9a3412">FJ</th>
+      <th style="background:#dbeafe;color:#1e40af">V</th>
+      <th style="background:#fef3c7;color:#92400e">P/G</th>
+      <th style="background:#f3e8ff;color:#6b21a8">In</th>
+      <th style="background:#f1f5f9;color:#334155">D</th>
+    </tr></thead>
+    <tbody>${filas}</tbody>
+  </table>
+  ${notasHtml}
+  <div class="foot">Sistema de Facturación · Grupo Management</div>
+  <script>window.addEventListener('load', () => setTimeout(() => window.print(), 400));<\/script>
+</body></html>`;
+
+  const w = window.open('', '_blank', 'width=1100,height=800');
+  if (!w) return toast('El navegador bloqueó la ventana emergente. Permite pop-ups.', 'warn');
+  w.document.write(html);
+  w.document.close();
 }
 
 function exportarAsistenciaExcel() {
