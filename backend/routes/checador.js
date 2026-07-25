@@ -247,9 +247,9 @@ router.get('/asistencia', async (req, res) => {
       paramsE
     );
 
-    // Registros del reloj en el rango
+    // Registros del reloj en el rango — fecha casteada a TEXT para evitar problemas de TZ
     const regs = await query(
-      `SELECT empleado_id, fecha, hora_entrada, hora_salida, minutos_retardo
+      `SELECT empleado_id, TO_CHAR(fecha,'YYYY-MM-DD') AS fecha, hora_entrada, hora_salida, minutos_retardo
        FROM fac_reloj_checador
        WHERE fecha BETWEEN $1::date AND $2::date`,
       [desde, hasta]
@@ -257,7 +257,10 @@ router.get('/asistencia', async (req, res) => {
 
     // Solicitudes aprobadas que caen dentro del rango
     const sols = await query(
-      `SELECT empleado_id, fecha_inicio, fecha_fin, COALESCE(tipo,'vacaciones') AS tipo
+      `SELECT empleado_id,
+              TO_CHAR(fecha_inicio,'YYYY-MM-DD') AS fecha_inicio,
+              TO_CHAR(fecha_fin,'YYYY-MM-DD')    AS fecha_fin,
+              COALESCE(tipo,'vacaciones') AS tipo
        FROM fac_vacaciones_solicitudes
        WHERE estatus = 'aprobada'
          AND daterange(fecha_inicio, fecha_fin, '[]') && daterange($1::date, $2::date, '[]')`,
@@ -266,7 +269,7 @@ router.get('/asistencia', async (req, res) => {
 
     // Ajustes/overrides manuales del rango
     const ajus = await query(
-      `SELECT empleado_id, fecha, codigo, notas
+      `SELECT empleado_id, TO_CHAR(fecha,'YYYY-MM-DD') AS fecha, codigo, notas
        FROM fac_asistencia_ajustes
        WHERE fecha BETWEEN $1::date AND $2::date`,
       [desde, hasta]
@@ -280,30 +283,34 @@ router.get('/asistencia', async (req, res) => {
       dias.push(d.toISOString().slice(0,10));
     }
 
-    // Indexar registros y solicitudes
-    const regByEmpDia = {};   // { empleado_id: { fecha: {...} } }
+    // Indexar registros (fecha ya viene como string 'YYYY-MM-DD' via TO_CHAR)
+    const regByEmpDia = {};
     regs.rows.forEach(r => {
-      const f = String(r.fecha).slice(0,10);
       if (!regByEmpDia[r.empleado_id]) regByEmpDia[r.empleado_id] = {};
-      regByEmpDia[r.empleado_id][f] = r;
+      regByEmpDia[r.empleado_id][r.fecha] = r;
     });
-    // Solicitudes: pre-expandir a un mapa empleado→fecha→tipo
-    const solByEmpDia = {};   // { empleado_id: { fecha: tipo } }
+    // Solicitudes: expandir cada rango a las fechas cubiertas
+    // Usar aritmética de string en lugar de Date para evitar problemas de TZ
+    const addDayStr = (isoStr) => {
+      const [y,m,d] = isoStr.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, m-1, d));
+      dt.setUTCDate(dt.getUTCDate()+1);
+      return dt.toISOString().slice(0,10);
+    };
+    const solByEmpDia = {};
     sols.rows.forEach(s => {
-      const fi = new Date(String(s.fecha_inicio).slice(0,10)+'T12:00:00');
-      const ff = new Date(String(s.fecha_fin).slice(0,10)+'T12:00:00');
-      for (let d = new Date(fi); d <= ff; d.setDate(d.getDate()+1)) {
-        const key = d.toISOString().slice(0,10);
+      let cur = s.fecha_inicio;
+      while (cur <= s.fecha_fin) {
         if (!solByEmpDia[s.empleado_id]) solByEmpDia[s.empleado_id] = {};
-        solByEmpDia[s.empleado_id][key] = s.tipo;
+        solByEmpDia[s.empleado_id][cur] = s.tipo;
+        cur = addDayStr(cur);
       }
     });
-    // Ajustes manuales: { empleado_id: { fecha: {codigo, notas} } }
+    // Ajustes manuales
     const ajusByEmpDia = {};
     ajus.rows.forEach(a => {
-      const f = String(a.fecha).slice(0,10);
       if (!ajusByEmpDia[a.empleado_id]) ajusByEmpDia[a.empleado_id] = {};
-      ajusByEmpDia[a.empleado_id][f] = { codigo: a.codigo, notas: a.notas };
+      ajusByEmpDia[a.empleado_id][a.fecha] = { codigo: a.codigo, notas: a.notas };
     });
 
     const codigoTipoSolicitud = { vacaciones:'V', permiso_goce:'P/G', incapacidad:'In' };
