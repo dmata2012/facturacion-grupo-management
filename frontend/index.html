@@ -4136,6 +4136,22 @@ async function checador() {
     </div>
 
     <!-- PESTAÑA LISTA DE ASISTENCIA -->
+    <style>
+      @media print {
+        body * { visibility: hidden }
+        #ch-tab-asistencia, #ch-tab-asistencia * { visibility: visible }
+        #ch-tab-asistencia { position: absolute; top: 0; left: 0; width: 100%; padding: 10mm }
+        #ch-tab-asistencia .filters,
+        #ch-tab-asistencia .btn,
+        #ch-tab-asistencia [onclick*="setAsistPreset"],
+        #ch-tab-asistencia > .card > div:first-child { display: none !important }
+        #asist-leyenda { display: flex !important; margin-bottom: 12px }
+        #asist-notas-print { page-break-inside: avoid; margin-top: 24px }
+        #asist-body .tscroll { max-height: none !important; overflow: visible !important }
+        #asist-body table { font-size: 9px }
+        @page { size: landscape; margin: 8mm }
+      }
+    </style>
     <div class="tab-panel" id="ch-tab-asistencia">
       <div class="card">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
@@ -5025,6 +5041,45 @@ function renderAsistencia(d) {
   });
   html += `</tbody></table></div>
     <div style="margin-top:10px;font-size:11px;color:var(--muted)">Rango: <strong>${fmtDate(d.desde)}</strong> — <strong>${fmtDate(d.hasta)}</strong> · ${d.empleados.length} colaboradores · ${d.dias.length} días</div>`;
+
+  // Recolectar notas / justificaciones para la sección inferior (visible en pantalla e impresión)
+  const notas = [];
+  d.empleados.forEach(e => {
+    d.dias.forEach(f => {
+      const c = e.celdas[f];
+      if (typeof c === 'object' && c?.n) notas.push({ nombre:e.nombre, fecha:f, codigo:c.c, nota:c.n });
+    });
+  });
+  notas.sort((a,b) => a.fecha.localeCompare(b.fecha) || a.nombre.localeCompare(b.nombre));
+
+  if (notas.length) {
+    html += `
+      <div id="asist-notas-print" style="margin-top:20px;page-break-before:auto">
+        <div style="font-size:13px;font-weight:900;color:#111;border-top:2px solid #111;padding-top:10px;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">📝 Notas y justificaciones (${notas.length})</div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead>
+            <tr style="background:#f8fafc;border-bottom:1.5px solid #cbd5e1">
+              <th style="text-align:left;padding:5px 8px;font-weight:800">Fecha</th>
+              <th style="text-align:left;padding:5px 8px;font-weight:800">Colaborador</th>
+              <th style="text-align:center;padding:5px 8px;font-weight:800;width:60px">Código</th>
+              <th style="text-align:left;padding:5px 8px;font-weight:800">Justificación / nota</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${notas.map(n => {
+              const c = ASIST_COLOR[n.codigo] || { bg:'#fff', fg:'#000' };
+              return `<tr style="border-bottom:1px solid #e5e7eb">
+                <td style="padding:5px 8px;white-space:nowrap">${fmtDate(n.fecha)}</td>
+                <td style="padding:5px 8px;font-weight:700">${n.nombre}</td>
+                <td style="padding:5px 8px;text-align:center"><span style="display:inline-block;padding:2px 6px;border-radius:4px;background:${c.bg};color:${c.fg};font-weight:900;font-size:10.5px">${n.codigo}</span></td>
+                <td style="padding:5px 8px">${(n.nota||'').replace(/</g,'&lt;')}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
   cont.innerHTML = html;
 }
 
