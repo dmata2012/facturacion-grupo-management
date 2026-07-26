@@ -4356,33 +4356,45 @@ async function renderChecadorTablet() {
       .tab-page { min-height:100vh;background:linear-gradient(180deg,#0a0f1a 0%,#111827 100%);color:#fff;display:flex;flex-direction:column;position:relative;overflow:hidden }
       .tab-page::before { content:'';position:absolute;top:-200px;left:-200px;width:600px;height:600px;background:radial-gradient(circle,rgba(59,130,246,.08) 0%,transparent 70%);pointer-events:none }
       .tab-page::after { content:'';position:absolute;bottom:-200px;right:-200px;width:600px;height:600px;background:radial-gradient(circle,rgba(16,185,129,.06) 0%,transparent 70%);pointer-events:none }
-      /* Top bar minimalista: logo pequeño izquierda + status derecha */
-      .tab-topbar { display:flex;justify-content:space-between;align-items:center;padding:14px 40px 0;position:relative;z-index:2 }
-      .tab-logo { font-size:11px;font-weight:800;letter-spacing:2px;color:#64748b;text-transform:uppercase;display:flex;align-items:center;gap:10px }
+      /* Top bar minimalista: logo pequeño izquierda + clima + status derecha */
+      .tab-topbar { display:flex;justify-content:space-between;align-items:center;padding:14px 40px 0;position:relative;z-index:2;gap:14px }
+      .tab-logo { font-size:11px;font-weight:800;letter-spacing:2px;color:#64748b;text-transform:uppercase;display:flex;align-items:center;gap:10px;flex-shrink:0 }
       .tab-logo img { height:44px;filter:brightness(0) invert(1) drop-shadow(0 0 12px rgba(59,130,246,.25));opacity:.85 }
+      .tab-topbar-right { display:flex;align-items:center;gap:12px;flex-shrink:0 }
       .status-pill { display:inline-flex;align-items:center;gap:8px;font-size:11px;color:#10b981;letter-spacing:1.5px;font-weight:700;text-transform:uppercase;background:rgba(16,185,129,.08);padding:6px 12px;border-radius:20px;border:1px solid rgba(16,185,129,.2) }
       .status-pill .dot { width:6px;height:6px;background:#10b981;border-radius:50%;box-shadow:0 0 8px #10b981;animation:pulseDot 1.5s infinite }
       @keyframes pulseDot { 0%,100%{opacity:1} 50%{opacity:.4} }
-      /* Hero centrado con reloj ENORME */
-      .tab-hero { text-align:center;padding:24px 20px 12px;position:relative;z-index:2 }
-      .tab-hero .h { font-size:220px;font-weight:100;letter-spacing:-10px;color:#f8fafc;font-variant-numeric:tabular-nums;line-height:.9;background:linear-gradient(180deg,#f8fafc 0%,#cbd5e1 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;text-shadow:0 0 80px rgba(59,130,246,.2);font-family:'SF Pro Display','Segoe UI',-apple-system,system-ui,sans-serif }
-      .tab-hero .h .sec { font-size:96px;color:#64748b;-webkit-text-fill-color:#64748b;margin-left:10px;letter-spacing:-3px;font-weight:200;vertical-align:top;position:relative;top:28px }
+      /* Widget del clima */
+      .weather-pill { display:inline-flex;align-items:center;gap:10px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);padding:8px 14px;border-radius:16px;color:#93c5fd;transition:all .2s }
+      .weather-pill .w-icon { font-size:26px;line-height:1 }
+      .weather-pill .w-info { display:flex;flex-direction:column;align-items:flex-start;gap:1px }
+      .weather-pill .w-temp { font-size:18px;font-weight:900;color:#f1f5f9;font-variant-numeric:tabular-nums;line-height:1 }
+      .weather-pill .w-city { font-size:9.5px;color:#94a3b8;text-transform:uppercase;letter-spacing:1.2px;font-weight:700 }
+      .weather-pill.loading { opacity:.5 }
+      /* Hero centrado con reloj MEGA ENORME */
+      .tab-hero { text-align:center;padding:12px 20px 4px;position:relative;z-index:2 }
+      .tab-hero .h { font-size:320px;font-weight:100;letter-spacing:-14px;color:#f8fafc;font-variant-numeric:tabular-nums;line-height:.88;background:linear-gradient(180deg,#f8fafc 0%,#cbd5e1 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;text-shadow:0 0 100px rgba(59,130,246,.25);font-family:'SF Pro Display','Segoe UI',-apple-system,system-ui,sans-serif }
+      .tab-hero .h .sec { font-size:140px;color:#64748b;-webkit-text-fill-color:#64748b;margin-left:14px;letter-spacing:-4px;font-weight:200;vertical-align:top;position:relative;top:40px }
       .tab-hero .h .colon { animation:blinkColon 1.2s infinite;-webkit-text-fill-color:#f8fafc }
       @keyframes blinkColon { 0%,50%{opacity:1} 51%,100%{opacity:.35} }
-      .tab-hero .d { font-size:16px;color:#94a3b8;letter-spacing:8px;margin-top:16px;text-transform:uppercase;font-weight:600 }
-      .tab-body { flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 40px 40px;position:relative;z-index:2 }
+      .tab-hero .d { font-size:18px;color:#94a3b8;letter-spacing:10px;margin-top:12px;text-transform:uppercase;font-weight:600 }
+      .tab-body { flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:6px 40px 40px;position:relative;z-index:2 }
+      @media (max-width:1400px) {
+        .tab-hero .h { font-size:260px;letter-spacing:-11px }
+        .tab-hero .h .sec { font-size:114px;top:34px }
+      }
       @media (max-width:1200px) {
-        .tab-hero .h { font-size:170px;letter-spacing:-7px }
-        .tab-hero .h .sec { font-size:74px;top:22px }
+        .tab-hero .h { font-size:210px;letter-spacing:-9px }
+        .tab-hero .h .sec { font-size:92px;top:26px }
       }
       @media (max-width:900px) {
-        .tab-hero .h { font-size:120px;letter-spacing:-5px }
-        .tab-hero .h .sec { font-size:52px;top:14px }
-        .tab-hero .d { font-size:12px;letter-spacing:5px }
+        .tab-hero .h { font-size:150px;letter-spacing:-6px }
+        .tab-hero .h .sec { font-size:66px;top:18px }
+        .tab-hero .d { font-size:13px;letter-spacing:6px }
       }
       @media (max-width:640px) {
-        .tab-hero .h { font-size:80px;letter-spacing:-3px }
-        .tab-hero .h .sec { font-size:34px;top:8px }
+        .tab-hero .h { font-size:96px;letter-spacing:-4px }
+        .tab-hero .h .sec { font-size:42px;top:10px }
       }
       .glass { background:rgba(30,41,59,.5);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(148,163,184,.12);border-radius:24px }
       .search-wrap { width:100%;max-width:1100px;padding:0 20px }
@@ -4462,13 +4474,22 @@ async function renderChecadorTablet() {
     </style>
 
     <div class="tab-page">
-      <!-- TOP BAR: logo pequeño + status pill -->
+      <!-- TOP BAR: logo pequeño + clima + status pill -->
       <div class="tab-topbar">
         <div class="tab-logo">
           <img src="logo.png" alt="GM" onerror="this.style.display='none';this.nextElementSibling.style.marginLeft='0'">
           <span>GRUPO MANAGEMENT</span>
         </div>
-        <span class="status-pill"><span class="dot"></span>En línea</span>
+        <div class="tab-topbar-right">
+          <div class="weather-pill loading" id="tab-weather" title="Clima local">
+            <div class="w-icon" id="tab-weather-icon">⏳</div>
+            <div class="w-info">
+              <div class="w-temp" id="tab-weather-temp">--°</div>
+              <div class="w-city" id="tab-weather-city">Cargando...</div>
+            </div>
+          </div>
+          <span class="status-pill"><span class="dot"></span>En línea</span>
+        </div>
       </div>
 
       <!-- HERO: reloj gigante centrado -->
@@ -4497,6 +4518,11 @@ async function renderChecadorTablet() {
   if (window._tabClkTimer) clearInterval(window._tabClkTimer);
   window._tabClkTimer = setInterval(dibujar, 1000);
 
+  // Clima local — Open-Meteo (gratis, sin API key)
+  cargarClimaTablet();
+  if (window._tabClimaTimer) clearInterval(window._tabClimaTimer);
+  window._tabClimaTimer = setInterval(cargarClimaTablet, 15 * 60 * 1000); // cada 15 min
+
   // Cargar empleados
   try {
     window._tabEmps = await api('/checador/empleados');
@@ -4504,6 +4530,69 @@ async function renderChecadorTablet() {
   } catch(e) { window._tabEmps = []; window._tabRegistrosHoy = { registros:[] }; }
 
   renderTabSearch();
+}
+
+// ══ CLIMA LOCAL (Open-Meteo) ══════════════════
+// Mapa de códigos WMO → emoji + etiqueta corta
+const WMO_MAP = {
+  0:['☀️','Despejado'], 1:['🌤','Mayormente sol'], 2:['⛅','Parcial'], 3:['☁️','Nublado'],
+  45:['🌫','Niebla'], 48:['🌫','Niebla helada'],
+  51:['🌦','Llovizna leve'], 53:['🌦','Llovizna'], 55:['🌦','Llovizna densa'],
+  56:['🌧','Llovizna helada'], 57:['🌧','Llovizna helada densa'],
+  61:['🌧','Lluvia leve'], 63:['🌧','Lluvia'], 65:['🌧','Lluvia fuerte'],
+  66:['🌧','Lluvia helada'], 67:['🌧','Lluvia helada fuerte'],
+  71:['🌨','Nieve leve'], 73:['🌨','Nieve'], 75:['🌨','Nieve fuerte'],
+  77:['🌨','Granizo pequeño'],
+  80:['🌦','Chubascos'], 81:['🌧','Chubascos fuertes'], 82:['⛈','Chubascos violentos'],
+  85:['🌨','Nevada leve'], 86:['🌨','Nevada fuerte'],
+  95:['⛈','Tormenta'], 96:['⛈','Tormenta con granizo'], 99:['⛈','Tormenta severa']
+};
+
+async function cargarClimaTablet() {
+  const setPill = (icon, temp, city) => {
+    const el = $('tab-weather'); if (!el) return;
+    el.classList.remove('loading');
+    if ($('tab-weather-icon')) $('tab-weather-icon').textContent = icon;
+    if ($('tab-weather-temp')) $('tab-weather-temp').textContent = temp;
+    if ($('tab-weather-city')) $('tab-weather-city').textContent = city;
+  };
+  try {
+    // 1. Obtener ubicación (cache primero, luego GPS)
+    let coords = window._climaCoords;
+    if (!coords) {
+      coords = await new Promise((res) => {
+        if (!navigator.geolocation) return res(null);
+        navigator.geolocation.getCurrentPosition(
+          p => res({ lat:p.coords.latitude, lon:p.coords.longitude }),
+          () => res(null),
+          { enableHighAccuracy:false, timeout:6000, maximumAge:600000 }
+        );
+      });
+      window._climaCoords = coords;
+    }
+    if (!coords) { setPill('📍', '—', 'GPS no disponible'); return; }
+
+    // 2. Clima actual desde Open-Meteo (gratis, sin key)
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current=temperature_2m,weather_code&timezone=auto`;
+    const r = await fetch(url).then(x => x.json());
+    const t = Math.round(r.current?.temperature_2m ?? 0);
+    const code = r.current?.weather_code ?? 0;
+    const [icon, label] = WMO_MAP[code] || ['🌡','—'];
+
+    // 3. Nombre de ciudad (reverse geocoding — BigDataCloud, gratis sin key)
+    let city = window._climaCity;
+    if (city == null) {
+      try {
+        const g = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${coords.lat}&longitude=${coords.lon}&localityLanguage=es`).then(x => x.json());
+        city = g.city || g.locality || g.principalSubdivision || '';
+        window._climaCity = city;
+      } catch { city = ''; window._climaCity = ''; }
+    }
+    const cityLine = city ? `${city.toUpperCase()} · ${label}` : label;
+    setPill(icon, `${t}°`, cityLine);
+  } catch(e) {
+    setPill('🌡', '—', 'Clima no disponible');
+  }
 }
 
 function renderTabSearch() {
