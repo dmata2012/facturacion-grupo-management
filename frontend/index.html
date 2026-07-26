@@ -5518,8 +5518,8 @@ async function renderChecadorTablet() {
       /* Cada empleado como card individual */
       .emp-row { display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;transition:all .2s;background:rgba(15,23,42,.85);border:1.5px solid rgba(148,163,184,.15);border-radius:12px;position:relative;overflow:hidden }
       .emp-row:hover { background:rgba(59,130,246,.15);border-color:#3b82f6;transform:translateY(-1px);box-shadow:0 4px 12px rgba(59,130,246,.25) }
-      .emp-row.done-entrada { background:rgba(22,163,74,.15);border-color:#16a34a;opacity:.75 }
-      .emp-row.done-entrada:hover { background:rgba(22,163,74,.25);border-color:#22c55e;opacity:1 }
+      .emp-row.done-entrada { background:rgba(22,163,74,.15);border:2.5px solid #22c55e;box-shadow:0 0 0 1px rgba(34,197,94,.35),0 0 14px rgba(34,197,94,.35) }
+      .emp-row.done-entrada:hover { background:rgba(22,163,74,.28);border-color:#4ade80;box-shadow:0 0 0 1px rgba(74,222,128,.5),0 0 22px rgba(34,197,94,.55) }
       .emp-row.done-completa { background:rgba(59,130,246,.08);border-color:rgba(59,130,246,.3);opacity:.5;filter:grayscale(.3) }
       .emp-row.done-completa:hover { opacity:.85 }
       .emp-row.done-completa::after { content:'✓ COMPLETO';position:absolute;top:6px;right:8px;font-size:9px;color:#60a5fa;font-weight:800;letter-spacing:1px }
