@@ -497,6 +497,8 @@ router.get('/asistencia', async (req, res) => {
 
     const codigoTipoSolicitud = { vacaciones:'V', permiso_goce:'P/G', incapacidad:'In' };
 
+    // Fecha de hoy (server) para no marcar F en fechas futuras
+    const hoyISO = new Date().toISOString().slice(0,10);
     // Construir matriz
     const matriz = empleados.rows.map(e => {
       // Default LFT: domingo es dia de descanso obligatorio si no hay config
@@ -510,12 +512,14 @@ router.get('/asistencia', async (req, res) => {
         const sol = solByEmpDia[e.id]?.[fecha];
         const reg = regByEmpDia[e.id]?.[fecha];
         const aj  = ajusByEmpDia[e.id]?.[fecha];
+        const esFutura = fecha > hoyISO;
         let cod;
-        // Prioridad: override manual > registro > solicitud > descanso > falta
+        // Prioridad: override manual > registro > solicitud > descanso > (falta o pendiente si futura)
         if (aj && aj.codigo) cod = aj.codigo;
         else if (reg && reg.hora_entrada) cod = 'A';
         else if (sol) cod = codigoTipoSolicitud[sol] || 'V';
         else if (descanso.includes(dow)) cod = 'D';
+        else if (esFutura) cod = '';   // fecha futura sin registro: no es falta
         else cod = 'F';
         celdas[fecha] = { c: cod, n: aj?.notas || null };
         if (totales[cod] !== undefined) totales[cod]++;
