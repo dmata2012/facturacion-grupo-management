@@ -5214,6 +5214,12 @@ async function checador() {
             <label style="font-size:11px;font-weight:700;color:var(--gray-d);display:block;margin-bottom:3px">HASTA</label>
             <input type="date" id="asist-hasta" onchange="cargarAsistencia()">
           </div>
+          <div style="display:flex;align-items:center;gap:4px;margin-left:12px;padding-left:12px;border-left:2px solid var(--border)">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:700;color:var(--dark)" title="Oculta filas donde el colaborador solo tuvo asistencias o descansos">
+              <input type="checkbox" id="asist-solo-inc" checked onchange="renderAsistencia(window._asistData)">
+              🔎 Solo con incidencias
+            </label>
+          </div>
           <div style="margin-left:auto">
             <button class="btn bs bsm" onclick="exportarAsistenciaExcel()">⬇ Descargar Excel</button>
             <button class="btn bo bsm" onclick="imprimirAsistencia()" style="margin-left:4px">🖨 Imprimir</button>
@@ -6369,12 +6375,36 @@ async function cargarAsistencia() {
   }
 }
 
+// Filtra empleados dejando solo los que tienen al menos una incidencia (F, FJ, V, P/G, In)
+function _empleadosConIncidencias(empleados) {
+  return empleados.filter(e => {
+    const t = e.totales || {};
+    return (t.F||0) + (t.FJ||0) + (t.V||0) + (t['P/G']||0) + (t.In||0) > 0;
+  });
+}
+
 function renderAsistencia(d) {
   const cont = $('asist-body');
   if (!d.empleados.length) {
     cont.innerHTML = '<p class="empty">Sin colaboradores activos.</p>';
     return;
   }
+  // Filtro "Solo con incidencias" (default ON)
+  const soloInc = $('asist-solo-inc')?.checked !== false;
+  const empleadosOrig = d.empleados;
+  const empleadosVis = soloInc ? _empleadosConIncidencias(empleadosOrig) : empleadosOrig;
+  if (soloInc && !empleadosVis.length) {
+    cont.innerHTML = `<div class="ibox ok" style="text-align:center;padding:24px;font-size:14px">
+      ✅ <strong>Sin incidencias registradas</strong> en el rango del ${fmtDate(d.desde)} al ${fmtDate(d.hasta)}.
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">${empleadosOrig.length} colaboradores solo tuvieron asistencias o descansos.</div>
+      <div style="margin-top:10px"><label style="cursor:pointer;color:#3b82f6;font-weight:700">
+        <input type="checkbox" onchange="$('asist-solo-inc').checked=false;renderAsistencia(window._asistData)" style="margin-right:4px"> Ver todos los colaboradores
+      </label></div>
+    </div>`;
+    return;
+  }
+  // Sustituir el arreglo visible para el resto del render
+  d = { ...d, empleados: empleadosVis };
   const fmtDiaCorto = (f) => {
     const dt = new Date(f+'T12:00:00');
     const dias = ['D','L','M','M','J','V','S'];
@@ -6424,8 +6454,11 @@ function renderAsistencia(d) {
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#334155">${e.totales.D}</td>`;
     html += `</tr>`;
   });
+  const filtroMsg = soloInc
+    ? ` · <span style="color:#d97706;font-weight:700">🔎 Mostrando ${empleadosVis.length} de ${empleadosOrig.length} (con incidencias)</span>`
+    : ` · ${d.empleados.length} colaboradores`;
   html += `</tbody></table></div>
-    <div style="margin-top:10px;font-size:11px;color:var(--muted)">Rango: <strong>${fmtDate(d.desde)}</strong> — <strong>${fmtDate(d.hasta)}</strong> · ${d.empleados.length} colaboradores · ${d.dias.length} días</div>`;
+    <div style="margin-top:10px;font-size:11px;color:var(--muted)">Rango: <strong>${fmtDate(d.desde)}</strong> — <strong>${fmtDate(d.hasta)}</strong>${filtroMsg} · ${d.dias.length} días</div>`;
 
   // Recolectar notas / justificaciones para la sección inferior (visible en pantalla e impresión)
   const notas = [];
@@ -6521,8 +6554,13 @@ async function guardarAjusteAsist(empId, fecha) {
 }
 
 function imprimirAsistencia() {
-  const d = window._asistData;
-  if (!d) return toast('Primero genera la lista de asistencia.', 'warn');
+  const dRaw = window._asistData;
+  if (!dRaw) return toast('Primero genera la lista de asistencia.', 'warn');
+  // Respetar el mismo filtro 'Solo con incidencias' que la vista en pantalla
+  const soloInc = $('asist-solo-inc')?.checked !== false;
+  const empleadosFiltrados = soloInc ? _empleadosConIncidencias(dRaw.empleados) : dRaw.empleados;
+  if (!empleadosFiltrados.length) return toast('Sin filas para imprimir con el filtro actual.', 'warn');
+  const d = { ...dRaw, empleados: empleadosFiltrados };
 
   const dias = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
   const colorFor = (cod) => ASIST_COLOR[cod] || { bg:'#fff', fg:'#000' };
@@ -6663,8 +6701,12 @@ function imprimirAsistencia() {
 }
 
 function exportarAsistenciaExcel() {
-  const d = window._asistData;
-  if (!d) return toast('Primero genera la lista de asistencia.', 'warn');
+  const dRaw = window._asistData;
+  if (!dRaw) return toast('Primero genera la lista de asistencia.', 'warn');
+  const soloInc = $('asist-solo-inc')?.checked !== false;
+  const empleadosFiltrados = soloInc ? _empleadosConIncidencias(dRaw.empleados) : dRaw.empleados;
+  if (!empleadosFiltrados.length) return toast('Sin filas para exportar con el filtro actual.', 'warn');
+  const d = { ...dRaw, empleados: empleadosFiltrados };
   if (typeof XLSX === 'undefined') return toast('Librería XLSX no disponible.', 'err');
   const wb = XLSX.utils.book_new();
   const aoa = [];
