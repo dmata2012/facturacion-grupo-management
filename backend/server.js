@@ -57,6 +57,7 @@ app.use('/api/conceptos',  require('./routes/conceptos'));
 app.use('/api/receptoras', require('./routes/receptoras'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/reportes',  require('./routes/reportes'));
+app.use('/api/bancos',    require('./routes/bancos'));
 
 // ── Health check ──────────────────────────────
 app.get('/api/health', async (req, res) => {
