@@ -694,6 +694,115 @@ router.get('/productividad', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/checador/productividad-por-dia — breakdown dia a dia (global o por empleado)
+router.get('/productividad-por-dia', async (req, res) => {
+  try {
+    const { desde, hasta, empleado_id } = req.query;
+    if (!desde || !hasta) return res.status(400).json({ error: 'Se requieren desde y hasta.' });
+    const hoyISO = new Date().toISOString().slice(0,10);
+    const cortaHasta = hasta > hoyISO ? hoyISO : hasta;
+
+    const paramsE = [];
+    let whereE = 'WHERE activo=TRUE';
+    if (empleado_id) { paramsE.push(empleado_id); whereE += ` AND id=$${paramsE.length}`; }
+    const emps = await query(
+      `SELECT id, nombre, numero_colaborador, puesto,
+        hora_entrada_esperada, hora_salida_esperada, dias_descanso
+       FROM fac_empleados ${whereE} ORDER BY nombre`, paramsE);
+
+    const regs = await query(
+      `SELECT empleado_id, TO_CHAR(fecha,'YYYY-MM-DD') AS fecha,
+        minutos_trabajados, minutos_retardo, hora_entrada
+       FROM fac_reloj_checador
+       WHERE fecha BETWEEN $1::date AND $2::date`, [desde, cortaHasta]);
+
+    const sols = await query(
+      `SELECT empleado_id,
+        TO_CHAR(fecha_inicio,'YYYY-MM-DD') AS fecha_inicio,
+        TO_CHAR(fecha_fin,'YYYY-MM-DD')    AS fecha_fin,
+        COALESCE(tipo,'vacaciones') AS tipo
+       FROM fac_vacaciones_solicitudes
+       WHERE estatus='aprobada'
+         AND daterange(fecha_inicio, fecha_fin, '[]') && daterange($1::date, $2::date, '[]')`,
+      [desde, cortaHasta]);
+
+    const ajus = await query(
+      `SELECT empleado_id, TO_CHAR(fecha,'YYYY-MM-DD') AS fecha, codigo
+       FROM fac_asistencia_ajustes
+       WHERE fecha BETWEEN $1::date AND $2::date`, [desde, cortaHasta]);
+
+    // Rango de dias
+    const dias = [];
+    const d0 = new Date(desde+'T12:00:00'), d1 = new Date(cortaHasta+'T12:00:00');
+    for (let d = new Date(d0); d <= d1; d.setDate(d.getDate()+1)) dias.push(d.toISOString().slice(0,10));
+
+    // Índices
+    const regByEmpDia = {};
+    regs.rows.forEach(r => { if(!regByEmpDia[r.empleado_id]) regByEmpDia[r.empleado_id]={}; regByEmpDia[r.empleado_id][r.fecha]=r; });
+    const solByEmpDia = {};
+    const addDay = iso => { const [y,m,d]=iso.split('-').map(Number); const dt=new Date(Date.UTC(y,m-1,d)); dt.setUTCDate(dt.getUTCDate()+1); return dt.toISOString().slice(0,10); };
+    sols.rows.forEach(s => { let cur=s.fecha_inicio; while(cur<=s.fecha_fin){ if(!solByEmpDia[s.empleado_id]) solByEmpDia[s.empleado_id]={}; solByEmpDia[s.empleado_id][cur]=s.tipo; cur=addDay(cur); } });
+    const ajusByEmpDia = {};
+    ajus.rows.forEach(a => { if(!ajusByEmpDia[a.empleado_id]) ajusByEmpDia[a.empleado_id]={}; ajusByEmpDia[a.empleado_id][a.fecha]=a.codigo; });
+
+    const parseHora = (h) => { if(!h) return 0; const [hh,mm]=String(h).split(':').map(Number); return (hh||0)*60+(mm||0); };
+
+    // Para cada dia, agregar
+    const porDia = dias.map(fecha => {
+      const dow = new Date(fecha+'T12:00:00').getDay();
+      let horasEsp = 0, horasLab = 0, empEsperados = 0, empTrabajados = 0;
+      let faltas = 0, retardoMin = 0, ausencias = 0;
+      emps.rows.forEach(e => {
+        const descanso = Array.isArray(e.dias_descanso) && e.dias_descanso.length ? e.dias_descanso : [0];
+        const esDesc = descanso.includes(dow);
+        const jornadaMin = Math.max(0, parseHora(e.hora_salida_esperada) - parseHora(e.hora_entrada_esperada));
+        const sol = solByEmpDia[e.id]?.[fecha];
+        const aj  = ajusByEmpDia[e.id]?.[fecha];
+        const reg = regByEmpDia[e.id]?.[fecha];
+        let cod;
+        if (aj) cod = aj;
+        else if (reg && reg.hora_entrada) cod = 'A';
+        else if (sol) cod = ({vacaciones:'V',permiso_goce:'P/G',incapacidad:'In'})[sol] || 'V';
+        else if (esDesc) cod = 'D';
+        else cod = 'F';
+
+        if (['A','F','FJ'].includes(cod)) {
+          empEsperados++;
+          horasEsp += jornadaMin / 60;
+          if (cod === 'A') { empTrabajados++; horasLab += (reg?.minutos_trabajados || 0) / 60; }
+          if (cod === 'F') faltas++;
+          if (reg?.minutos_retardo) retardoMin += parseInt(reg.minutos_retardo)||0;
+        } else if (['V','P/G','In'].includes(cod)) ausencias++;
+      });
+      const prod = horasEsp > 0 ? Math.min(200, (horasLab/horasEsp)*100) : 0;
+      return {
+        fecha,
+        dow,
+        empleados_esperados: empEsperados,
+        empleados_trabajados: empTrabajados,
+        faltas, ausencias,
+        horas_esperadas: +horasEsp.toFixed(2),
+        horas_laboradas: +horasLab.toFixed(2),
+        retardo_min: retardoMin,
+        productividad_pct: +prod.toFixed(1)
+      };
+    });
+
+    // Totales del rango
+    const tot = porDia.reduce((a,d) => {
+      a.horas_esperadas += d.horas_esperadas;
+      a.horas_laboradas += d.horas_laboradas;
+      a.faltas += d.faltas; a.ausencias += d.ausencias;
+      a.retardo_min += d.retardo_min;
+      return a;
+    }, { horas_esperadas:0, horas_laboradas:0, faltas:0, ausencias:0, retardo_min:0 });
+    tot.productividad_pct = tot.horas_esperadas > 0 ? +((tot.horas_laboradas/tot.horas_esperadas)*100).toFixed(1) : 0;
+    Object.keys(tot).forEach(k => { if (typeof tot[k]==='number') tot[k] = +tot[k].toFixed(2); });
+
+    res.json({ desde, hasta, corta_hasta: cortaHasta, dias: porDia, totales: tot });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/checador/empleados — lista de empleados con configuración de horarios
 router.get('/empleados', async (req, res) => {
   try {
