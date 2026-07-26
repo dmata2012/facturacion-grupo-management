@@ -127,6 +127,22 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--
 }
 /* Secciones colapsables */
 .nav-group{margin:2px 0}
+/* RH: departamento destacado con acento teal/verde */
+.nav-group[data-group="rh"]{
+  background:linear-gradient(90deg,rgba(16,185,129,.08) 0%,rgba(16,185,129,.02) 100%);
+  border-left:3px solid #10b981;
+  margin:8px 0;
+  border-radius:0 8px 8px 0
+}
+.nav-group[data-group="rh"] .nav-group-toggle{color:rgba(255,255,255,.75);font-size:10.5px}
+.nav-group[data-group="rh"] .nav-group-toggle:hover{color:#a7f3d0}
+.nav-group[data-group="rh"] .nav-group-icon{font-size:16px;filter:drop-shadow(0 0 4px rgba(16,185,129,.4));opacity:1}
+.nav-group[data-group="rh"] .chev{color:#10b981;opacity:.9}
+.nav-group[data-group="rh"] nav a,
+.nav-group[data-group="rh"] .nav-group-items a{color:rgba(167,243,208,.75)}
+.nav-group[data-group="rh"] .nav-group-items a:hover{background:rgba(16,185,129,.15);color:#d1fae5}
+.nav-group[data-group="rh"] .nav-group-items a.active{background:rgba(16,185,129,.25);border-left-color:#10b981;color:#fff}
+.nav-group[data-group="rh"] .nav-group-items a .ni{opacity:.9}
 .nav-group-toggle{
   display:flex;align-items:center;justify-content:space-between;
   padding:10px 18px 8px;font-size:9.5px;font-weight:800;
@@ -520,9 +536,9 @@ canvas{max-height:230px}
         </div>
       </div>
 
-      <div class="nav-group" data-group="rh">
+      <div class="nav-group open" data-group="rh">
         <button class="nav-group-toggle" onclick="toggleNavGroup('rh')">
-          <span class="nav-group-label"><span class="nav-group-icon">👥</span> Recurso Humano</span>
+          <span class="nav-group-label"><span class="nav-group-icon">👥</span> Recursos Humanos</span>
           <span class="chev">▶</span>
         </button>
         <div class="nav-group-items">
@@ -902,7 +918,7 @@ function toggleNavGroup(groupId) {
 // Restaurar estado abierto/cerrado desde localStorage al cargar la app
 function restaurarNavGroups() {
   try {
-    const abiertos = JSON.parse(localStorage.getItem('nav-groups-open') || '["operacion"]');
+    const abiertos = JSON.parse(localStorage.getItem('nav-groups-open') || '["operacion","rh"]');
     document.querySelectorAll('.nav-group').forEach(g => {
       if (abiertos.includes(g.dataset.group)) g.classList.add('open');
     });
