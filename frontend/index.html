@@ -5117,6 +5117,7 @@ async function checador() {
       <div class="tab" onclick="showTab(this,'ch-tab-hoy');cargarChecadorHoy()">📅 Registros de hoy</div>
       <div class="tab" onclick="showTab(this,'ch-tab-reporte');cargarChecadorReporte()">📊 Reporte por periodo</div>
       <div class="tab" onclick="showTab(this,'ch-tab-asistencia');inicializarAsistencia()">📋 Lista de Asistencia</div>
+      ${canAdmin()?`<div class="tab" onclick="showTab(this,'ch-tab-productividad');inicializarProductividad()">📊 Productividad</div>`:''}
     </div>`}
 
     <!-- PESTAÑA MARCAR -->
@@ -5235,6 +5236,44 @@ async function checador() {
           <span><span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:#dc2626;color:#fff;font-weight:900;border-radius:50%;box-shadow:0 0 0 1.5px #b91c1c inset">D</span> Descanso</span>
         </div>
         <div id="asist-body"><p class="empty">Selecciona un rango para generar la lista de asistencia.</p></div>
+      </div>
+    </div>
+
+    <!-- PESTAÑA PRODUCTIVIDAD (Admin) -->
+    <div class="tab-panel" id="ch-tab-productividad">
+      <div class="card">
+        <div style="background:linear-gradient(135deg,#4c1d95,#7c3aed);color:#fff;padding:16px 20px;border-radius:10px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <div>
+            <div style="font-size:11px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;opacity:.85">Reporte Administrador</div>
+            <div style="font-size:20px;font-weight:900;margin-top:2px">📊 Productividad del Personal</div>
+            <div style="font-size:12px;opacity:.85;margin-top:4px">Horas laboradas vs esperadas · con barra visual de rendimiento</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--gray-d);display:block;margin-bottom:3px">RANGO PRESET</label>
+            <div style="display:flex;gap:4px;flex-wrap:wrap">
+              <button class="btn bo bsm" onclick="setProdPreset('semana')">📅 Esta semana</button>
+              <button class="btn bo bsm" onclick="setProdPreset('q1')">1ª quincena</button>
+              <button class="btn bo bsm" onclick="setProdPreset('q2')">2ª quincena</button>
+              <button class="btn bo bsm" onclick="setProdPreset('mes')">Este mes</button>
+              <button class="btn bo bsm" onclick="setProdPreset('mesant')">Mes anterior</button>
+            </div>
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--gray-d);display:block;margin-bottom:3px">DESDE</label>
+            <input type="date" id="prod-desde" onchange="cargarProductividad()">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--gray-d);display:block;margin-bottom:3px">HASTA</label>
+            <input type="date" id="prod-hasta" onchange="cargarProductividad()">
+          </div>
+          <div style="margin-left:auto">
+            <button class="btn bs bsm" onclick="exportarProductividadExcel()">⬇ Descargar Excel</button>
+            <button class="btn bo bsm" onclick="imprimirProductividad()" style="margin-left:4px">🖨 Imprimir</button>
+          </div>
+        </div>
+        <div id="prod-body"><p class="empty">Selecciona un rango para generar el reporte.</p></div>
       </div>
     </div>`;
 
@@ -6763,6 +6802,238 @@ function exportarAsistenciaExcel() {
     XLSX.utils.book_append_sheet(wb, wsN, 'Notas');
   }
   XLSX.writeFile(wb, `Asistencia_${d.desde}_a_${d.hasta}.xlsx`);
+}
+
+// ══ PRODUCTIVIDAD (Admin) ══════════════════════════════
+function inicializarProductividad() {
+  const hoy = new Date();
+  const y = hoy.getFullYear(), m = hoy.getMonth(), pad = n => String(n).padStart(2,'0');
+  const dia = hoy.getDate();
+  if (!$('prod-desde').value) {
+    if (dia <= 15) { $('prod-desde').value = `${y}-${pad(m+1)}-01`; $('prod-hasta').value = `${y}-${pad(m+1)}-15`; }
+    else {
+      const fin = new Date(y, m+1, 0).getDate();
+      $('prod-desde').value = `${y}-${pad(m+1)}-16`;
+      $('prod-hasta').value = `${y}-${pad(m+1)}-${pad(fin)}`;
+    }
+  }
+  cargarProductividad();
+}
+
+function setProdPreset(p) {
+  const hoy = new Date();
+  const y = hoy.getFullYear(), m = hoy.getMonth(), d = hoy.getDate();
+  const pad = n => String(n).padStart(2,'0');
+  let desde, hasta;
+  if (p === 'semana') {
+    const dw = hoy.getDay();
+    const lunes = new Date(hoy); lunes.setDate(d - (dw === 0 ? 6 : dw - 1));
+    const dom = new Date(lunes); dom.setDate(lunes.getDate()+6);
+    desde = lunes.toISOString().slice(0,10); hasta = dom.toISOString().slice(0,10);
+  } else if (p === 'q1') { desde = `${y}-${pad(m+1)}-01`; hasta = `${y}-${pad(m+1)}-15`; }
+  else if (p === 'q2')  { const fin=new Date(y,m+1,0).getDate(); desde=`${y}-${pad(m+1)}-16`; hasta=`${y}-${pad(m+1)}-${pad(fin)}`; }
+  else if (p === 'mes') { const fin=new Date(y,m+1,0).getDate(); desde=`${y}-${pad(m+1)}-01`;  hasta=`${y}-${pad(m+1)}-${pad(fin)}`; }
+  else if (p === 'mesant') { const finA=new Date(y,m,0).getDate(); const mA=m===0?12:m; const yA=m===0?y-1:y; desde=`${yA}-${pad(mA)}-01`; hasta=`${yA}-${pad(mA)}-${pad(finA)}`; }
+  $('prod-desde').value = desde; $('prod-hasta').value = hasta;
+  cargarProductividad();
+}
+
+async function cargarProductividad() {
+  const desde = $('prod-desde')?.value, hasta = $('prod-hasta')?.value;
+  if (!desde || !hasta) return;
+  if (desde > hasta) return toast('"Desde" debe ser menor o igual a "hasta".', 'warn');
+  $('prod-body').innerHTML = '<p class="empty">Cargando...</p>';
+  try {
+    const d = await api(`/checador/productividad?desde=${desde}&hasta=${hasta}`);
+    window._prodData = d;
+    renderProductividad(d);
+  } catch(e) { $('prod-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function _prodColor(pct) {
+  if (pct >= 95) return { bar:'linear-gradient(90deg,#16a34a,#22c55e)', chip:'#dcfce7', chipFg:'#166534', label:'Excelente' };
+  if (pct >= 85) return { bar:'linear-gradient(90deg,#22c55e,#84cc16)', chip:'#ecfccb', chipFg:'#3f6212', label:'Buena' };
+  if (pct >= 70) return { bar:'linear-gradient(90deg,#eab308,#f59e0b)', chip:'#fef3c7', chipFg:'#92400e', label:'Regular' };
+  if (pct >= 50) return { bar:'linear-gradient(90deg,#f97316,#ea580c)', chip:'#ffedd5', chipFg:'#9a3412', label:'Baja' };
+  return { bar:'linear-gradient(90deg,#dc2626,#b91c1c)', chip:'#fee2e2', chipFg:'#991b1b', label:'Crítica' };
+}
+
+function renderProductividad(d) {
+  const cont = $('prod-body');
+  if (!d.empleados.length) { cont.innerHTML = '<p class="empty">Sin colaboradores activos.</p>'; return; }
+  const tot = d.totales;
+  const totColor = _prodColor(tot.productividad_pct);
+  const cortaMsg = d.corta_hasta !== d.hasta ? ` <span style="color:#d97706">(recortado hasta ${fmtDate(d.corta_hasta)} — sin dias futuros)</span>` : '';
+
+  let html = `
+    <!-- KPI general -->
+    <div style="background:${totColor.chip};border:2px solid ${totColor.chipFg};border-radius:12px;padding:18px 22px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:10px">
+        <div>
+          <div style="font-size:11px;font-weight:800;color:${totColor.chipFg};text-transform:uppercase;letter-spacing:1.5px">Productividad Global (${d.empleados.length} colaboradores)</div>
+          <div style="font-size:32px;font-weight:900;color:${totColor.chipFg};line-height:1;margin-top:4px">${tot.productividad_pct}% <span style="font-size:14px;opacity:.8">— ${totColor.label}</span></div>
+        </div>
+        <div style="text-align:right;font-size:12px;color:${totColor.chipFg}">
+          <div><strong>${tot.horas_laboradas.toFixed(1)} h</strong> laboradas</div>
+          <div>de <strong>${tot.horas_esperadas.toFixed(1)} h</strong> esperadas</div>
+          <div style="margin-top:4px;font-size:11px;opacity:.85">${tot.dias_trabajados}/${tot.dias_laborables} días · ${(tot.retardo_min/60).toFixed(1)} h retardo</div>
+        </div>
+      </div>
+      <div style="background:rgba(255,255,255,.5);height:14px;border-radius:99px;overflow:hidden;position:relative">
+        <div style="height:100%;width:${Math.min(100,tot.productividad_pct)}%;background:${totColor.bar};border-radius:99px;transition:width .6s"></div>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Rango: <strong>${fmtDate(d.desde)}</strong> — <strong>${fmtDate(d.hasta)}</strong>${cortaMsg}</div>
+    <div class="tscroll"><table style="font-size:12px">
+      <thead><tr>
+        <th style="text-align:left;min-width:200px;position:sticky;left:0;background:#f8fafc;z-index:2">Colaborador</th>
+        <th title="Horas por dia (salida - entrada)">Jornada</th>
+        <th title="Dias que debia laborar (rango - descansos - vacaciones/permisos/incap)">Días<br>lab.</th>
+        <th title="Dias con entrada registrada">Días<br>trab.</th>
+        <th>Faltas</th>
+        <th>V+PG+In</th>
+        <th title="Horas totales esperadas (jornada × dias lab)">Horas<br>esperadas</th>
+        <th title="Horas efectivamente trabajadas (suma de minutos_trabajados)">Horas<br>laboradas</th>
+        <th title="Suma de minutos de retardo">Retardo</th>
+        <th style="min-width:260px">Productividad</th>
+      </tr></thead>
+      <tbody>`;
+  d.empleados.forEach(e => {
+    const c = _prodColor(e.productividad_pct);
+    const ausencias = e.vacaciones + e.permiso_goce + e.incapacidad;
+    const retH = Math.floor(e.retardo_min/60), retM = e.retardo_min%60;
+    html += `<tr>
+      <td style="position:sticky;left:0;background:#fff;z-index:1;border-right:1.5px solid #e5e7eb;padding:8px">
+        <div style="font-weight:800">${e.nombre}</div>
+        <div style="font-size:10px;color:var(--muted)">${e.numero_colaborador?'#'+e.numero_colaborador+' · ':''}${e.puesto||''}</div>
+      </td>
+      <td style="text-align:center;color:var(--muted)">${e.jornada_diaria_hrs}h</td>
+      <td style="text-align:center;font-weight:800">${e.dias_laborables}</td>
+      <td style="text-align:center;font-weight:800;color:#166534">${e.dias_trabajados}</td>
+      <td style="text-align:center;font-weight:800;color:${e.faltas>0?'#991b1b':'var(--muted)'}">${e.faltas}${e.fj?` <sub style="color:#9a3412">+${e.fj}FJ</sub>`:''}</td>
+      <td style="text-align:center;color:var(--muted)">${ausencias||'—'}</td>
+      <td style="text-align:right;font-weight:700;padding-right:10px">${e.horas_esperadas.toFixed(1)} h</td>
+      <td style="text-align:right;font-weight:900;color:#166534;padding-right:10px">${e.horas_laboradas.toFixed(1)} h</td>
+      <td style="text-align:center;color:${e.retardo_min>0?'#d97706':'var(--muted)'};font-weight:${e.retardo_min>0?'800':'400'}">${retH}h ${String(retM).padStart(2,'0')}m</td>
+      <td style="padding:6px 8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;background:#f1f5f9;height:16px;border-radius:99px;overflow:hidden;position:relative;min-width:120px">
+            <div style="height:100%;width:${Math.min(100,e.productividad_pct)}%;background:${c.bar};border-radius:99px;transition:width .6s"></div>
+            ${e.productividad_pct > 100 ? `<div style="position:absolute;top:0;right:2px;height:100%;display:flex;align-items:center;color:#fff;font-size:9px;font-weight:900;padding:0 4px">⬆</div>`:''}
+          </div>
+          <span style="background:${c.chip};color:${c.chipFg};padding:3px 8px;border-radius:10px;font-size:11px;font-weight:900;min-width:52px;text-align:center">${e.productividad_pct}%</span>
+        </div>
+      </td>
+    </tr>`;
+  });
+  html += `</tbody></table></div>
+    <div style="margin-top:14px;display:flex;gap:14px;flex-wrap:wrap;font-size:11px;padding:10px 14px;background:var(--bg-alt);border-radius:8px">
+      <span><span style="display:inline-block;width:14px;height:14px;background:linear-gradient(90deg,#16a34a,#22c55e);border-radius:3px;vertical-align:middle"></span> ≥95% Excelente</span>
+      <span><span style="display:inline-block;width:14px;height:14px;background:linear-gradient(90deg,#22c55e,#84cc16);border-radius:3px;vertical-align:middle"></span> 85-94% Buena</span>
+      <span><span style="display:inline-block;width:14px;height:14px;background:linear-gradient(90deg,#eab308,#f59e0b);border-radius:3px;vertical-align:middle"></span> 70-84% Regular</span>
+      <span><span style="display:inline-block;width:14px;height:14px;background:linear-gradient(90deg,#f97316,#ea580c);border-radius:3px;vertical-align:middle"></span> 50-69% Baja</span>
+      <span><span style="display:inline-block;width:14px;height:14px;background:linear-gradient(90deg,#dc2626,#b91c1c);border-radius:3px;vertical-align:middle"></span> &lt;50% Crítica</span>
+    </div>`;
+  cont.innerHTML = html;
+}
+
+function exportarProductividadExcel() {
+  const d = window._prodData;
+  if (!d || !d.empleados.length) return toast('Primero genera el reporte.', 'warn');
+  if (typeof XLSX === 'undefined') return toast('Librería XLSX no disponible.', 'err');
+  const wb = XLSX.utils.book_new();
+  const aoa = [];
+  aoa.push(['PRODUCTIVIDAD DEL PERSONAL — GRUPO MANAGEMENT']);
+  aoa.push([`Rango: ${fmtDate(d.desde)} al ${fmtDate(d.hasta)}${d.corta_hasta!==d.hasta?' (recortado hasta '+fmtDate(d.corta_hasta)+')':''}`]);
+  aoa.push([`Generado: ${new Date().toLocaleString('es-MX')}`]);
+  aoa.push([]);
+  aoa.push([`Productividad global: ${d.totales.productividad_pct}%`, '', 'Horas laboradas:', d.totales.horas_laboradas, 'de', d.totales.horas_esperadas]);
+  aoa.push([]);
+  aoa.push(['#','Colaborador','Puesto','Departamento','Jornada (h)','Días laborables','Días trabajados','Faltas','FJ','Vacaciones','P/G','Incapacidad','Horas esperadas','Horas laboradas','Retardo (min)','Productividad %']);
+  d.empleados.forEach(e => {
+    aoa.push([
+      e.numero_colaborador||'', e.nombre, e.puesto||'', e.departamento||'',
+      e.jornada_diaria_hrs, e.dias_laborables, e.dias_trabajados,
+      e.faltas, e.fj, e.vacaciones, e.permiso_goce, e.incapacidad,
+      e.horas_esperadas, e.horas_laboradas, e.retardo_min, e.productividad_pct
+    ]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:6},{wch:32},{wch:20},{wch:16},{wch:9},{wch:8},{wch:8},{wch:7},{wch:5},{wch:9},{wch:6},{wch:11},{wch:11},{wch:11},{wch:9},{wch:11}];
+  XLSX.utils.book_append_sheet(wb, ws, 'Productividad');
+  XLSX.writeFile(wb, `Productividad_${d.desde}_a_${d.hasta}.xlsx`);
+}
+
+function imprimirProductividad() {
+  const d = window._prodData;
+  if (!d || !d.empleados.length) return toast('Primero genera el reporte.', 'warn');
+  const hoy = new Date().toLocaleString('es-MX');
+  const totColor = _prodColor(d.totales.productividad_pct);
+  const filasHtml = d.empleados.map(e => {
+    const c = _prodColor(e.productividad_pct);
+    const ausencias = e.vacaciones + e.permiso_goce + e.incapacidad;
+    return `<tr>
+      <td class="name">${e.nombre}<div class="sub">${e.numero_colaborador?'#'+e.numero_colaborador+' · ':''}${e.puesto||''}</div></td>
+      <td class="c">${e.jornada_diaria_hrs}h</td>
+      <td class="c">${e.dias_laborables}</td>
+      <td class="c" style="color:#166534;font-weight:800">${e.dias_trabajados}</td>
+      <td class="c" style="color:${e.faltas>0?'#991b1b':'#888'}">${e.faltas}${e.fj?`+${e.fj}FJ`:''}</td>
+      <td class="c">${ausencias||'—'}</td>
+      <td class="r">${e.horas_esperadas.toFixed(1)}</td>
+      <td class="r" style="font-weight:900">${e.horas_laboradas.toFixed(1)}</td>
+      <td class="r" style="color:${e.retardo_min>0?'#d97706':'#888'}">${(e.retardo_min/60).toFixed(1)}h</td>
+      <td style="padding:4px 8px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <div style="flex:1;background:#e5e7eb;height:12px;border-radius:99px;min-width:70px;position:relative;overflow:hidden">
+            <div style="height:100%;width:${Math.min(100,e.productividad_pct)}%;background:${c.bar};border-radius:99px"></div>
+          </div>
+          <span style="background:${c.chip};color:${c.chipFg};padding:2px 6px;border-radius:8px;font-weight:900;font-size:9.5px;min-width:44px;text-align:center">${e.productividad_pct}%</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Productividad — ${d.desde} a ${d.hasta}</title>
+<style>
+  @page { size: A4 landscape; margin: 8mm }
+  * { box-sizing:border-box; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important }
+  body { font-family:'Segoe UI',Arial,sans-serif; color:#111; padding:8px; margin:0; font-size:10px }
+  .head { display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #4c1d95; padding-bottom:8px; margin-bottom:12px }
+  .head h1 { margin:0; font-size:15px; color:#4c1d95 }
+  .head .sub { font-size:9px; color:#666 }
+  .global { background:${totColor.chip}; border:2px solid ${totColor.chipFg}; border-radius:8px; padding:10px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center }
+  .global .p { font-size:22px; font-weight:900; color:${totColor.chipFg} }
+  .global .r { font-size:10px; color:${totColor.chipFg}; text-align:right }
+  table { width:100%; border-collapse:collapse; font-size:9.5px }
+  th, td { border:.5px solid #cbd5e1; padding:3px 5px }
+  th { background:#f1f5f9; font-weight:800; text-align:center }
+  th.l { text-align:left }
+  td.c { text-align:center }
+  td.r { text-align:right; font-weight:700 }
+  td.name { font-weight:800 }
+  td.name .sub { font-size:8px; color:#888; font-weight:400 }
+  .actions { position:fixed; top:6px; right:6px; display:flex; gap:6px; z-index:10 }
+  .actions button { padding:8px 12px; border-radius:5px; border:none; font-weight:800; cursor:pointer; font-size:11px }
+  .actions .p { background:#4c1d95; color:#fff } .actions .c { background:#e5e7eb }
+  @media print { .actions { display:none } body { padding:0 } }
+</style></head><body>
+  <div class="actions"><button class="p" onclick="window.print()">🖨 Imprimir</button><button class="c" onclick="window.close()">Cerrar</button></div>
+  <div class="head"><div><h1>📊 PRODUCTIVIDAD DEL PERSONAL</h1><div class="sub">${fmtDate(d.desde)} al ${fmtDate(d.hasta)} · ${d.empleados.length} colaboradores</div></div><div class="sub">Impreso ${hoy}</div></div>
+  <div class="global">
+    <div><div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:1.2px">Productividad Global — ${totColor.label}</div><div class="p">${d.totales.productividad_pct}%</div></div>
+    <div class="r"><div><strong>${d.totales.horas_laboradas.toFixed(1)} h</strong> laboradas de <strong>${d.totales.horas_esperadas.toFixed(1)} h</strong> esperadas</div><div>${d.totales.dias_trabajados}/${d.totales.dias_laborables} días · ${(d.totales.retardo_min/60).toFixed(1)}h retardo</div></div>
+  </div>
+  <table>
+    <thead><tr>
+      <th class="l">Colaborador</th><th>Jornada</th><th>Días lab.</th><th>Días trab.</th>
+      <th>Faltas</th><th>V+PG+In</th><th>H. esp.</th><th>H. lab.</th><th>Retardo</th><th style="min-width:160px">Productividad</th>
+    </tr></thead>
+    <tbody>${filasHtml}</tbody>
+  </table>
+  <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400));<\/script>
+</body></html>`;
+  const w = window.open('','_blank','width=1100,height=800');
+  if (!w) return toast('Bloquearon la ventana emergente.', 'warn');
+  w.document.write(html); w.document.close();
 }
 
 async function verFotoChecador(id, tipo, nombre) {
