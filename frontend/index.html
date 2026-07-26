@@ -1078,7 +1078,8 @@ async function bancos() {
           <input type="date" id="rep-desde" onchange="cargarReporteACobrar()">
           <label style="font-size:11px;font-weight:700;color:var(--gray-d)">HASTA</label>
           <input type="date" id="rep-hasta" onchange="cargarReporteACobrar()">
-          <button class="btn bs bsm" onclick="imprimirReporteACobrar()" style="margin-left:auto">🖨 Imprimir Reporte</button>
+          <button class="btn bsuc bsm" onclick="whatsappReporteACobrar()" style="margin-left:auto">💬 Enviar por WhatsApp</button>
+          <button class="btn bs bsm" onclick="imprimirReporteACobrar()">🖨 Imprimir Reporte</button>
         </div>
       </div>
       <div id="rep-body"><p class="empty">Selecciona una fecha o rango...</p></div>
@@ -1565,134 +1566,242 @@ async function cargarReporteACobrar() {
 
 function renderReporteACobrar(r) {
   if (!r.grupos.length) return '<p class="empty">Sin cheques pendientes de cobro en el rango seleccionado.</p>';
-  const fechaTxt = r.fecha_reporte ? fmtDate(r.fecha_reporte) : (r.desde && r.hasta ? `${fmtDate(r.desde)} al ${fmtDate(r.hasta)}` : (r.desde ? `desde ${fmtDate(r.desde)}` : ''));
+  const fmtF = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso+'T12:00:00');
+    const mes = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][d.getMonth()];
+    return `${String(d.getDate()).padStart(2,'0')}-${mes}-${String(d.getFullYear()).slice(2)}`;
+  };
+  const fechaTxt = r.fecha_reporte ? fmtF(r.fecha_reporte) : (r.desde && r.hasta ? `${fmtF(r.desde)} al ${fmtF(r.hasta)}` : (r.desde ? `desde ${fmtF(r.desde)}` : ''));
+  // Colores por posición del banco (alterna amarillo/azul)
+  const colores = [
+    { hd:'#4472c4', bg:'#fff2cc', txt:'#000', totBg:'#fff2cc' },   // BANORTE — cabecera azul, "LEX" amarillo
+    { hd:'#4472c4', bg:'#d9e2f3', txt:'#000', totBg:'#d9e2f3' }    // BANCOMER — cabecera azul, "LEX" azul claro
+  ];
+  const primerBenef = r.grupos[0]?.cheques?.[0]?.beneficiario_nombre || '';
+
   return `
-    <div class="card" style="padding:24px">
-      <div style="text-align:center;margin-bottom:16px;border-bottom:2px solid #111;padding-bottom:12px">
-        <div style="font-size:20px;font-weight:900;letter-spacing:2px">CHEQUES A COBRAR:</div>
-        <div style="font-size:13px;color:var(--muted);margin-top:4px">${fechaTxt.toUpperCase()}</div>
+    <div class="card" style="padding:24px;max-width:900px;margin:0 auto">
+      <!-- Header verde -->
+      <div style="display:flex;justify-content:space-between;align-items:center;background:#c6efce;border:1.5px solid #92d050;border-radius:4px;padding:10px 18px;margin-bottom:22px">
+        <div style="font-size:15px;font-weight:900;letter-spacing:1px;color:#111">CHEQUES A COBRAR:</div>
+        <div style="font-size:13px;font-weight:800;color:#111">${fechaTxt}</div>
       </div>
-      ${r.grupos.map(g => `
-        <div style="margin-bottom:22px">
-          <div style="background:#1e3a8a;color:#fff;padding:8px 14px;font-weight:900;font-size:13px;letter-spacing:1.5px;border-radius:6px 6px 0 0">
-            ${g.banco} — ${g.empresa}
-          </div>
-          <table style="width:100%;border-collapse:collapse;border:1.5px solid #1e3a8a;font-size:12px">
-            <thead style="background:#dbeafe">
+
+      ${r.grupos.map((g, i) => {
+        const col = colores[i % colores.length];
+        return `
+        <div style="margin-bottom:18px">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;border:1.2px solid #7f7f7f">
+            <thead>
               <tr>
-                <th style="padding:8px;text-align:center;width:80px;border-right:1px solid #93c5fd">NO. DE</th>
-                <th style="padding:8px;text-align:left;border-right:1px solid #93c5fd">NOMBRE BENEFICIARIO</th>
-                <th style="padding:8px;text-align:right;width:130px;border-right:1px solid #93c5fd">MONTO</th>
-                <th style="padding:8px;text-align:left">CONCEPTO</th>
+                <th style="background:${col.hd};color:#fff;padding:7px 10px;text-align:center;font-weight:900;border:1px solid #7f7f7f;width:110px">${g.banco}</th>
+                <th style="background:${col.hd};color:#fff;padding:7px 10px;text-align:center;font-weight:900;border:1px solid #7f7f7f;width:90px">No. DE</th>
+                <th style="background:${col.hd};color:#fff;padding:7px 10px;text-align:center;font-weight:900;border:1px solid #7f7f7f">NOMBRE BENEFICIARIO</th>
+                <th style="background:${col.hd};color:#fff;padding:7px 10px;text-align:center;font-weight:900;border:1px solid #7f7f7f;width:130px">MONTO</th>
+                <th style="background:${col.hd};color:#fff;padding:7px 10px;text-align:center;font-weight:900;border:1px solid #7f7f7f">CONCEPTO</th>
               </tr>
             </thead>
-            <tbody>${g.cheques.map(c => `
-              <tr style="border-top:1px solid #bfdbfe">
-                <td style="padding:6px 8px;text-align:center;font-family:monospace;font-weight:800;border-right:1px solid #bfdbfe">${c.no_cheque}</td>
-                <td style="padding:6px 8px;font-weight:700;border-right:1px solid #bfdbfe">${c.beneficiario_nombre||'—'}</td>
-                <td style="padding:6px 8px;text-align:right;font-weight:800;border-right:1px solid #bfdbfe">${fmt(c.monto)}</td>
-                <td style="padding:6px 8px;color:var(--muted)">${c.concepto||''}</td>
+            <tbody>
+              ${g.cheques.map((c, idx) => `
+              <tr>
+                ${idx === 0 ? `<td rowspan="${g.cheques.length}" style="background:${col.bg};color:${col.txt};text-align:center;font-weight:800;border:1px solid #7f7f7f;font-size:12px">${g.empresa}</td>` : ''}
+                <td style="padding:5px 8px;text-align:center;border:1px solid #7f7f7f">${c.no_cheque}</td>
+                <td style="padding:5px 10px;border:1px solid #7f7f7f">${c.beneficiario_nombre||'—'}</td>
+                <td style="padding:5px 8px;text-align:right;border:1px solid #7f7f7f"><span style="float:left">$</span>${new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}).format(c.monto)}</td>
+                <td style="padding:5px 10px;border:1px solid #7f7f7f">${c.concepto||''}</td>
               </tr>`).join('')}
-              <tr style="background:#fef3c7;border-top:1.5px solid #d97706">
-                <td colspan="2" style="padding:8px 12px;text-align:right;font-weight:900;color:#78350f">TOTAL DE ${g.banco}:</td>
-                <td style="padding:8px;text-align:right;font-weight:900;color:#78350f">${fmt(g.subtotal)}</td>
-                <td></td>
+              <tr style="background:${col.totBg};font-weight:900">
+                <td style="padding:5px 8px;text-align:center;border:1px solid #7f7f7f"></td>
+                <td style="padding:5px 8px;text-align:center;border:1px solid #7f7f7f">${g.cheques.length}</td>
+                <td style="border:1px solid #7f7f7f"></td>
+                <td style="padding:5px 8px;text-align:right;border:1px solid #7f7f7f"><span style="float:left">$</span>${new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}).format(g.subtotal)}</td>
+                <td style="border:1px solid #7f7f7f"></td>
               </tr>
             </tbody>
           </table>
-        </div>`).join('')}
-      <div style="background:#166534;color:#fff;padding:14px 18px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;margin-top:20px">
-        <div style="font-size:14px;font-weight:900;letter-spacing:2px">IMPORTE TOTAL</div>
-        <div style="font-size:22px;font-weight:900;font-family:monospace">${fmt(r.importe_total)}</div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:36px">
-        <div style="border:1.5px dashed #94a3b8;padding:20px;text-align:center;border-radius:8px">
-          <div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:40px">Firma de Recepción de Cheques</div>
-          <div style="border-top:1.5px solid #111;padding-top:6px;font-size:11px;color:var(--muted)">NOMBRE Y FIRMA</div>
+        </div>`;
+      }).join('')}
+
+      <!-- Subtotales por banco -->
+      <div style="max-width:400px;margin:32px 0 20px 60px">
+        ${r.grupos.map((g, i) => {
+          const col = colores[i % colores.length];
+          return `<div style="display:grid;grid-template-columns:1fr 150px;gap:12px;align-items:center;padding:6px 0">
+            <div style="font-style:italic;font-weight:800">TOTAL DE ${g.banco}</div>
+            <div style="background:${col.totBg};padding:6px 12px;text-align:right;font-weight:900;font-style:italic;border:1px solid #7f7f7f"><span style="float:left">$</span>${new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}).format(g.subtotal)}</div>
+          </div>`;
+        }).join('')}
+        <div style="display:grid;grid-template-columns:1fr 150px;gap:12px;align-items:center;padding:14px 0 6px;border-top:2px solid transparent">
+          <div style="font-style:italic;font-weight:900;text-decoration:underline;font-size:14px">IMPORTE TOTAL</div>
+          <div style="padding:6px 12px;text-align:right;font-weight:900;font-size:14px"><span style="float:left">$</span>${new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}).format(r.importe_total)}</div>
         </div>
-        <div style="border:1.5px dashed #94a3b8;padding:20px;text-align:center;border-radius:8px">
-          <div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:40px">Firma de Recepción de Dinero</div>
-          <div style="border-top:1.5px solid #111;padding-top:6px;font-size:11px;color:var(--muted)">NOMBRE Y FIRMA</div>
+      </div>
+
+      <!-- Firmas -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:60px;margin-top:60px;padding-top:20px">
+        <div style="text-align:left">
+          <div style="border-top:1.2px solid #111;padding-top:4px;font-size:11px;font-weight:700">FIRMA DE RECEPCIÓN DE CHEQUES</div>
+          ${primerBenef ? `<div style="font-size:11px;font-weight:800;margin-top:2px">${primerBenef}</div>` : '<div style="font-size:11px;color:var(--muted);margin-top:2px">&nbsp;</div>'}
+        </div>
+        <div style="text-align:left">
+          <div style="border-top:1.2px solid #111;padding-top:4px;font-size:11px;font-weight:700">FIRMA DE RECEPCIÓN DE DINERO</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">&nbsp;</div>
         </div>
       </div>
     </div>`;
 }
 
+// Envío por WhatsApp — formato de texto legible
+function whatsappReporteACobrar() {
+  const r = window._repACobrar;
+  if (!r || !r.grupos.length) return toast('Primero genera el reporte con filtros.', 'warn');
+  const fmtF = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso+'T12:00:00');
+    const mes = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][d.getMonth()];
+    return `${String(d.getDate()).padStart(2,'0')}-${mes}-${String(d.getFullYear()).slice(2)}`;
+  };
+  const fechaTxt = r.fecha_reporte ? fmtF(r.fecha_reporte) : (r.desde && r.hasta ? `${fmtF(r.desde)} al ${fmtF(r.hasta)}` : (r.desde ? `desde ${fmtF(r.desde)}` : ''));
+  const fmtMon = (n) => '$' + new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
+  const LINE = '━━━━━━━━━━━━━━━━━━━━━━';
+
+  let t = '';
+  t += `*🏦 CHEQUES A COBRAR — ${fechaTxt}*\n`;
+  t += `${LINE}\n\n`;
+  r.grupos.forEach(g => {
+    t += `*${g.banco} — ${g.empresa}*\n`;
+    t += `${LINE}\n`;
+    g.cheques.forEach(c => {
+      t += `• N° *${c.no_cheque}*\n`;
+      t += `  ${c.beneficiario_nombre||'—'}\n`;
+      t += `  ${fmtMon(c.monto)}${c.concepto?' · '+c.concepto:''}\n`;
+    });
+    t += `📌 *TOTAL ${g.banco}: ${fmtMon(g.subtotal)}*  (${g.cheques.length} cheque${g.cheques.length!==1?'s':''})\n\n`;
+  });
+  t += `${LINE}\n`;
+  t += `💰 *IMPORTE TOTAL: ${fmtMon(r.importe_total)}*\n`;
+  t += `${LINE}\n\n`;
+  t += `_Grupo Management · ${new Date().toLocaleDateString('es-MX')}_`;
+
+  window.open(`https://wa.me/?text=${encodeURIComponent(t)}`, '_blank');
+}
+
 function imprimirReporteACobrar() {
   const r = window._repACobrar;
   if (!r || !r.grupos.length) return toast('Primero genera el reporte con filtros.', 'warn');
-  const hoy = new Date().toLocaleString('es-MX', { day:'2-digit', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' });
-  const fechaTxt = r.fecha_reporte ? fmtDate(r.fecha_reporte) : (r.desde && r.hasta ? `${fmtDate(r.desde)} al ${fmtDate(r.hasta)}` : (r.desde ? `desde ${fmtDate(r.desde)}` : ''));
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Cheques a Cobrar</title>
+  const fmtF = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso+'T12:00:00');
+    const mes = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][d.getMonth()];
+    return `${String(d.getDate()).padStart(2,'0')}-${mes}-${String(d.getFullYear()).slice(2)}`;
+  };
+  const fmtMon = (n) => '$&nbsp;' + new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
+  const fechaTxt = r.fecha_reporte ? fmtF(r.fecha_reporte) : (r.desde && r.hasta ? `${fmtF(r.desde)} al ${fmtF(r.hasta)}` : (r.desde ? `desde ${fmtF(r.desde)}` : ''));
+  const colores = [
+    { hd:'#4472c4', bg:'#fff2cc' },   // BANORTE — LEX amarillo
+    { hd:'#4472c4', bg:'#d9e2f3' }    // BANCOMER — LEX azul claro
+  ];
+  const primerBenef = r.grupos[0]?.cheques?.[0]?.beneficiario_nombre || '';
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Cheques a Cobrar — ${fechaTxt}</title>
 <style>
-  @page { size: A4 portrait; margin: 10mm }
+  @page { size: A4 portrait; margin: 12mm }
   * { box-sizing:border-box; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important }
-  body { font-family:'Segoe UI',Arial,sans-serif; color:#111; padding:10px; font-size:11px }
-  .head { text-align:center; border-bottom:2px solid #111; padding-bottom:8px; margin-bottom:14px }
-  .head h1 { margin:0; font-size:22px; letter-spacing:3px }
-  .head .sub { font-size:11px; color:#555; margin-top:3px }
-  .grupo { margin-bottom:20px; page-break-inside:avoid }
-  .grupo .banco-head { background:#1e3a8a; color:#fff; padding:7px 12px; font-weight:900; font-size:12px; letter-spacing:1.5px; border-radius:5px 5px 0 0 }
-  table { width:100%; border-collapse:collapse; font-size:11px; border:1.5px solid #1e3a8a }
-  thead { background:#dbeafe }
-  th, td { padding:5px 8px; border:1px solid #bfdbfe }
-  th { font-weight:800; text-align:center }
-  td.no { text-align:center; font-family:monospace; font-weight:800 }
-  td.ben { font-weight:700 }
-  td.monto { text-align:right; font-weight:800 }
-  td.concepto { color:#555 }
-  .subtotal { background:#fef3c7; font-weight:900; color:#78350f }
-  .subtotal td { border-top:2px solid #d97706 }
-  .total { background:#166534; color:#fff; padding:12px 16px; border-radius:6px; display:flex; justify-content:space-between; margin-top:16px; font-weight:900 }
-  .total .l { font-size:12px; letter-spacing:2px }
-  .total .n { font-size:18px; font-family:monospace }
-  .firmas { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:36px }
-  .firma { border:1.5px dashed #94a3b8; padding:16px; text-align:center; border-radius:6px }
-  .firma .l { font-size:9.5px; font-weight:800; color:#555; text-transform:uppercase; letter-spacing:1.5px; margin-bottom:40px }
-  .firma .line { border-top:1.2px solid #111; padding-top:5px; font-size:9px; color:#666 }
-  .foot { margin-top:16px; text-align:center; font-size:8px; color:#999 }
+  body { font-family:'Calibri','Segoe UI',Arial,sans-serif; color:#111; padding:0; margin:0; font-size:11px }
+  .head { display:flex; justify-content:space-between; align-items:center; background:#c6efce; border:1.2px solid #92d050; padding:10px 18px; margin-bottom:18px }
+  .head .t { font-size:14px; font-weight:900; letter-spacing:.5px }
+  .head .f { font-size:12px; font-weight:800 }
+  table { width:100%; border-collapse:collapse; font-size:11px; border:1px solid #7f7f7f; margin-bottom:14px; page-break-inside:avoid }
+  table th, table td { border:1px solid #7f7f7f; padding:4px 8px }
+  table th { background:#4472c4; color:#fff; font-weight:900; text-align:center; font-size:11px }
+  .col-banco { text-align:center; font-weight:800; font-size:12px; vertical-align:middle }
+  .no { text-align:center }
+  .monto { text-align:right; font-weight:700 }
+  .monto .s { float:left }
+  .concepto { }
+  .subrow { font-weight:900 }
+  .subrow td { padding:4px 8px }
+  .subtotales { max-width:400px; margin:26px 0 0 60px }
+  .sub-row { display:grid; grid-template-columns:1fr 150px; gap:12px; align-items:center; padding:5px 0 }
+  .sub-row .l { font-style:italic; font-weight:800 }
+  .sub-row .m { padding:5px 10px; text-align:right; font-weight:900; font-style:italic; border:1px solid #7f7f7f }
+  .sub-row .m .s { float:left }
+  .imp-total { display:grid; grid-template-columns:1fr 150px; gap:12px; align-items:center; padding:12px 0 6px }
+  .imp-total .l { font-style:italic; font-weight:900; text-decoration:underline; font-size:13px }
+  .imp-total .m { padding:5px 10px; text-align:right; font-weight:900; font-size:13px }
+  .imp-total .m .s { float:left }
+  .firmas { display:grid; grid-template-columns:1fr 1fr; gap:60px; margin-top:50px; padding:0 20px }
+  .firma { text-align:left }
+  .firma .line { border-top:1.2px solid #111; padding-top:4px; font-size:10.5px; font-weight:700 }
+  .firma .n { font-size:10.5px; font-weight:800; margin-top:2px }
   .actions { position:fixed; top:6px; right:6px; display:flex; gap:6px; z-index:10 }
   .actions button { padding:8px 12px; border-radius:5px; border:none; font-weight:800; cursor:pointer; font-size:11px }
   .actions .p { background:#dc2626; color:#fff }
   .actions .c { background:#e5e7eb }
-  @media print { .actions { display:none } }
+  @media print { .actions { display:none } body { padding:0 } }
 </style></head><body>
   <div class="actions">
     <button class="p" onclick="window.print()">🖨 Imprimir</button>
     <button class="c" onclick="window.close()">Cerrar</button>
   </div>
-  <div class="head"><h1>CHEQUES A COBRAR:</h1><div class="sub">${fechaTxt.toUpperCase()} · GRUPO MANAGEMENT</div></div>
-  ${r.grupos.map(g => `
-    <div class="grupo">
-      <div class="banco-head">${g.banco} — ${g.empresa}</div>
-      <table>
-        <thead><tr>
-          <th style="width:60px">NO. DE</th>
-          <th style="text-align:left">NOMBRE BENEFICIARIO</th>
-          <th style="width:110px">MONTO</th>
-          <th style="text-align:left">CONCEPTO</th>
-        </tr></thead>
-        <tbody>
-          ${g.cheques.map(c => `<tr>
-            <td class="no">${c.no_cheque}</td>
-            <td class="ben">${c.beneficiario_nombre||'—'}</td>
-            <td class="monto">${fmt(c.monto)}</td>
-            <td class="concepto">${c.concepto||''}</td>
-          </tr>`).join('')}
-          <tr class="subtotal">
-            <td colspan="2" style="text-align:right">TOTAL DE ${g.banco}:</td>
-            <td class="monto">${fmt(g.subtotal)}</td>
-            <td></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>`).join('')}
-  <div class="total"><div class="l">IMPORTE TOTAL</div><div class="n">${fmt(r.importe_total)}</div></div>
-  <div class="firmas">
-    <div class="firma"><div class="l">Firma de Recepción de Cheques</div><div class="line">NOMBRE Y FIRMA</div></div>
-    <div class="firma"><div class="l">Firma de Recepción de Dinero</div><div class="line">NOMBRE Y FIRMA</div></div>
+  <div class="head"><div class="t">CHEQUES A COBRAR:</div><div class="f">${fechaTxt}</div></div>
+
+  ${r.grupos.map((g, i) => {
+    const col = colores[i % colores.length];
+    return `
+    <table>
+      <thead><tr>
+        <th style="background:${col.hd};width:110px">${g.banco}</th>
+        <th style="background:${col.hd};width:80px">No. DE</th>
+        <th style="background:${col.hd}">NOMBRE BENEFICIARIO</th>
+        <th style="background:${col.hd};width:120px">MONTO</th>
+        <th style="background:${col.hd}">CONCEPTO</th>
+      </tr></thead>
+      <tbody>
+        ${g.cheques.map((c, idx) => `
+        <tr>
+          ${idx === 0 ? `<td rowspan="${g.cheques.length}" class="col-banco" style="background:${col.bg}">${g.empresa}</td>` : ''}
+          <td class="no">${c.no_cheque}</td>
+          <td>${c.beneficiario_nombre||'—'}</td>
+          <td class="monto"><span class="s">$</span>${new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}).format(c.monto)}</td>
+          <td class="concepto">${c.concepto||''}</td>
+        </tr>`).join('')}
+        <tr class="subrow" style="background:${col.bg}">
+          <td></td>
+          <td class="no">${g.cheques.length}</td>
+          <td></td>
+          <td class="monto"><span class="s">$</span>${new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}).format(g.subtotal)}</td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>`;
+  }).join('')}
+
+  <div class="subtotales">
+    ${r.grupos.map((g, i) => {
+      const col = colores[i % colores.length];
+      return `<div class="sub-row">
+        <div class="l">TOTAL DE ${g.banco}</div>
+        <div class="m" style="background:${col.bg}"><span class="s">$</span>${new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}).format(g.subtotal)}</div>
+      </div>`;
+    }).join('')}
+    <div class="imp-total">
+      <div class="l">IMPORTE TOTAL</div>
+      <div class="m"><span class="s">$</span>${new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}).format(r.importe_total)}</div>
+    </div>
   </div>
-  <div class="foot">Impreso ${hoy}</div>
+
+  <div class="firmas">
+    <div class="firma">
+      <div class="line">FIRMA DE RECEPCIÓN DE CHEQUES</div>
+      ${primerBenef ? `<div class="n">${primerBenef}</div>` : '<div class="n">&nbsp;</div>'}
+    </div>
+    <div class="firma">
+      <div class="line">FIRMA DE RECEPCIÓN DE DINERO</div>
+      <div class="n">&nbsp;</div>
+    </div>
+  </div>
   <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400));<\/script>
 </body></html>`;
   const w = window.open('','_blank','width=900,height=1100');
