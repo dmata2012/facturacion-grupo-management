@@ -659,6 +659,10 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-cc-permisos"><div class="modal" id="modal-cc-permisos-body"></div></div>
 <div class="overlay" id="modal-asist-cell"><div class="modal modal-sm" id="modal-asist-cell-body"></div></div>
 <div class="overlay" id="modal-banco"><div class="modal" style="width:min(680px,96vw)" id="modal-banco-body"></div></div>
+<div class="overlay" id="modal-cheque"><div class="modal" style="width:min(720px,96vw)" id="modal-cheque-body"></div></div>
+<div class="overlay" id="modal-mov-ec"><div class="modal modal-sm" id="modal-mov-ec-body"></div></div>
+<div class="overlay" id="modal-empresas-bnc"><div class="modal modal-sm" id="modal-empresas-bnc-body"></div></div>
+<div class="overlay" id="modal-benef-bnc"><div class="modal" style="width:min(640px,96vw)" id="modal-benef-bnc-body"></div></div>
 <div class="overlay" id="modal-notif-ch"><div class="modal" style="width:min(720px,96vw)" id="modal-notif-ch-body"></div></div>
 <div class="overlay" id="modal-notif-show"><div class="modal modal-sm" id="modal-notif-show-body"></div></div>
 <div class="overlay" id="modal-camara-ch" style="align-items:center;justify-content:center">
@@ -1002,30 +1006,103 @@ function nav(page) {
   if (pages[page]) pages[page]();
 }
 
-// ══ BANCOS — Alta y gestión de cuentas ══════════════════
+// ══ BANCOS — Gestión completa (cuentas · cheques · reporte · conciliación) ══
 async function bancos() {
   $('content').innerHTML = `
     <div class="page-header">
       <div class="page-header-left">
-        <div class="page-title">🏦 Cuentas Bancarias</div>
-        <div class="page-sub">Alta, edición y consulta de cuentas de la empresa</div>
-      </div>
-      ${canWrite()?`<button class="btn bs" onclick="openCuentaBanco()">+ Nueva cuenta</button>`:''}
-    </div>
-
-    <div class="card" style="margin-bottom:14px">
-      <div class="filters">
-        <input id="bnc-buscar" placeholder="🔍 Buscar por banco, alias, titular, N° cuenta o CLABE..." oninput="cargarCuentasBanco()" style="flex:1;min-width:260px">
-        <label style="font-size:11px;font-weight:700;color:var(--gray-d)">ESTADO</label>
-        <select id="bnc-activa" onchange="cargarCuentasBanco()">
-          <option value="true" selected>Solo activas</option>
-          <option value="false">Solo inactivas</option>
-          <option value="">Todas</option>
-        </select>
+        <div class="page-title">🏦 Bancos</div>
+        <div class="page-sub">Cuentas · Cheques emitidos · Reporte a cobrar · Conciliación</div>
       </div>
     </div>
+    <div class="tabs">
+      <div class="tab active" onclick="showTab(this,'bnc-tab-cuentas')">🏦 Cuentas</div>
+      <div class="tab" onclick="showTab(this,'bnc-tab-cheques');cargarCheques()">📝 Cheques Emitidos</div>
+      <div class="tab" onclick="showTab(this,'bnc-tab-reporte');cargarReporteACobrar()">📋 Reporte a Cobrar</div>
+      <div class="tab" onclick="showTab(this,'bnc-tab-concil');cargarConciliacion()">⚖ Conciliación</div>
+    </div>
 
-    <div id="bnc-lista"><p class="empty">Cargando...</p></div>`;
+    <!-- CUENTAS -->
+    <div class="tab-panel active" id="bnc-tab-cuentas">
+      <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:10px">
+        ${canWrite()?`<button class="btn bo bsm" onclick="gestionEmpresasBanco()">🏢 Empresas</button>`:''}
+        ${canWrite()?`<button class="btn bs bsm" onclick="openCuentaBanco()">+ Nueva cuenta</button>`:''}
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <div class="filters">
+          <input id="bnc-buscar" placeholder="🔍 Buscar por banco, alias, titular, N° cuenta o CLABE..." oninput="cargarCuentasBanco()" style="flex:1;min-width:260px">
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d)">ESTADO</label>
+          <select id="bnc-activa" onchange="cargarCuentasBanco()">
+            <option value="true" selected>Solo activas</option>
+            <option value="false">Solo inactivas</option>
+            <option value="">Todas</option>
+          </select>
+        </div>
+      </div>
+      <div id="bnc-lista"><p class="empty">Cargando...</p></div>
+    </div>
+
+    <!-- CHEQUES -->
+    <div class="tab-panel" id="bnc-tab-cheques">
+      <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:10px">
+        ${canWrite()?`<button class="btn bo bsm" onclick="gestionBeneficiariosBanco()">👤 Beneficiarios</button>`:''}
+        ${canWrite()?`<button class="btn bs bsm" onclick="openCheque()">+ Nuevo cheque</button>`:''}
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <div class="filters">
+          <input id="chq-buscar" placeholder="🔍 Buscar por N° cheque, concepto o beneficiario..." oninput="cargarCheques()" style="flex:1;min-width:260px">
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d)">ESTATUS</label>
+          <select id="chq-estatus" onchange="cargarCheques()">
+            <option value="">Todos</option>
+            <option value="EMITIDO">Emitido</option>
+            <option value="ENTREGADO">Entregado</option>
+            <option value="COBRADO">Cobrado</option>
+            <option value="CANCELADO">Cancelado</option>
+          </select>
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d)">DESDE</label>
+          <input type="date" id="chq-desde" onchange="cargarCheques()">
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d)">HASTA</label>
+          <input type="date" id="chq-hasta" onchange="cargarCheques()">
+        </div>
+      </div>
+      <div id="chq-lista"><p class="empty">Selecciona filtros...</p></div>
+    </div>
+
+    <!-- REPORTE A COBRAR -->
+    <div class="tab-panel" id="bnc-tab-reporte">
+      <div class="card" style="margin-bottom:14px">
+        <div class="filters">
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d)">FECHA REPORTE</label>
+          <input type="date" id="rep-fecha" onchange="cargarReporteACobrar()">
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d)">O RANGO — DESDE</label>
+          <input type="date" id="rep-desde" onchange="cargarReporteACobrar()">
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d)">HASTA</label>
+          <input type="date" id="rep-hasta" onchange="cargarReporteACobrar()">
+          <button class="btn bs bsm" onclick="imprimirReporteACobrar()" style="margin-left:auto">🖨 Imprimir Reporte</button>
+        </div>
+      </div>
+      <div id="rep-body"><p class="empty">Selecciona una fecha o rango...</p></div>
+    </div>
+
+    <!-- CONCILIACIÓN -->
+    <div class="tab-panel" id="bnc-tab-concil">
+      <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:10px">
+        ${canWrite()?`<button class="btn bo bsm" onclick="openMovimientoEC()">+ Movimiento EC manual</button>`:''}
+        ${canWrite()?`<button class="btn bs bsm" onclick="ejecutarConciliacion()">⚡ Ejecutar Conciliación Automática</button>`:''}
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <div class="filters">
+          <select id="conc-cuenta" onchange="cargarConciliacion()">
+            <option value="">Todas las cuentas</option>
+          </select>
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d)">DESDE</label>
+          <input type="date" id="conc-desde" onchange="cargarConciliacion()">
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d)">HASTA</label>
+          <input type="date" id="conc-hasta" onchange="cargarConciliacion()">
+        </div>
+      </div>
+      <div id="conc-body"><p class="empty">Registra movimientos del estado de cuenta y ejecuta la conciliación automática.</p></div>
+    </div>`;
   cargarCuentasBanco();
 }
 
@@ -1122,8 +1199,10 @@ function renderCuentasBanco(cuentas) {
 async function openCuentaBanco(id) {
   const c = id ? await api(`/bancos/cuentas/${id}`) : {
     banco:'', sucursal:'', alias:'', titular:'', tipo:'cheques',
-    numero_cuenta:'', clabe:'', tarjeta:'', moneda:'MXN', saldo_inicial:0, notas:'', activa:true
+    numero_cuenta:'', clabe:'', tarjeta:'', moneda:'MXN', saldo_inicial:0, notas:'', activa:true, empresa_id:null
   };
+  let empresas = [];
+  try { empresas = await api('/bancos/empresas'); } catch(e) {}
   $('modal-banco-body').innerHTML = `
     <div style="margin:-28px -28px 20px;padding:20px 28px;background:linear-gradient(135deg,#1e3a8a,#3b82f6);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
       <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">${id?'Editar':'Nueva'} cuenta bancaria</div>
@@ -1141,6 +1220,12 @@ async function openCuentaBanco(id) {
       </div>
       <div class="fi"><label>Titular / Razón social</label>
         <input id="bc-titular" placeholder="Nombre de la empresa o persona titular" value="${c.titular||''}">
+      </div>
+      <div class="fi"><label>Empresa <span style="color:var(--muted);font-weight:400;font-size:10.5px">(agrupa en reporte "Cheques a cobrar")</span></label>
+        <select id="bc-empresa">
+          <option value="">— Sin empresa —</option>
+          ${empresas.map(e => `<option value="${e.id}" ${c.empresa_id==e.id?'selected':''}>${e.nombre}</option>`).join('')}
+        </select>
       </div>
       <div class="fi"><label>Tipo de cuenta</label>
         <select id="bc-tipo">
@@ -1203,7 +1288,8 @@ async function guardarCuentaBanco(id) {
     tarjeta      : $('bc-tarjeta').value.trim(),
     saldo_inicial: parseFloat($('bc-saldo').value) || 0,
     notas        : $('bc-notas').value.trim(),
-    activa       : $('bc-activa').checked
+    activa       : $('bc-activa').checked,
+    empresa_id   : $('bc-empresa').value || null
   };
   if (!body.banco) return toast('El nombre del banco es requerido.', 'warn');
   if (body.clabe && !/^\d{18}$/.test(body.clabe)) return toast('La CLABE debe tener 18 dígitos.', 'warn');
@@ -1222,6 +1308,503 @@ async function eliminarCuentaBanco(id, alias) {
     await api(`/bancos/cuentas/${id}`, { method:'DELETE' });
     toast('Cuenta dada de baja.');
     cargarCuentasBanco();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+// ═══ EMPRESAS ═══════════════════════════════════════
+async function gestionEmpresasBanco() {
+  const emps = await api('/bancos/empresas');
+  $('modal-empresas-bnc-body').innerHTML = `
+    <h4>🏢 Empresas</h4>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Las empresas agrupan cuentas bancarias en el reporte "Cheques a cobrar" (ej: LEX). Nombres se guardan en mayúsculas.</p>
+    <div class="fg" style="gap:8px;margin-bottom:12px">
+      <div class="fi full"><label>Nueva empresa</label>
+        <div style="display:flex;gap:6px">
+          <input id="emp-nuevo" placeholder="Ej: LEX" style="flex:1">
+          <button class="btn bs bsm" onclick="crearEmpresaBanco()">+ Agregar</button>
+        </div>
+      </div>
+    </div>
+    <table style="width:100%;font-size:13px;border-collapse:collapse">
+      <thead><tr style="border-bottom:1.5px solid var(--border)"><th style="text-align:left;padding:6px">Empresa</th><th style="padding:6px"></th></tr></thead>
+      <tbody>${emps.map(e => `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px;font-weight:700">${e.nombre}</td>
+        <td style="padding:8px;text-align:right">${canAdmin()?`<button class="btn bd bsm" onclick="eliminarEmpresaBanco(${e.id},'${e.nombre.replace(/'/g,"\\'")}')">🗑</button>`:''}</td>
+      </tr>`).join('') || '<tr><td colspan="2" style="padding:12px;text-align:center;color:var(--muted)">Sin empresas</td></tr>'}</tbody>
+    </table>
+    <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-empresas-bnc')">Cerrar</button></div>`;
+  openModal('modal-empresas-bnc');
+}
+
+async function crearEmpresaBanco() {
+  const nombre = $('emp-nuevo').value.trim();
+  if (!nombre) return toast('Escribe un nombre.', 'warn');
+  try { await api('/bancos/empresas', { method:'POST', body: JSON.stringify({ nombre }) }); toast('Empresa creada.'); gestionEmpresasBanco(); }
+  catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarEmpresaBanco(id, nombre) {
+  if (!await confirm2(`¿Eliminar empresa "${nombre}"?`)) return;
+  try { await api(`/bancos/empresas/${id}`, { method:'DELETE' }); toast('Empresa eliminada.'); gestionEmpresasBanco(); }
+  catch(e) { toast(e.message, 'err'); }
+}
+
+// ═══ BENEFICIARIOS ══════════════════════════════════
+async function gestionBeneficiariosBanco() {
+  const bs = await api('/bancos/beneficiarios');
+  $('modal-benef-bnc-body').innerHTML = `
+    <h4>👤 Beneficiarios de cheques</h4>
+    <div class="fg" style="gap:8px;margin-bottom:12px">
+      <div class="fi"><label>Nombre completo</label><input id="ben-nombre" placeholder="Ej: SALVADOR QUIROZ MORALES"></div>
+      <div class="fi"><label>RFC (opcional)</label><input id="ben-rfc" placeholder="QUIS800101ABC" maxlength="13" style="text-transform:uppercase"></div>
+      <div class="fi full" style="text-align:right"><button class="btn bs bsm" onclick="crearBeneficiarioBanco()">+ Agregar beneficiario</button></div>
+    </div>
+    <div class="tscroll" style="max-height:400px;overflow:auto">
+      <table style="width:100%;font-size:13px;border-collapse:collapse">
+        <thead style="background:var(--bg-alt);position:sticky;top:0"><tr>
+          <th style="text-align:left;padding:6px 8px">Nombre completo</th>
+          <th style="padding:6px 8px">RFC</th>
+          <th style="padding:6px 8px"></th>
+        </tr></thead>
+        <tbody>${bs.map(b => `<tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:8px;font-weight:700">${b.nombre_completo}</td>
+          <td style="padding:8px;font-family:monospace">${b.rfc||'—'}</td>
+          <td style="padding:8px;text-align:right">${canAdmin()?`<button class="btn bd bsm" onclick="eliminarBeneficiarioBanco(${b.id},'${(b.nombre_completo||'').replace(/'/g,"\\'")}')">🗑</button>`:''}</td>
+        </tr>`).join('') || '<tr><td colspan="3" style="padding:12px;text-align:center;color:var(--muted)">Sin beneficiarios</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-benef-bnc')">Cerrar</button></div>`;
+  openModal('modal-benef-bnc');
+}
+
+async function crearBeneficiarioBanco() {
+  const nombre_completo = $('ben-nombre').value.trim();
+  const rfc = $('ben-rfc').value.trim();
+  if (!nombre_completo) return toast('Nombre requerido.', 'warn');
+  try { await api('/bancos/beneficiarios', { method:'POST', body: JSON.stringify({ nombre_completo, rfc }) }); toast('Beneficiario creado.'); gestionBeneficiariosBanco(); }
+  catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarBeneficiarioBanco(id, nombre) {
+  if (!await confirm2(`¿Eliminar beneficiario "${nombre}"?`)) return;
+  try { await api(`/bancos/beneficiarios/${id}`, { method:'DELETE' }); toast('Beneficiario eliminado.'); gestionBeneficiariosBanco(); }
+  catch(e) { toast(e.message, 'err'); }
+}
+
+// ═══ CHEQUES ═════════════════════════════════════════
+const ESTATUS_BADGE = {
+  EMITIDO:   { bg:'#dbeafe', fg:'#1e40af', txt:'📝 Emitido' },
+  ENTREGADO: { bg:'#fef3c7', fg:'#92400e', txt:'📬 Entregado' },
+  COBRADO:   { bg:'#dcfce7', fg:'#166534', txt:'✅ Cobrado' },
+  CANCELADO: { bg:'#f1f5f9', fg:'#64748b', txt:'⏸ Cancelado' }
+};
+
+async function cargarCheques() {
+  const buscar = $('chq-buscar')?.value?.trim() || '';
+  const estatus = $('chq-estatus')?.value || '';
+  const desde = $('chq-desde')?.value || '';
+  const hasta = $('chq-hasta')?.value || '';
+  const p = [];
+  if (buscar) p.push(`buscar=${encodeURIComponent(buscar)}`);
+  if (estatus) p.push(`estatus=${estatus}`);
+  if (desde) p.push(`desde=${desde}`);
+  if (hasta) p.push(`hasta=${hasta}`);
+  try {
+    const chs = await api(`/bancos/cheques${p.length?'?'+p.join('&'):''}`);
+    renderCheques(chs);
+  } catch(e) { $('chq-lista').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function renderCheques(chs) {
+  const cont = $('chq-lista');
+  if (!chs.length) { cont.innerHTML = '<p class="empty">Sin cheques que coincidan con los filtros.</p>'; return; }
+  const total = chs.reduce((a,c) => a + parseFloat(c.monto), 0);
+  cont.innerHTML = `
+    <div class="tscroll"><table>
+      <thead><tr>
+        <th>Fecha</th><th>Banco / Cuenta</th><th>N°</th><th>Beneficiario</th>
+        <th>Concepto</th><th>Monto</th><th>Estatus</th><th></th>
+      </tr></thead>
+      <tbody>${chs.map(c => {
+        const b = ESTATUS_BADGE[c.estatus] || ESTATUS_BADGE.EMITIDO;
+        return `<tr>
+          <td>${fmtDate(c.fecha_emision)}</td>
+          <td><div style="font-weight:700">${c.banco}</div><div style="font-size:10px;color:var(--muted)">${c.cuenta_alias||''}${c.empresa_nombre?' · '+c.empresa_nombre:''}</div></td>
+          <td style="font-family:monospace;font-weight:800">${c.no_cheque}</td>
+          <td>${c.beneficiario_nombre||'—'}</td>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c.concepto||''}">${c.concepto||'—'}</td>
+          <td style="text-align:right;font-weight:800">${fmt(c.monto)}</td>
+          <td><span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:10.5px;font-weight:800;background:${b.bg};color:${b.fg}">${b.txt}</span></td>
+          <td style="white-space:nowrap">
+            ${canWrite()?`<button class="btn bg bsm" onclick="openCheque(${c.id})" title="Editar">✏️</button>`:''}
+            ${canAdmin()?`<button class="btn bd bsm" onclick="eliminarCheque(${c.id})" title="Eliminar">🗑</button>`:''}
+          </td>
+        </tr>`;
+      }).join('')}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--dark);background:var(--bg-alt);font-weight:900">
+        <td colspan="5" style="padding:10px;text-align:right">TOTAL:</td>
+        <td style="text-align:right;padding:10px">${fmt(total)}</td>
+        <td colspan="2"></td>
+      </tr></tfoot>
+    </table></div>`;
+}
+
+async function openCheque(id) {
+  const [cuentas, benefs] = await Promise.all([
+    api('/bancos/cuentas?activa=true'),
+    api('/bancos/beneficiarios')
+  ]);
+  const c = id ? await api(`/bancos/cheques?buscar=`).then(r => r.find(x=>x.id===id)) : {
+    cuenta_bancaria_id:'', beneficiario_id:'', no_cheque:'',
+    fecha_emision: new Date().toISOString().slice(0,10),
+    monto:0, concepto:'', estatus:'EMITIDO',
+    recibio_cheque_nombre:'', recibio_cheque_fecha:'',
+    recibio_dinero_nombre:'', recibio_dinero_fecha:''
+  };
+  $('modal-cheque-body').innerHTML = `
+    <div style="margin:-28px -28px 20px;padding:20px 28px;background:linear-gradient(135deg,#1e3a8a,#3b82f6);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">${id?'Editar cheque':'Nuevo cheque emitido'}</div>
+      <div style="font-size:20px;font-weight:900;margin-top:4px">📝 ${id?'#'+c.no_cheque:'Registro de cheque'}</div>
+    </div>
+    <div class="fg" style="gap:12px">
+      <div class="fi"><label>Cuenta bancaria <span style="color:var(--red)">*</span></label>
+        <select id="ch-cuenta">
+          <option value="">— Seleccionar —</option>
+          ${cuentas.map(cu => `<option value="${cu.id}" ${c.cuenta_bancaria_id==cu.id?'selected':''}>${cu.banco}${cu.empresa_nombre?' — '+cu.empresa_nombre:''} · ${cu.alias||cu.numero_cuenta||''}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fi"><label>N° de cheque <span style="color:var(--red)">*</span></label>
+        <input id="ch-numero" value="${c.no_cheque||''}" placeholder="Ej: 1139" style="font-family:monospace;font-weight:800">
+      </div>
+      <div class="fi"><label>Fecha de emisión <span style="color:var(--red)">*</span></label>
+        <input type="date" id="ch-fecha" value="${(c.fecha_emision||'').slice(0,10)}">
+      </div>
+      <div class="fi"><label>Monto <span style="color:var(--red)">*</span></label>
+        <input type="number" step="0.01" id="ch-monto" value="${c.monto||0}">
+      </div>
+      <div class="fi full"><label>Beneficiario</label>
+        <select id="ch-benef">
+          <option value="">— Sin beneficiario (o agrega uno primero) —</option>
+          ${benefs.map(b => `<option value="${b.id}" ${c.beneficiario_id==b.id?'selected':''}>${b.nombre_completo}${b.rfc?' · '+b.rfc:''}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fi full"><label>Concepto</label>
+        <input id="ch-concepto" value="${c.concepto||''}" placeholder="Ej: REEMBOLSO TRC JULIO 10/12" maxlength="300">
+      </div>
+      <div class="fi"><label>Estatus</label>
+        <select id="ch-estatus">
+          ${['EMITIDO','ENTREGADO','COBRADO','CANCELADO'].map(s => `<option value="${s}" ${c.estatus===s?'selected':''}>${ESTATUS_BADGE[s].txt}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fi"><label>Recibió cheque (nombre)</label>
+        <input id="ch-rec-cheque-n" value="${c.recibio_cheque_nombre||''}">
+      </div>
+      <div class="fi"><label>Fecha recepción cheque</label>
+        <input type="date" id="ch-rec-cheque-f" value="${(c.recibio_cheque_fecha||'').slice(0,10)}">
+      </div>
+      <div class="fi"><label>Recibió dinero (nombre)</label>
+        <input id="ch-rec-dinero-n" value="${c.recibio_dinero_nombre||''}">
+      </div>
+      <div class="fi"><label>Fecha recepción dinero</label>
+        <input type="date" id="ch-rec-dinero-f" value="${(c.recibio_dinero_fecha||'').slice(0,10)}">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-cheque')">Cancelar</button>
+      <button class="btn bs" onclick="guardarCheque(${id||'null'})">💾 Guardar cheque</button>
+    </div>`;
+  openModal('modal-cheque');
+}
+
+async function guardarCheque(id) {
+  const body = {
+    cuenta_bancaria_id: $('ch-cuenta').value,
+    beneficiario_id   : $('ch-benef').value || null,
+    no_cheque         : $('ch-numero').value.trim(),
+    fecha_emision     : $('ch-fecha').value,
+    monto             : parseFloat($('ch-monto').value) || 0,
+    concepto          : $('ch-concepto').value.trim(),
+    estatus           : $('ch-estatus').value,
+    recibio_cheque_nombre: $('ch-rec-cheque-n').value.trim(),
+    recibio_cheque_fecha : $('ch-rec-cheque-f').value || null,
+    recibio_dinero_nombre: $('ch-rec-dinero-n').value.trim(),
+    recibio_dinero_fecha : $('ch-rec-dinero-f').value || null
+  };
+  if (!body.cuenta_bancaria_id || !body.no_cheque || !body.fecha_emision || !body.monto)
+    return toast('Cuenta, N° cheque, fecha y monto son requeridos.', 'warn');
+  try {
+    if (id) await api(`/bancos/cheques/${id}`, { method:'PUT',  body: JSON.stringify(body) });
+    else    await api('/bancos/cheques',       { method:'POST', body: JSON.stringify(body) });
+    toast('Cheque guardado.');
+    closeModal('modal-cheque');
+    cargarCheques();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarCheque(id) {
+  if (!await confirm2('¿Eliminar este cheque? La acción no se puede deshacer.')) return;
+  try { await api(`/bancos/cheques/${id}`, { method:'DELETE' }); toast('Cheque eliminado.'); cargarCheques(); }
+  catch(e) { toast(e.message, 'err'); }
+}
+
+// ═══ REPORTE "CHEQUES A COBRAR" ══════════════════════
+async function cargarReporteACobrar() {
+  const fecha = $('rep-fecha')?.value || '';
+  const desde = $('rep-desde')?.value || '';
+  const hasta = $('rep-hasta')?.value || '';
+  const p = [];
+  if (fecha) p.push(`fecha=${fecha}`);
+  else { if (desde) p.push(`desde=${desde}`); if (hasta) p.push(`hasta=${hasta}`); }
+  if (!p.length) { $('rep-body').innerHTML = '<p class="empty">Selecciona una fecha o rango de fechas.</p>'; return; }
+  try {
+    const r = await api(`/bancos/cheques/reporte-a-cobrar?${p.join('&')}`);
+    window._repACobrar = r;
+    $('rep-body').innerHTML = renderReporteACobrar(r);
+  } catch(e) { $('rep-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function renderReporteACobrar(r) {
+  if (!r.grupos.length) return '<p class="empty">Sin cheques pendientes de cobro en el rango seleccionado.</p>';
+  const fechaTxt = r.fecha_reporte ? fmtDate(r.fecha_reporte) : (r.desde && r.hasta ? `${fmtDate(r.desde)} al ${fmtDate(r.hasta)}` : (r.desde ? `desde ${fmtDate(r.desde)}` : ''));
+  return `
+    <div class="card" style="padding:24px">
+      <div style="text-align:center;margin-bottom:16px;border-bottom:2px solid #111;padding-bottom:12px">
+        <div style="font-size:20px;font-weight:900;letter-spacing:2px">CHEQUES A COBRAR:</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:4px">${fechaTxt.toUpperCase()}</div>
+      </div>
+      ${r.grupos.map(g => `
+        <div style="margin-bottom:22px">
+          <div style="background:#1e3a8a;color:#fff;padding:8px 14px;font-weight:900;font-size:13px;letter-spacing:1.5px;border-radius:6px 6px 0 0">
+            ${g.banco} — ${g.empresa}
+          </div>
+          <table style="width:100%;border-collapse:collapse;border:1.5px solid #1e3a8a;font-size:12px">
+            <thead style="background:#dbeafe">
+              <tr>
+                <th style="padding:8px;text-align:center;width:80px;border-right:1px solid #93c5fd">NO. DE</th>
+                <th style="padding:8px;text-align:left;border-right:1px solid #93c5fd">NOMBRE BENEFICIARIO</th>
+                <th style="padding:8px;text-align:right;width:130px;border-right:1px solid #93c5fd">MONTO</th>
+                <th style="padding:8px;text-align:left">CONCEPTO</th>
+              </tr>
+            </thead>
+            <tbody>${g.cheques.map(c => `
+              <tr style="border-top:1px solid #bfdbfe">
+                <td style="padding:6px 8px;text-align:center;font-family:monospace;font-weight:800;border-right:1px solid #bfdbfe">${c.no_cheque}</td>
+                <td style="padding:6px 8px;font-weight:700;border-right:1px solid #bfdbfe">${c.beneficiario_nombre||'—'}</td>
+                <td style="padding:6px 8px;text-align:right;font-weight:800;border-right:1px solid #bfdbfe">${fmt(c.monto)}</td>
+                <td style="padding:6px 8px;color:var(--muted)">${c.concepto||''}</td>
+              </tr>`).join('')}
+              <tr style="background:#fef3c7;border-top:1.5px solid #d97706">
+                <td colspan="2" style="padding:8px 12px;text-align:right;font-weight:900;color:#78350f">TOTAL DE ${g.banco}:</td>
+                <td style="padding:8px;text-align:right;font-weight:900;color:#78350f">${fmt(g.subtotal)}</td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>`).join('')}
+      <div style="background:#166534;color:#fff;padding:14px 18px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;margin-top:20px">
+        <div style="font-size:14px;font-weight:900;letter-spacing:2px">IMPORTE TOTAL</div>
+        <div style="font-size:22px;font-weight:900;font-family:monospace">${fmt(r.importe_total)}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:36px">
+        <div style="border:1.5px dashed #94a3b8;padding:20px;text-align:center;border-radius:8px">
+          <div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:40px">Firma de Recepción de Cheques</div>
+          <div style="border-top:1.5px solid #111;padding-top:6px;font-size:11px;color:var(--muted)">NOMBRE Y FIRMA</div>
+        </div>
+        <div style="border:1.5px dashed #94a3b8;padding:20px;text-align:center;border-radius:8px">
+          <div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:40px">Firma de Recepción de Dinero</div>
+          <div style="border-top:1.5px solid #111;padding-top:6px;font-size:11px;color:var(--muted)">NOMBRE Y FIRMA</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function imprimirReporteACobrar() {
+  const r = window._repACobrar;
+  if (!r || !r.grupos.length) return toast('Primero genera el reporte con filtros.', 'warn');
+  const hoy = new Date().toLocaleString('es-MX', { day:'2-digit', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  const fechaTxt = r.fecha_reporte ? fmtDate(r.fecha_reporte) : (r.desde && r.hasta ? `${fmtDate(r.desde)} al ${fmtDate(r.hasta)}` : (r.desde ? `desde ${fmtDate(r.desde)}` : ''));
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Cheques a Cobrar</title>
+<style>
+  @page { size: A4 portrait; margin: 10mm }
+  * { box-sizing:border-box; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important }
+  body { font-family:'Segoe UI',Arial,sans-serif; color:#111; padding:10px; font-size:11px }
+  .head { text-align:center; border-bottom:2px solid #111; padding-bottom:8px; margin-bottom:14px }
+  .head h1 { margin:0; font-size:22px; letter-spacing:3px }
+  .head .sub { font-size:11px; color:#555; margin-top:3px }
+  .grupo { margin-bottom:20px; page-break-inside:avoid }
+  .grupo .banco-head { background:#1e3a8a; color:#fff; padding:7px 12px; font-weight:900; font-size:12px; letter-spacing:1.5px; border-radius:5px 5px 0 0 }
+  table { width:100%; border-collapse:collapse; font-size:11px; border:1.5px solid #1e3a8a }
+  thead { background:#dbeafe }
+  th, td { padding:5px 8px; border:1px solid #bfdbfe }
+  th { font-weight:800; text-align:center }
+  td.no { text-align:center; font-family:monospace; font-weight:800 }
+  td.ben { font-weight:700 }
+  td.monto { text-align:right; font-weight:800 }
+  td.concepto { color:#555 }
+  .subtotal { background:#fef3c7; font-weight:900; color:#78350f }
+  .subtotal td { border-top:2px solid #d97706 }
+  .total { background:#166534; color:#fff; padding:12px 16px; border-radius:6px; display:flex; justify-content:space-between; margin-top:16px; font-weight:900 }
+  .total .l { font-size:12px; letter-spacing:2px }
+  .total .n { font-size:18px; font-family:monospace }
+  .firmas { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:36px }
+  .firma { border:1.5px dashed #94a3b8; padding:16px; text-align:center; border-radius:6px }
+  .firma .l { font-size:9.5px; font-weight:800; color:#555; text-transform:uppercase; letter-spacing:1.5px; margin-bottom:40px }
+  .firma .line { border-top:1.2px solid #111; padding-top:5px; font-size:9px; color:#666 }
+  .foot { margin-top:16px; text-align:center; font-size:8px; color:#999 }
+  .actions { position:fixed; top:6px; right:6px; display:flex; gap:6px; z-index:10 }
+  .actions button { padding:8px 12px; border-radius:5px; border:none; font-weight:800; cursor:pointer; font-size:11px }
+  .actions .p { background:#dc2626; color:#fff }
+  .actions .c { background:#e5e7eb }
+  @media print { .actions { display:none } }
+</style></head><body>
+  <div class="actions">
+    <button class="p" onclick="window.print()">🖨 Imprimir</button>
+    <button class="c" onclick="window.close()">Cerrar</button>
+  </div>
+  <div class="head"><h1>CHEQUES A COBRAR:</h1><div class="sub">${fechaTxt.toUpperCase()} · GRUPO MANAGEMENT</div></div>
+  ${r.grupos.map(g => `
+    <div class="grupo">
+      <div class="banco-head">${g.banco} — ${g.empresa}</div>
+      <table>
+        <thead><tr>
+          <th style="width:60px">NO. DE</th>
+          <th style="text-align:left">NOMBRE BENEFICIARIO</th>
+          <th style="width:110px">MONTO</th>
+          <th style="text-align:left">CONCEPTO</th>
+        </tr></thead>
+        <tbody>
+          ${g.cheques.map(c => `<tr>
+            <td class="no">${c.no_cheque}</td>
+            <td class="ben">${c.beneficiario_nombre||'—'}</td>
+            <td class="monto">${fmt(c.monto)}</td>
+            <td class="concepto">${c.concepto||''}</td>
+          </tr>`).join('')}
+          <tr class="subtotal">
+            <td colspan="2" style="text-align:right">TOTAL DE ${g.banco}:</td>
+            <td class="monto">${fmt(g.subtotal)}</td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>`).join('')}
+  <div class="total"><div class="l">IMPORTE TOTAL</div><div class="n">${fmt(r.importe_total)}</div></div>
+  <div class="firmas">
+    <div class="firma"><div class="l">Firma de Recepción de Cheques</div><div class="line">NOMBRE Y FIRMA</div></div>
+    <div class="firma"><div class="l">Firma de Recepción de Dinero</div><div class="line">NOMBRE Y FIRMA</div></div>
+  </div>
+  <div class="foot">Impreso ${hoy}</div>
+  <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400));<\/script>
+</body></html>`;
+  const w = window.open('','_blank','width=900,height=1100');
+  if (!w) return toast('El navegador bloqueó la ventana emergente.', 'warn');
+  w.document.write(html); w.document.close();
+}
+
+// ═══ CONCILIACIÓN ════════════════════════════════════
+async function cargarConciliacion() {
+  const cuentaId = $('conc-cuenta')?.value || '';
+  const desde = $('conc-desde')?.value || '';
+  const hasta = $('conc-hasta')?.value || '';
+  // Cargar dropdown de cuentas si vacío
+  const sel = $('conc-cuenta');
+  if (sel && sel.options.length === 1) {
+    try {
+      const cs = await api('/bancos/cuentas?activa=true');
+      sel.innerHTML = '<option value="">Todas las cuentas</option>' +
+        cs.map(c => `<option value="${c.id}">${c.banco} — ${c.alias||c.numero_cuenta||''}</option>`).join('');
+    } catch {}
+  }
+  const p = [];
+  if (cuentaId) p.push(`cuenta_id=${cuentaId}`);
+  if (desde) p.push(`desde=${desde}`);
+  if (hasta) p.push(`hasta=${hasta}`);
+  try {
+    const movs = await api(`/bancos/movimientos-ec${p.length?'?'+p.join('&'):''}`);
+    renderConciliacion(movs);
+  } catch(e) { $('conc-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function renderConciliacion(movs) {
+  const cont = $('conc-body');
+  const stats = movs.reduce((a,m) => { a[m.estado_conciliacion] = (a[m.estado_conciliacion]||0)+1; return a; }, {});
+  const kpis = `<div class="kpi-grid" style="margin-bottom:14px">
+    <div class="kpi primary"><div class="label">Total movimientos</div><div class="value">${movs.length}</div></div>
+    <div class="kpi warning"><div class="label">Pendientes</div><div class="value">${stats.PENDIENTE||0}</div></div>
+    <div class="kpi success"><div class="label">Conciliados</div><div class="value">${stats.CONCILIADO||0}</div></div>
+    <div class="kpi danger"><div class="label">No identificados</div><div class="value">${stats.NO_IDENTIFICADO||0}</div></div>
+  </div>`;
+  if (!movs.length) { cont.innerHTML = kpis + '<p class="empty">Sin movimientos registrados en el estado de cuenta.</p>'; return; }
+  const badgeC = { PENDIENTE:{bg:'#fef3c7',fg:'#92400e'}, CONCILIADO:{bg:'#dcfce7',fg:'#166534'}, NO_IDENTIFICADO:{bg:'#fee2e2',fg:'#991b1b'} };
+  cont.innerHTML = kpis + `
+    <div class="tscroll"><table>
+      <thead><tr><th>Fecha</th><th>Cuenta</th><th>Concepto banco</th><th>Referencia</th><th>Retiro</th><th>Estado</th><th>Cheque</th><th></th></tr></thead>
+      <tbody>${movs.map(m => {
+        const b = badgeC[m.estado_conciliacion] || badgeC.PENDIENTE;
+        return `<tr>
+          <td>${fmtDate(m.fecha_operacion)}</td>
+          <td><div style="font-weight:700">${m.banco}</div><div style="font-size:10px;color:var(--muted)">${m.cuenta_alias||''}</div></td>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.concepto_banco||''}">${m.concepto_banco||'—'}</td>
+          <td style="font-family:monospace;font-size:11px">${m.numero_referencia||'—'}</td>
+          <td style="text-align:right;font-weight:800;color:#991b1b">${fmt(m.monto_retiro)}</td>
+          <td><span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:10.5px;font-weight:800;background:${b.bg};color:${b.fg}">${m.estado_conciliacion}</span></td>
+          <td style="font-family:monospace">${m.cheque_no||'—'}</td>
+          <td>${canAdmin()?`<button class="btn bd bsm" onclick="eliminarMovimientoEC(${m.id})">🗑</button>`:''}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+}
+
+async function openMovimientoEC() {
+  const cs = await api('/bancos/cuentas?activa=true');
+  $('modal-mov-ec-body').innerHTML = `
+    <h4>+ Movimiento del Estado de Cuenta</h4>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Captura manual. En una siguiente fase se podrá importar desde CSV/XLS del banco.</p>
+    <div class="fg" style="gap:10px">
+      <div class="fi full"><label>Cuenta bancaria *</label>
+        <select id="mec-cuenta"><option value="">— Seleccionar —</option>
+          ${cs.map(c => `<option value="${c.id}">${c.banco} — ${c.alias||c.numero_cuenta||''}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fi"><label>Fecha operación *</label><input type="date" id="mec-fecha" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="fi"><label>N° referencia</label><input id="mec-ref" placeholder="Ej: CHQ001139"></div>
+      <div class="fi full"><label>Concepto del banco</label><input id="mec-concepto" placeholder="Ej: PAGO CHEQUE 1139"></div>
+      <div class="fi"><label>Monto retiro</label><input type="number" step="0.01" id="mec-retiro" value="0"></div>
+      <div class="fi"><label>Monto depósito</label><input type="number" step="0.01" id="mec-dep" value="0"></div>
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-mov-ec')">Cancelar</button>
+      <button class="btn bs" onclick="guardarMovimientoEC()">💾 Guardar</button>
+    </div>`;
+  openModal('modal-mov-ec');
+}
+
+async function guardarMovimientoEC() {
+  const body = {
+    cuenta_bancaria_id: $('mec-cuenta').value,
+    fecha_operacion   : $('mec-fecha').value,
+    concepto_banco    : $('mec-concepto').value.trim(),
+    numero_referencia : $('mec-ref').value.trim(),
+    monto_retiro      : parseFloat($('mec-retiro').value) || 0,
+    monto_deposito    : parseFloat($('mec-dep').value) || 0
+  };
+  if (!body.cuenta_bancaria_id || !body.fecha_operacion) return toast('Cuenta y fecha requeridas.', 'warn');
+  try { await api('/bancos/movimientos-ec', { method:'POST', body: JSON.stringify(body) }); toast('Movimiento guardado.'); closeModal('modal-mov-ec'); cargarConciliacion(); }
+  catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarMovimientoEC(id) {
+  if (!await confirm2('¿Eliminar este movimiento?')) return;
+  try { await api(`/bancos/movimientos-ec/${id}`, { method:'DELETE' }); toast('Eliminado.'); cargarConciliacion(); }
+  catch(e) { toast(e.message, 'err'); }
+}
+
+async function ejecutarConciliacion() {
+  const cuenta_id = $('conc-cuenta')?.value || null;
+  if (!await confirm2('¿Ejecutar conciliación automática?\nBusca cheques emitidos/entregados con mismo monto y N° de cheque en la referencia o concepto del movimiento.')) return;
+  try {
+    const r = await api('/bancos/conciliar', { method:'POST', body: JSON.stringify({ cuenta_id }) });
+    toast(`✅ ${r.conciliados} conciliados · ${r.no_identificados} no identificados de ${r.revisados} pendientes.`);
+    cargarConciliacion();
   } catch(e) { toast(e.message, 'err'); }
 }
 
