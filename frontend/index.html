@@ -125,6 +125,25 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--
   padding:14px 18px 5px;font-size:9.5px;font-weight:700;
   color:rgba(255,255,255,.25);text-transform:uppercase;letter-spacing:1.2px
 }
+/* Secciones colapsables */
+.nav-group{margin:2px 0}
+.nav-group-toggle{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 18px 8px;font-size:9.5px;font-weight:800;
+  color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:1.2px;
+  cursor:pointer;user-select:none;background:none;border:none;width:100%;
+  transition:color .18s
+}
+.nav-group-toggle:hover{color:rgba(255,255,255,.75)}
+.nav-group-toggle .nav-group-label{display:flex;align-items:center;gap:8px}
+.nav-group-toggle .nav-group-icon{font-size:12px;opacity:.7}
+.nav-group-toggle .chev{font-size:9px;transition:transform .2s;opacity:.6}
+.nav-group.open .nav-group-toggle .chev{transform:rotate(90deg)}
+.nav-group-items{overflow:hidden;max-height:0;transition:max-height .25s ease}
+.nav-group.open .nav-group-items{max-height:600px}
+.nav-group-items a{padding-left:34px}
+.nav-group.has-active .nav-group-toggle{color:rgba(255,255,255,.75)}
+.nav-group.has-active .nav-group-toggle .nav-group-icon{opacity:1}
 nav a{
   display:flex;align-items:center;gap:10px;padding:9px 18px;
   color:rgba(255,255,255,.55);text-decoration:none;font-size:12.5px;
@@ -485,28 +504,76 @@ canvas{max-height:230px}
       </div>
     </div>
     <nav>
-      <div class="nav-section">Principal</div>
-      <a href="#" onclick="nav('dashboard')" id="nav-dashboard"><span class="ni">📊</span> Dashboard</a>
-      <div class="nav-section">Operación</div>
-      <a href="#" onclick="nav('facturas')"  id="nav-facturas"><span class="ni">🧾</span> Facturas</a>
-      <a href="#" onclick="nav('cobranza')"  id="nav-cobranza"><span class="ni">💰</span> Cobranza</a>
-      <a href="#" onclick="nav('estadoCuenta')" id="nav-estadoCuenta"><span class="ni">📑</span> Estado de Cuenta</a>
-      <a href="#" onclick="nav('clientes')"  id="nav-clientes"><span class="ni">🏢</span> Clientes</a>
-      <div class="nav-section">Recurso Humano</div>
-      <a href="#" onclick="nav('nomina')"    id="nav-nomina"><span class="ni">👥</span> Nómina</a>
-      <a href="#" onclick="nav('empleados')" id="nav-empleados"><span class="ni">👤</span> Empleados</a>
-      <a href="#" onclick="nav('vacaciones')" id="nav-vacaciones"><span class="ni">🌴</span> Vacaciones</a>
-      <a href="#" onclick="nav('checador')"   id="nav-checador"><span class="ni">🕐</span> Reloj Checador</a>
-      <div class="nav-section">Tesorería</div>
-      <a href="#" onclick="nav('cajaChica')" id="nav-cajaChica"><span class="ni">💵</span> Caja Chica</a>
-      <div class="nav-section">Análisis</div>
-      <a href="#" onclick="nav('reportes')"  id="nav-reportes"><span class="ni">📋</span> Reportes</a>
-      <a href="#" onclick="nav('estadisticas')" id="nav-estadisticas"><span class="ni">📈</span> Estadísticas</a>
-      <div class="nav-section">Configuración</div>
-      <a href="#" onclick="nav('receptoras')" id="nav-receptoras"><span class="ni">🏛</span> Empresas Emisoras</a>
-      <a href="#" onclick="nav('catalogo')"   id="nav-catalogo"><span class="ni">📂</span> Conceptos de Desglose</a>
-      <div class="nav-section" id="nav-sec-admin" style="display:none">Admin</div>
-      <a href="#" onclick="nav('usuarios')"  id="nav-usuarios" style="display:none"><span class="ni">🔒</span> Usuarios</a>
+      <!-- Principal siempre visible sin acordeón -->
+      <a href="#" onclick="nav('dashboard')" id="nav-dashboard" style="margin-top:8px"><span class="ni">📊</span> Dashboard</a>
+
+      <div class="nav-group" data-group="operacion">
+        <button class="nav-group-toggle" onclick="toggleNavGroup('operacion')">
+          <span class="nav-group-label"><span class="nav-group-icon">🧾</span> Operación</span>
+          <span class="chev">▶</span>
+        </button>
+        <div class="nav-group-items">
+          <a href="#" onclick="nav('facturas')"    id="nav-facturas"><span class="ni">🧾</span> Facturas</a>
+          <a href="#" onclick="nav('cobranza')"    id="nav-cobranza"><span class="ni">💰</span> Cobranza</a>
+          <a href="#" onclick="nav('estadoCuenta')" id="nav-estadoCuenta"><span class="ni">📑</span> Estado de Cuenta</a>
+          <a href="#" onclick="nav('clientes')"    id="nav-clientes"><span class="ni">🏢</span> Clientes</a>
+        </div>
+      </div>
+
+      <div class="nav-group" data-group="rh">
+        <button class="nav-group-toggle" onclick="toggleNavGroup('rh')">
+          <span class="nav-group-label"><span class="nav-group-icon">👥</span> Recurso Humano</span>
+          <span class="chev">▶</span>
+        </button>
+        <div class="nav-group-items">
+          <a href="#" onclick="nav('nomina')"     id="nav-nomina"><span class="ni">👥</span> Nómina</a>
+          <a href="#" onclick="nav('empleados')"  id="nav-empleados"><span class="ni">👤</span> Empleados</a>
+          <a href="#" onclick="nav('vacaciones')" id="nav-vacaciones"><span class="ni">🌴</span> Vacaciones</a>
+          <a href="#" onclick="nav('checador')"   id="nav-checador"><span class="ni">🕐</span> Reloj Checador</a>
+        </div>
+      </div>
+
+      <div class="nav-group" data-group="tesoreria">
+        <button class="nav-group-toggle" onclick="toggleNavGroup('tesoreria')">
+          <span class="nav-group-label"><span class="nav-group-icon">💵</span> Tesorería</span>
+          <span class="chev">▶</span>
+        </button>
+        <div class="nav-group-items">
+          <a href="#" onclick="nav('cajaChica')" id="nav-cajaChica"><span class="ni">💵</span> Caja Chica</a>
+        </div>
+      </div>
+
+      <div class="nav-group" data-group="analisis">
+        <button class="nav-group-toggle" onclick="toggleNavGroup('analisis')">
+          <span class="nav-group-label"><span class="nav-group-icon">📈</span> Análisis</span>
+          <span class="chev">▶</span>
+        </button>
+        <div class="nav-group-items">
+          <a href="#" onclick="nav('reportes')"     id="nav-reportes"><span class="ni">📋</span> Reportes</a>
+          <a href="#" onclick="nav('estadisticas')" id="nav-estadisticas"><span class="ni">📈</span> Estadísticas</a>
+        </div>
+      </div>
+
+      <div class="nav-group" data-group="config">
+        <button class="nav-group-toggle" onclick="toggleNavGroup('config')">
+          <span class="nav-group-label"><span class="nav-group-icon">⚙️</span> Configuración</span>
+          <span class="chev">▶</span>
+        </button>
+        <div class="nav-group-items">
+          <a href="#" onclick="nav('receptoras')" id="nav-receptoras"><span class="ni">🏛</span> Empresas Emisoras</a>
+          <a href="#" onclick="nav('catalogo')"   id="nav-catalogo"><span class="ni">📂</span> Conceptos de Desglose</a>
+        </div>
+      </div>
+
+      <div class="nav-group" data-group="admin" id="nav-group-admin" style="display:none">
+        <button class="nav-group-toggle" onclick="toggleNavGroup('admin')">
+          <span class="nav-group-label"><span class="nav-group-icon">🔒</span> Administración</span>
+          <span class="chev">▶</span>
+        </button>
+        <div class="nav-group-items">
+          <a href="#" onclick="nav('usuarios')" id="nav-usuarios"><span class="ni">🔒</span> Usuarios</a>
+        </div>
+      </div>
     </nav>
     <div class="sidebar-bottom">
       <button onclick="openCambiarClave()" style="margin-bottom:6px">🔐 Cambiar mi clave</button>
@@ -789,11 +856,13 @@ function initApp() {
   $('app').style.display = 'block';
   $('sb-nombre').textContent = ME.nombre;
   $('sb-rol').textContent = ME.rol;
+  // Restaurar estado abierto/cerrado de los grupos del menú lateral
+  restaurarNavGroups();
   const av = $('sb-avatar');
   if(av) av.textContent = ME.nombre?.charAt(0)?.toUpperCase() || '?';
   if (canAdmin()) {
     $('nav-usuarios').style.display = 'flex';
-    $('nav-sec-admin').style.display = 'block';
+    const gAdmin = $('nav-group-admin'); if (gAdmin) gAdmin.style.display = 'block';
   }
   // Capturista: ocultar todo el menú excepto Facturas y aterrizar ahí
   if (isCapturista() || isTesoreria() || isTesoreriaConsulta() || isChecador()) {
@@ -806,22 +875,42 @@ function initApp() {
                      : 'cajaChica';
     document.querySelectorAll('nav a').forEach(a => {
       const pg = a.id?.replace('nav-','');
-      if (!permitidas.includes(pg)) a.style.display = 'none';
+      if (pg && pg !== 'dashboard' && !permitidas.includes(pg)) a.style.display = 'none';
     });
-    // Ocultar encabezados de sección que no tengan ningún link visible debajo
-    document.querySelectorAll('nav .nav-section').forEach(s => {
-      let n = s.nextElementSibling;
-      let hayVisible = false;
-      while (n && !n.classList.contains('nav-section')) {
-        if (n.tagName === 'A' && n.style.display !== 'none') { hayVisible = true; break; }
-        n = n.nextElementSibling;
-      }
-      if (!hayVisible) s.style.display = 'none';
+    // Ocultar grupos que quedaron sin items visibles
+    document.querySelectorAll('nav .nav-group').forEach(g => {
+      const visibles = [...g.querySelectorAll('a')].filter(a => a.style.display !== 'none');
+      if (!visibles.length) g.style.display = 'none';
     });
     nav(landing);
     return;
   }
   nav('dashboard');
+}
+
+// Toggle sección colapsable + persistencia en localStorage
+function toggleNavGroup(groupId) {
+  const g = document.querySelector(`.nav-group[data-group="${groupId}"]`);
+  if (!g) return;
+  g.classList.toggle('open');
+  try {
+    const abiertos = [...document.querySelectorAll('.nav-group.open')].map(x => x.dataset.group);
+    localStorage.setItem('nav-groups-open', JSON.stringify(abiertos));
+  } catch(e) {}
+}
+
+// Restaurar estado abierto/cerrado desde localStorage al cargar la app
+function restaurarNavGroups() {
+  try {
+    const abiertos = JSON.parse(localStorage.getItem('nav-groups-open') || '["operacion"]');
+    document.querySelectorAll('.nav-group').forEach(g => {
+      if (abiertos.includes(g.dataset.group)) g.classList.add('open');
+    });
+  } catch(e) {
+    // Default: abrir Operación
+    const op = document.querySelector('.nav-group[data-group="operacion"]');
+    if (op) op.classList.add('open');
+  }
 }
 
 function nav(page) {
@@ -843,8 +932,14 @@ function nav(page) {
     return;
   }
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+  document.querySelectorAll('nav .nav-group').forEach(g => g.classList.remove('has-active'));
   const el = $('nav-' + page);
-  if (el) el.classList.add('active');
+  if (el) {
+    el.classList.add('active');
+    // Auto-abrir + marcar el grupo que contiene el link activo
+    const grupo = el.closest('.nav-group');
+    if (grupo) { grupo.classList.add('open','has-active'); }
+  }
   // Cerrar sidebar en móvil y actualizar título del topbar
   toggleSidebar(false);
   const titulos = {
