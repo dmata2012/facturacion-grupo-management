@@ -647,6 +647,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-mov-ec"><div class="modal modal-sm" id="modal-mov-ec-body"></div></div>
 <div class="overlay" id="modal-empresas-bnc"><div class="modal modal-sm" id="modal-empresas-bnc-body"></div></div>
 <div class="overlay" id="modal-catbancos"><div class="modal" style="width:min(640px,96vw)" id="modal-catbancos-body"></div></div>
+<div class="overlay" id="modal-chequeras"><div class="modal" style="width:min(780px,96vw)" id="modal-chequeras-body"></div></div>
 <div class="overlay" id="modal-benef-bnc"><div class="modal" style="width:min(640px,96vw)" id="modal-benef-bnc-body"></div></div>
 <div class="overlay" id="modal-notif-ch"><div class="modal" style="width:min(720px,96vw)" id="modal-notif-ch-body"></div></div>
 <div class="overlay" id="modal-notif-show"><div class="modal modal-sm" id="modal-notif-show-body"></div></div>
@@ -1171,7 +1172,8 @@ function renderCuentasBanco(cuentas) {
             <div style="color:var(--muted);font-weight:600">Saldo inicial:</div><div style="font-weight:900;color:#166534">${fmt(c.saldo_inicial)} ${c.moneda}</div>
           </div>
           ${c.notas ? `<div style="font-size:11px;color:var(--muted);padding:8px 10px;background:var(--bg-alt);border-radius:6px;margin-bottom:10px">📝 ${(c.notas||'').replace(/</g,'&lt;')}</div>` : ''}
-          <div style="display:flex;gap:6px;justify-content:flex-end;border-top:1px solid var(--border);padding-top:10px">
+          <div style="display:flex;gap:6px;justify-content:flex-end;border-top:1px solid var(--border);padding-top:10px;flex-wrap:wrap">
+            <button class="btn bo bsm" onclick="openChequeras(${c.id},'${(c.alias||c.banco).replace(/'/g,"\\'")}')">📕 Chequeras</button>
             ${canWrite()?`<button class="btn bg bsm" onclick="openCuentaBanco(${c.id})">✏️ Editar</button>`:''}
             ${canAdmin()&&c.activa?`<button class="btn bd bsm" onclick="eliminarCuentaBanco(${c.id},'${(c.alias||c.banco).replace(/'/g,"\\'")}')">🗑 Dar de baja</button>`:''}
           </div>
@@ -1555,6 +1557,208 @@ async function eliminarCuentaBanco(id, alias) {
   } catch(e) { toast(e.message, 'err'); }
 }
 
+// ═══ CHEQUERAS ══════════════════════════════════════
+const CHQ_ESTATUS = {
+  ACTIVA:    { bg:'#dcfce7', fg:'#166534', br:'#4ade80', txt:'● ACTIVA' },
+  AGOTADA:   { bg:'#fee2e2', fg:'#991b1b', br:'#fca5a5', txt:'✖ AGOTADA' },
+  CERRADA:   { bg:'#f1f5f9', fg:'#475569', br:'#cbd5e1', txt:'⏸ CERRADA' },
+  CANCELADA: { bg:'#f1f5f9', fg:'#94a3b8', br:'#e2e8f0', txt:'⊘ CANCELADA' }
+};
+
+async function openChequeras(cuentaId, alias) {
+  window._chqCuenta = { id: cuentaId, alias };
+  $('modal-chequeras-body').innerHTML = '<h4>📕 Chequeras</h4><p class="empty">Cargando...</p>';
+  openModal('modal-chequeras');
+  try {
+    const d = await api(`/bancos/cuentas/${cuentaId}/chequeras`);
+    renderChequeras(d, alias);
+  } catch(e) {
+    $('modal-chequeras-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`;
+  }
+}
+
+function renderChequeras(d, alias) {
+  const est = d.estado_actual || {};
+  const q = est.chequera;
+  const hayActiva = !!q && !est.agotada;
+  // Sugerir el rango de la siguiente chequera: arranca donde terminó la última
+  const maxFinal = d.chequeras.reduce((m, x) => Math.max(m, parseInt(x.folio_final)||0), 0);
+  const sugIni = maxFinal ? maxFinal + 1 : '';
+
+  // Panel de estado actual
+  let panel;
+  if (!q) {
+    panel = `<div class="ibox warn" style="margin-bottom:14px;font-size:12.5px">
+      ⚠ <strong>Esta cuenta no tiene chequera activa.</strong> Sin chequera los cheques se capturan con folio
+      libre y <u>no hay control de consecutivo</u>. Asigna una abajo para activar el control.
+    </div>`;
+  } else if (est.agotada) {
+    panel = `<div style="background:linear-gradient(135deg,#991b1b,#dc2626);color:#fff;border-radius:12px;padding:16px 18px;margin-bottom:14px">
+      <div style="font-size:10.5px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;opacity:.9">Chequera agotada</div>
+      <div style="font-size:18px;font-weight:900;margin-top:3px">Folios ${q.folio_inicial} – ${q.folio_final}</div>
+      <div style="font-size:12px;opacity:.92;margin-top:5px">
+        Se consumieron todos los folios. <strong>Asigna una nueva chequera</strong> para poder seguir emitiendo cheques.
+      </div>
+    </div>`;
+  } else {
+    const total = q.folio_final - q.folio_inicial + 1;
+    const pct = Math.round((est.usados / total) * 100);
+    const alerta = est.restantes <= 5;
+    panel = `<div style="background:linear-gradient(135deg,#0f172a,#1e293b);color:#fff;border-radius:12px;padding:16px 18px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:10.5px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:#4ade80">● Chequera activa</div>
+          <div style="font-size:20px;font-weight:900;margin-top:2px;font-family:'Consolas',monospace">${q.folio_inicial} – ${q.folio_final}</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:2px">Asignada el ${fmtDate(q.fecha_asignacion)}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;font-weight:700">Siguiente cheque</div>
+          <div style="font-size:30px;font-weight:900;color:#4ade80;font-family:'Consolas',monospace;line-height:1">${est.siguiente}</div>
+        </div>
+      </div>
+      <div style="margin-top:14px">
+        <div style="background:rgba(148,163,184,.2);height:9px;border-radius:99px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,${alerta?'#f59e0b,#dc2626':'#3b82f6,#22c55e'});border-radius:99px;transition:width .5s"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:6px;font-weight:700">
+          <span style="color:#94a3b8">${est.usados} de ${total} usados</span>
+          <span style="color:${alerta?'#fbbf24':'#4ade80'}">${est.restantes} disponible${est.restantes!==1?'s':''}${alerta?' ⚠':''}</span>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  $('modal-chequeras-body').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <h4 style="margin:0;padding:0;border:none">📕 Chequeras — ${alias}</h4>
+      <button class="btn bo bsm" onclick="closeModal('modal-chequeras')">✕ Cerrar</button>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 14px">
+      Los folios se consumen en <strong>orden estricto</strong>. No se puede saltar un cheque:
+      si uno se daña, regístralo como <strong>CANCELADO</strong> para liberar el consecutivo.
+    </p>
+
+    ${panel}
+
+    <!-- Asignar nueva chequera -->
+    <div style="background:var(--bg-alt);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:9px">
+        ➕ Asignar nueva chequera
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:9px;align-items:end">
+        <div class="fi" style="margin:0"><label style="font-size:10px">Folio inicial *</label>
+          <input type="number" id="chq-ini" min="1" value="${sugIni}" placeholder="Ej: 1141"
+                 style="font-family:monospace;font-weight:800;text-align:center" oninput="_chqCalc()">
+        </div>
+        <div class="fi" style="margin:0"><label style="font-size:10px">Folio final *</label>
+          <input type="number" id="chq-fin" min="1" placeholder="Ej: 1200"
+                 style="font-family:monospace;font-weight:800;text-align:center" oninput="_chqCalc()">
+        </div>
+        <button class="btn bs bsm" onclick="crearChequera()" style="height:36px;white-space:nowrap">📕 Asignar</button>
+      </div>
+      <div class="fi" style="margin:9px 0 0"><label style="font-size:10px">Notas (opcional)</label>
+        <input id="chq-notas" placeholder="Ej: Chequera recibida en sucursal Centro">
+      </div>
+      ${hayActiva ? `
+      <label style="display:flex;align-items:center;gap:7px;margin-top:9px;cursor:pointer;font-size:12px;font-weight:700;color:#92400e;background:#fef3c7;border:1.5px solid #fbbf24;border-radius:8px;padding:8px 11px">
+        <input type="checkbox" id="chq-cerrar-ant" checked>
+        Cerrar la chequera activa actual (${q.folio_inicial}–${q.folio_final}) al asignar esta
+      </label>` : ''}
+      <div id="chq-calc" style="font-size:11.5px;margin-top:8px;min-height:16px;font-weight:700"></div>
+    </div>
+
+    <!-- Historial -->
+    <div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">
+      Historial de chequeras (${d.chequeras.length})
+    </div>
+    ${d.chequeras.length ? `
+    <div class="tscroll" style="max-height:260px;overflow-y:auto">
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead style="background:var(--bg-alt);position:sticky;top:0"><tr>
+          <th style="text-align:left;padding:7px 8px">Rango de folios</th>
+          <th style="padding:7px 8px">Total</th>
+          <th style="padding:7px 8px">Usados</th>
+          <th style="padding:7px 8px">Asignada</th>
+          <th style="padding:7px 8px">Estatus</th>
+          <th style="padding:7px 8px"></th>
+        </tr></thead>
+        <tbody>${d.chequeras.map(x => {
+          const s = CHQ_ESTATUS[x.estatus] || CHQ_ESTATUS.CERRADA;
+          const total = x.total_folios;
+          const usados = x.max_folio_usado >= x.folio_inicial ? (x.max_folio_usado - x.folio_inicial + 1) : 0;
+          return `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:8px;font-family:monospace;font-weight:800">${x.folio_inicial} – ${x.folio_final}</td>
+            <td style="padding:8px;text-align:center;color:var(--muted)">${total}</td>
+            <td style="padding:8px;text-align:center;font-weight:800;color:${usados?'#166534':'var(--muted)'}">${usados}</td>
+            <td style="padding:8px;text-align:center;font-size:11px;color:var(--muted)">${fmtDate(x.fecha_asignacion)}</td>
+            <td style="padding:8px;text-align:center">
+              <span style="background:${s.bg};color:${s.fg};border:1px solid ${s.br};padding:2px 8px;border-radius:12px;font-size:10px;font-weight:800;white-space:nowrap">${s.txt}</span>
+            </td>
+            <td style="padding:8px;white-space:nowrap;text-align:right">
+              ${x.estatus==='ACTIVA' ? `<button class="btn bo bsm" style="padding:4px 8px" title="Cerrar chequera" onclick="cambiarEstatusChequera(${x.id},'CERRADA')">⏸</button>` : ''}
+              ${(x.estatus==='CERRADA') ? `<button class="btn bo bsm" style="padding:4px 8px" title="Reactivar" onclick="cambiarEstatusChequera(${x.id},'ACTIVA')">▶</button>` : ''}
+              ${canAdmin() && x.n_cheques===0 ? `<button class="btn bd bsm" style="padding:4px 8px" title="Eliminar" onclick="eliminarChequera(${x.id},'${x.folio_inicial}–${x.folio_final}')">🗑</button>` : ''}
+            </td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>` : '<p class="empty" style="text-align:center;padding:16px">Sin chequeras registradas todavía.</p>'}
+
+    <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-chequeras')">Cerrar</button></div>`;
+  _chqCalc();
+}
+
+function _chqCalc() {
+  const ini = parseInt($('chq-ini')?.value), fin = parseInt($('chq-fin')?.value);
+  const el = $('chq-calc');
+  if (!el) return;
+  if (!Number.isInteger(ini) || !Number.isInteger(fin)) { el.innerHTML = ''; return; }
+  if (fin < ini) { el.innerHTML = '<span style="color:#dc2626">⚠ El folio final debe ser mayor o igual al inicial.</span>'; return; }
+  const n = fin - ini + 1;
+  el.innerHTML = `<span style="color:#166534">✅ Chequera de <strong>${n}</strong> cheque${n!==1?'s':''} — del <strong>${ini}</strong> al <strong>${fin}</strong>.</span>`;
+}
+
+async function crearChequera() {
+  const c = window._chqCuenta;
+  if (!c) return;
+  const folio_inicial = parseInt($('chq-ini').value);
+  const folio_final   = parseInt($('chq-fin').value);
+  const notas         = ($('chq-notas')?.value || '').trim();
+  const cerrar_anterior = $('chq-cerrar-ant')?.checked || false;
+  if (!Number.isInteger(folio_inicial) || !Number.isInteger(folio_final))
+    return toast('Captura el folio inicial y final.', 'warn');
+  if (folio_final < folio_inicial) return toast('El folio final debe ser mayor o igual al inicial.', 'warn');
+  try {
+    await api('/bancos/chequeras', {
+      method:'POST',
+      body: JSON.stringify({ cuenta_bancaria_id: c.id, folio_inicial, folio_final, notas, cerrar_anterior })
+    });
+    toast(`Chequera ${folio_inicial}–${folio_final} asignada.`);
+    openChequeras(c.id, c.alias);
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function cambiarEstatusChequera(id, estatus) {
+  const c = window._chqCuenta;
+  const txt = estatus === 'CERRADA' ? 'cerrar' : 'reactivar';
+  if (!await confirm2(`¿${txt.charAt(0).toUpperCase()+txt.slice(1)} esta chequera?`)) return;
+  try {
+    await api(`/bancos/chequeras/${id}/estatus`, { method:'PATCH', body: JSON.stringify({ estatus }) });
+    toast(`Chequera ${estatus.toLowerCase()}.`);
+    openChequeras(c.id, c.alias);
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarChequera(id, rango) {
+  const c = window._chqCuenta;
+  if (!await confirm2(`¿Eliminar la chequera ${rango}?\nSolo se permite si no tiene cheques emitidos.`)) return;
+  try {
+    await api(`/bancos/chequeras/${id}`, { method:'DELETE' });
+    toast('Chequera eliminada.');
+    openChequeras(c.id, c.alias);
+  } catch(e) { toast(e.message, 'err'); }
+}
+
 // ═══ CATÁLOGO DE BANCOS ═════════════════════════════
 async function gestionCatalogoBancos() {
   $('modal-catbancos-body').innerHTML = '<h4>🏛 Catálogo de Bancos</h4><p class="empty">Cargando...</p>';
@@ -1796,7 +2000,7 @@ async function openCheque(id) {
     </div>
     <div class="fg" style="gap:12px">
       <div class="fi"><label>Cuenta bancaria <span style="color:var(--red)">*</span></label>
-        <select id="ch-cuenta">
+        <select id="ch-cuenta" onchange="_chCargarFolio()">
           <option value="">— Seleccionar —</option>
           ${cuentas.map(cu => `<option value="${cu.id}" ${c.cuenta_bancaria_id==cu.id?'selected':''}>${cu.banco}${cu.empresa_nombre?' — '+cu.empresa_nombre:''} · ${cu.alias||cu.numero_cuenta||''}</option>`).join('')}
         </select>
@@ -1804,6 +2008,7 @@ async function openCheque(id) {
       <div class="fi"><label>N° de cheque <span style="color:var(--red)">*</span></label>
         <input id="ch-numero" value="${c.no_cheque||''}" placeholder="Ej: 1139" style="font-family:monospace;font-weight:800">
       </div>
+      <div class="fi full" id="ch-chq-info" style="margin:0"></div>
       <div class="fi"><label>Fecha de emisión <span style="color:var(--red)">*</span></label>
         <input type="date" id="ch-fecha" value="${(c.fecha_emision||'').slice(0,10)}">
       </div>
@@ -1842,6 +2047,58 @@ async function openCheque(id) {
       <button class="btn bs" onclick="guardarCheque(${id||'null'})">💾 Guardar cheque</button>
     </div>`;
   openModal('modal-cheque');
+  window._chEditando = !!id;
+  _chCargarFolio();
+}
+
+// Consulta la chequera de la cuenta elegida y fija el folio consecutivo
+async function _chCargarFolio() {
+  const cuentaId = $('ch-cuenta')?.value;
+  const info = $('ch-chq-info');
+  const inp  = $('ch-numero');
+  if (!info || !inp) return;
+  if (!cuentaId) { info.innerHTML = ''; inp.readOnly = false; inp.style.background = ''; return; }
+  info.innerHTML = '<div style="font-size:11px;color:var(--muted)">Consultando chequera…</div>';
+  try {
+    const e = await api(`/bancos/cuentas/${cuentaId}/siguiente-folio`);
+    // Al editar un cheque existente no se toca el folio
+    if (window._chEditando) {
+      info.innerHTML = e.chequera
+        ? `<div class="ibox info" style="font-size:11.5px;margin:0">📕 Chequera <strong>${e.chequera.folio_inicial}–${e.chequera.folio_final}</strong> · el folio de un cheque emitido no se puede cambiar.</div>`
+        : '';
+      inp.readOnly = true; inp.style.background = '#f1f5f9';
+      return;
+    }
+    if (!e.chequera) {
+      info.innerHTML = `<div class="ibox warn" style="font-size:11.5px;margin:0">
+        ⚠ Esta cuenta <strong>no tiene chequera activa</strong> — el folio se captura libre y sin control de consecutivo.
+        Puedes asignarle una desde <strong>Cuentas → 📕 Chequeras</strong>.
+      </div>`;
+      inp.readOnly = false; inp.style.background = '';
+      return;
+    }
+    if (e.agotada) {
+      info.innerHTML = `<div class="ibox err" style="font-size:11.5px;margin:0;background:#fee2e2;border-color:#fca5a5;color:#991b1b">
+        🚫 La chequera <strong>${e.chequera.folio_inicial}–${e.chequera.folio_final}</strong> está <strong>AGOTADA</strong>.
+        Asigna una nueva en <strong>Cuentas → 📕 Chequeras</strong> antes de emitir.
+      </div>`;
+      inp.value = ''; inp.readOnly = true; inp.style.background = '#fee2e2';
+      return;
+    }
+    // Folio consecutivo: se fija y se bloquea para que no se pueda saltar
+    inp.value = e.siguiente;
+    inp.readOnly = true;
+    inp.style.background = '#f0fdf4';
+    inp.style.borderColor = '#4ade80';
+    const alerta = e.restantes <= 5;
+    info.innerHTML = `<div style="background:${alerta?'#fef3c7':'#f0fdf4'};border:1.5px solid ${alerta?'#fbbf24':'#86efac'};border-radius:9px;padding:9px 12px;font-size:11.5px;color:${alerta?'#78350f':'#166534'};display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <span>📕 Chequera <strong>${e.chequera.folio_inicial}–${e.chequera.folio_final}</strong> · folio asignado automáticamente</span>
+      <strong style="white-space:nowrap">${e.restantes} cheque${e.restantes!==1?'s':''} restante${e.restantes!==1?'s':''}${alerta?' ⚠':''}</strong>
+    </div>`;
+  } catch(err) {
+    info.innerHTML = `<div style="font-size:11px;color:var(--red)">No se pudo consultar la chequera: ${err.message}</div>`;
+    inp.readOnly = false; inp.style.background = '';
+  }
 }
 
 async function guardarCheque(id) {
@@ -1861,9 +2118,12 @@ async function guardarCheque(id) {
   if (!body.cuenta_bancaria_id || !body.no_cheque || !body.fecha_emision || !body.monto)
     return toast('Cuenta, N° cheque, fecha y monto son requeridos.', 'warn');
   try {
-    if (id) await api(`/bancos/cheques/${id}`, { method:'PUT',  body: JSON.stringify(body) });
-    else    await api('/bancos/cheques',       { method:'POST', body: JSON.stringify(body) });
+    let r;
+    if (id) { await api(`/bancos/cheques/${id}`, { method:'PUT',  body: JSON.stringify(body) }); }
+    else    { r = await api('/bancos/cheques',   { method:'POST', body: JSON.stringify(body) }); }
     toast('Cheque guardado.');
+    // Avisos de la chequera (últimos folios o chequera agotada)
+    if (r?.aviso_chequera) setTimeout(() => toast('📕 ' + r.aviso_chequera, 'warn'), 900);
     closeModal('modal-cheque');
     cargarCheques();
   } catch(e) { toast(e.message, 'err'); }

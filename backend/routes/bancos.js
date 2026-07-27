@@ -91,6 +91,22 @@ router.use(verificarToken);
         creado_en TIMESTAMP DEFAULT NOW(),
         actualizado_en TIMESTAMP DEFAULT NOW()
       )`);
+    // Chequeras por cuenta (rango de folios consecutivos)
+    await query(`
+      CREATE TABLE IF NOT EXISTS fac_bancos_chequeras (
+        id SERIAL PRIMARY KEY,
+        cuenta_bancaria_id INT NOT NULL REFERENCES fac_bancos_cuentas(id) ON DELETE CASCADE,
+        folio_inicial INT NOT NULL,
+        folio_final INT NOT NULL,
+        estatus TEXT DEFAULT 'ACTIVA',
+        fecha_asignacion DATE DEFAULT CURRENT_DATE,
+        fecha_cierre DATE,
+        notas TEXT,
+        creado_por INT,
+        creado_en TIMESTAMP DEFAULT NOW(),
+        CHECK (folio_final >= folio_inicial)
+      )`);
+    await query(`ALTER TABLE fac_bancos_cheques ADD COLUMN IF NOT EXISTS chequera_id INT REFERENCES fac_bancos_chequeras(id) ON DELETE SET NULL`);
     // Movimientos del estado de cuenta bancario
     await query(`
       CREATE TABLE IF NOT EXISTS fac_bancos_movimientos_ec (
@@ -337,6 +353,154 @@ router.delete('/beneficiarios/:id', requireRol('admin'), async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══ CHEQUERAS ══════════════════════════════════════
+// Devuelve el estado de la chequera activa de una cuenta y cuál es el folio que toca.
+// Regla: los folios se consumen en orden estricto. Un cheque cancelado también consume su folio.
+async function estadoChequera(cuentaId) {
+  const ch = await query(
+    `SELECT * FROM fac_bancos_chequeras
+     WHERE cuenta_bancaria_id=$1 AND estatus='ACTIVA'
+     ORDER BY folio_inicial LIMIT 1`,
+    [cuentaId]
+  );
+  if (!ch.rows.length) return { chequera: null, siguiente: null, usados: 0, restantes: 0 };
+  const q = ch.rows[0];
+  const u = await query(
+    `SELECT COALESCE(MAX(no_cheque::int), 0) AS max_folio, COUNT(*)::int AS n
+     FROM fac_bancos_cheques
+     WHERE chequera_id=$1 AND no_cheque ~ '^[0-9]+$'`,
+    [q.id]
+  );
+  const maxUsado = parseInt(u.rows[0].max_folio) || 0;
+  const usados   = maxUsado >= q.folio_inicial ? (maxUsado - q.folio_inicial + 1) : 0;
+  const siguiente = maxUsado >= q.folio_inicial ? maxUsado + 1 : q.folio_inicial;
+  const agotada = siguiente > q.folio_final;
+  return {
+    chequera: q,
+    siguiente: agotada ? null : siguiente,
+    usados,
+    restantes: Math.max(0, q.folio_final - q.folio_inicial + 1 - usados),
+    agotada
+  };
+}
+
+// GET /api/bancos/cuentas/:id/chequeras — lista con métricas de uso
+router.get('/cuentas/:id/chequeras', async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT q.*,
+        TO_CHAR(q.fecha_asignacion,'YYYY-MM-DD') AS fecha_asignacion,
+        TO_CHAR(q.fecha_cierre,'YYYY-MM-DD')     AS fecha_cierre,
+        (q.folio_final - q.folio_inicial + 1) AS total_folios,
+        COALESCE((SELECT MAX(c.no_cheque::int) FROM fac_bancos_cheques c
+                  WHERE c.chequera_id = q.id AND c.no_cheque ~ '^[0-9]+$'), 0) AS max_folio_usado,
+        (SELECT COUNT(*)::int FROM fac_bancos_cheques c WHERE c.chequera_id = q.id) AS n_cheques
+      FROM fac_bancos_chequeras q
+      WHERE q.cuenta_bancaria_id=$1
+      ORDER BY q.estatus='ACTIVA' DESC, q.folio_inicial DESC
+    `, [req.params.id]);
+    const estado = await estadoChequera(req.params.id);
+    res.json({ chequeras: r.rows, estado_actual: estado });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/bancos/cuentas/:id/siguiente-folio — cuál cheque toca emitir
+router.get('/cuentas/:id/siguiente-folio', async (req, res) => {
+  try {
+    res.json(await estadoChequera(req.params.id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/bancos/chequeras — asignar nueva chequera
+router.post('/chequeras', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
+  try {
+    const { cuenta_bancaria_id, folio_inicial, folio_final, notas, cerrar_anterior } = req.body;
+    const ini = parseInt(folio_inicial), fin = parseInt(folio_final);
+    if (!cuenta_bancaria_id || !Number.isInteger(ini) || !Number.isInteger(fin))
+      return res.status(400).json({ error: 'Cuenta, folio inicial y folio final son requeridos.' });
+    if (ini < 1) return res.status(400).json({ error: 'El folio inicial debe ser mayor a 0.' });
+    if (fin < ini) return res.status(400).json({ error: 'El folio final debe ser mayor o igual al inicial.' });
+
+    // No permitir rangos traslapados en la misma cuenta
+    const solapa = await query(
+      `SELECT id, folio_inicial, folio_final FROM fac_bancos_chequeras
+       WHERE cuenta_bancaria_id=$1 AND estatus <> 'CANCELADA'
+         AND NOT ($3 < folio_inicial OR $2 > folio_final)
+       LIMIT 1`,
+      [cuenta_bancaria_id, ini, fin]
+    );
+    if (solapa.rows.length) {
+      const s = solapa.rows[0];
+      return res.status(400).json({
+        error: `El rango ${ini}–${fin} se traslapa con una chequera existente (${s.folio_inicial}–${s.folio_final}).`
+      });
+    }
+
+    // Si se pide, cerrar la chequera activa anterior
+    if (cerrar_anterior) {
+      await query(
+        `UPDATE fac_bancos_chequeras SET estatus='CERRADA', fecha_cierre=CURRENT_DATE
+         WHERE cuenta_bancaria_id=$1 AND estatus='ACTIVA'`,
+        [cuenta_bancaria_id]
+      );
+    } else {
+      const activa = await query(
+        `SELECT id FROM fac_bancos_chequeras WHERE cuenta_bancaria_id=$1 AND estatus='ACTIVA' LIMIT 1`,
+        [cuenta_bancaria_id]
+      );
+      if (activa.rows.length) {
+        return res.status(400).json({
+          error: 'Ya existe una chequera ACTIVA en esta cuenta. Ciérrala primero o marca "cerrar la anterior".'
+        });
+      }
+    }
+
+    const r = await query(
+      `INSERT INTO fac_bancos_chequeras(cuenta_bancaria_id, folio_inicial, folio_final, notas, creado_por)
+       VALUES($1,$2,$3,$4,$5) RETURNING *`,
+      [cuenta_bancaria_id, ini, fin, notas || null, req.usuario.id]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH /api/bancos/chequeras/:id/estatus — cerrar / reactivar / cancelar
+router.patch('/chequeras/:id/estatus', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
+  try {
+    const { estatus } = req.body;
+    if (!['ACTIVA','CERRADA','AGOTADA','CANCELADA'].includes(estatus))
+      return res.status(400).json({ error: 'Estatus inválido.' });
+    const q = await query(`SELECT cuenta_bancaria_id FROM fac_bancos_chequeras WHERE id=$1`, [req.params.id]);
+    if (!q.rows.length) return res.status(404).json({ error: 'Chequera no encontrada.' });
+    // Solo puede haber una ACTIVA por cuenta
+    if (estatus === 'ACTIVA') {
+      const otra = await query(
+        `SELECT id FROM fac_bancos_chequeras WHERE cuenta_bancaria_id=$1 AND estatus='ACTIVA' AND id<>$2 LIMIT 1`,
+        [q.rows[0].cuenta_bancaria_id, req.params.id]
+      );
+      if (otra.rows.length) return res.status(400).json({ error: 'Ya hay otra chequera activa en esta cuenta.' });
+    }
+    await query(
+      `UPDATE fac_bancos_chequeras
+       SET estatus=$1, fecha_cierre = CASE WHEN $1='ACTIVA' THEN NULL ELSE CURRENT_DATE END
+       WHERE id=$2`,
+      [estatus, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/bancos/chequeras/:id — solo si no tiene cheques
+router.delete('/chequeras/:id', requireRol('admin'), async (req, res) => {
+  try {
+    const uso = await query(`SELECT COUNT(*)::int AS n FROM fac_bancos_cheques WHERE chequera_id=$1`, [req.params.id]);
+    if (uso.rows[0].n > 0)
+      return res.status(400).json({ error: `No se puede eliminar: la chequera ya tiene ${uso.rows[0].n} cheque(s) emitido(s).` });
+    await query(`DELETE FROM fac_bancos_chequeras WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ═══ CHEQUES EMITIDOS ═══════════════════════════════
 router.get('/cheques', async (req, res) => {
   try {
@@ -380,17 +544,55 @@ router.post('/cheques', requireRol('admin', 'capturista', 'tesoreria', 'gerente'
     if (!cuenta_bancaria_id || !no_cheque || !fecha_emision || !monto)
       return res.status(400).json({ error: 'Cuenta, N° cheque, fecha y monto son requeridos.' });
     const est = ['EMITIDO','ENTREGADO','COBRADO','CANCELADO'].includes(estatus) ? estatus : 'EMITIDO';
+    const folioTxt = String(no_cheque).trim();
+
+    // ── Control de chequera: el folio debe ser el consecutivo exacto ──
+    const ec = await estadoChequera(cuenta_bancaria_id);
+    let chequeraId = null;
+    if (ec.chequera) {
+      if (!/^\d+$/.test(folioTxt))
+        return res.status(400).json({ error: 'Con chequera asignada el N° de cheque debe ser numérico.' });
+      const folio = parseInt(folioTxt);
+      if (ec.agotada) {
+        return res.status(400).json({
+          error: `La chequera ${ec.chequera.folio_inicial}–${ec.chequera.folio_final} está agotada. Asigna una nueva chequera antes de emitir más cheques.`
+        });
+      }
+      if (folio < ec.chequera.folio_inicial || folio > ec.chequera.folio_final) {
+        return res.status(400).json({
+          error: `El folio ${folio} está fuera del rango de la chequera activa (${ec.chequera.folio_inicial}–${ec.chequera.folio_final}).`
+        });
+      }
+      if (folio !== ec.siguiente) {
+        return res.status(400).json({
+          error: folio > ec.siguiente
+            ? `No se puede saltar folios. El siguiente cheque a emitir es el ${ec.siguiente} (intentaste el ${folio}). Si el ${ec.siguiente} se dañó, regístralo como CANCELADO para liberar el consecutivo.`
+            : `El folio ${folio} ya fue usado. El siguiente disponible es el ${ec.siguiente}.`
+        });
+      }
+      chequeraId = ec.chequera.id;
+    }
+
     const r = await query(
       `INSERT INTO fac_bancos_cheques(
          cuenta_bancaria_id, beneficiario_id, no_cheque, fecha_emision, monto,
          concepto, estatus, recibio_cheque_nombre, recibio_cheque_fecha,
-         recibio_dinero_nombre, recibio_dinero_fecha, creado_por
-       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [cuenta_bancaria_id, beneficiario_id || null, String(no_cheque).trim(), fecha_emision, parseFloat(monto),
+         recibio_dinero_nombre, recibio_dinero_fecha, chequera_id, creado_por
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [cuenta_bancaria_id, beneficiario_id || null, folioTxt, fecha_emision, parseFloat(monto),
        concepto || null, est, recibio_cheque_nombre || null, recibio_cheque_fecha || null,
-       recibio_dinero_nombre || null, recibio_dinero_fecha || null, req.usuario.id]
+       recibio_dinero_nombre || null, recibio_dinero_fecha || null, chequeraId, req.usuario.id]
     );
-    res.status(201).json(r.rows[0]);
+
+    // Si con este cheque se consumió el último folio, marcar la chequera como AGOTADA
+    let avisoChequera = null;
+    if (chequeraId && parseInt(folioTxt) === ec.chequera.folio_final) {
+      await query(`UPDATE fac_bancos_chequeras SET estatus='AGOTADA', fecha_cierre=CURRENT_DATE WHERE id=$1`, [chequeraId]);
+      avisoChequera = `Se emitió el último cheque (${folioTxt}). La chequera quedó AGOTADA — asigna una nueva para continuar.`;
+    } else if (chequeraId && ec.restantes - 1 <= 5) {
+      avisoChequera = `Quedan ${ec.restantes - 1} cheque(s) en esta chequera.`;
+    }
+    res.status(201).json({ ...r.rows[0], aviso_chequera: avisoChequera });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -402,6 +604,24 @@ router.put('/cheques/:id', requireRol('admin', 'capturista', 'tesoreria', 'geren
       recibio_dinero_nombre, recibio_dinero_fecha
     } = req.body;
     const est = ['EMITIDO','ENTREGADO','COBRADO','CANCELADO'].includes(estatus) ? estatus : 'EMITIDO';
+
+    // Si el cheque pertenece a una chequera, su folio y cuenta quedan bloqueados
+    // para no romper el consecutivo. Todo lo demás sí es editable.
+    const actual = await query(
+      `SELECT chequera_id, no_cheque, cuenta_bancaria_id FROM fac_bancos_cheques WHERE id=$1`,
+      [req.params.id]
+    );
+    if (!actual.rows.length) return res.status(404).json({ error: 'Cheque no encontrado.' });
+    const a = actual.rows[0];
+    if (a.chequera_id) {
+      if (String(no_cheque).trim() !== String(a.no_cheque).trim())
+        return res.status(400).json({
+          error: `No se puede cambiar el folio de un cheque que pertenece a una chequera (rompería el consecutivo). Si el cheque ${a.no_cheque} se dañó, márcalo como CANCELADO.`
+        });
+      if (String(cuenta_bancaria_id) !== String(a.cuenta_bancaria_id))
+        return res.status(400).json({ error: 'No se puede mover un cheque de chequera a otra cuenta.' });
+    }
+
     await query(
       `UPDATE fac_bancos_cheques SET
          cuenta_bancaria_id=$1, beneficiario_id=$2, no_cheque=$3, fecha_emision=$4, monto=$5,
@@ -428,6 +648,29 @@ router.patch('/cheques/:id/estatus', requireRol('admin', 'capturista', 'tesoreri
 
 router.delete('/cheques/:id', requireRol('admin'), async (req, res) => {
   try {
+    // Solo se puede borrar el ÚLTIMO folio de la chequera; si no, se abriría un hueco
+    const c = await query(
+      `SELECT chequera_id, no_cheque FROM fac_bancos_cheques WHERE id=$1`, [req.params.id]
+    );
+    if (!c.rows.length) return res.status(404).json({ error: 'Cheque no encontrado.' });
+    if (c.rows[0].chequera_id) {
+      const mx = await query(
+        `SELECT MAX(no_cheque::int) AS m FROM fac_bancos_cheques
+         WHERE chequera_id=$1 AND no_cheque ~ '^[0-9]+$'`,
+        [c.rows[0].chequera_id]
+      );
+      if (parseInt(c.rows[0].no_cheque) !== parseInt(mx.rows[0].m)) {
+        return res.status(400).json({
+          error: `Solo puedes eliminar el último cheque emitido de la chequera (el ${mx.rows[0].m}). Borrar el ${c.rows[0].no_cheque} dejaría un hueco en el consecutivo — márcalo como CANCELADO en su lugar.`
+        });
+      }
+      // Al liberar folios, la chequera vuelve a estar activa
+      await query(
+        `UPDATE fac_bancos_chequeras SET estatus='ACTIVA', fecha_cierre=NULL
+         WHERE id=$1 AND estatus='AGOTADA'`,
+        [c.rows[0].chequera_id]
+      );
+    }
     await query(`DELETE FROM fac_bancos_cheques WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
