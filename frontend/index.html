@@ -7369,7 +7369,8 @@ async function openConfigPINs() {
       <button onclick="closeModal('modal-cambiar-clave')" style="position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;border:2px solid var(--border);background:#fff;cursor:pointer;font-size:14px;font-weight:800;color:var(--muted)">✕</button>
       <h4>⚙ Configurar Horarios, PINs y Ubicaciones</h4>
       <div class="ibox info" style="margin-bottom:12px;font-size:12px">
-        Asigna a cada colaborador su <strong>horario</strong>, <strong>días de descanso</strong>, <strong>PIN</strong> y las <strong>ubicaciones autorizadas</strong> desde las que puede marcar entrada.
+        Asigna a cada colaborador su <strong>horario</strong>, <strong>días de descanso</strong>, <strong>tolerancia de llegada</strong>, <strong>PIN</strong> y las <strong>ubicaciones autorizadas</strong> desde las que puede marcar entrada.
+        <br><small style="color:var(--muted)">⏰ <strong>Tolerancia</strong>: minutos de gracia. Si el colaborador llega dentro de ese margen NO se marca retardo.</small>
         <br><small style="color:var(--muted)">📍 Si dejas la lista de ubicaciones vacía para un colaborador, podrá marcar desde <strong>cualquiera</strong> de las ubicaciones globales activas.</small>
       </div>
       <div style="max-height:440px;overflow-y:auto">
@@ -7379,6 +7380,7 @@ async function openConfigPINs() {
               <th style="text-align:left;padding:8px">Colaborador</th>
               <th style="padding:8px">Entrada</th>
               <th style="padding:8px">Salida</th>
+              <th style="padding:8px" title="Minutos de gracia para no marcar retardo">⏰ Toler.</th>
               <th style="padding:8px">Descanso</th>
               <th style="padding:8px">PIN</th>
               <th style="padding:8px;text-align:left">📍 Ubicaciones autorizadas</th>
@@ -7395,6 +7397,12 @@ async function openConfigPINs() {
               </td>
               <td style="padding:8px"><input type="time" id="cpin-hora-${e.id}" value="${e.hora_entrada_esperada?e.hora_entrada_esperada.toString().slice(0,5):'09:00'}" style="width:95px"></td>
               <td style="padding:8px"><input type="time" id="cpin-sal-${e.id}" value="${e.hora_salida_esperada?e.hora_salida_esperada.toString().slice(0,5):'18:00'}" style="width:95px"></td>
+              <td style="padding:8px;text-align:center">
+                <div style="display:inline-flex;align-items:center;gap:4px">
+                  <input type="number" id="cpin-tol-${e.id}" value="${e.tolerancia_min||0}" min="0" max="120" style="width:56px;text-align:center;font-weight:800">
+                  <span style="font-size:10px;color:var(--muted)">min</span>
+                </div>
+              </td>
               <td style="padding:8px">
                 <div style="display:flex;gap:3px" id="cpin-dd-${e.id}" data-empid="${e.id}">
                   ${DIAS.map(d => `
@@ -7452,13 +7460,15 @@ async function guardarPINEmp(empId) {
     ? [...contU.querySelectorAll('input[type="checkbox"]:checked')].map(cb => parseInt(cb.dataset.ubi))
     : [];
   try {
+    const tolerancia = parseInt($(`cpin-tol-${empId}`)?.value) || 0;
     await api(`/checador/empleado/${empId}/pin`, {
       method: 'PUT',
       body: JSON.stringify({
         pin,
         hora_entrada_esperada: horaEnt,
         hora_salida_esperada : horaSal,
-        dias_descanso        : dias.join(',')
+        dias_descanso        : dias.join(','),
+        tolerancia_min       : tolerancia
       })
     });
     await api(`/checador/empleados/${empId}/ubicaciones`, {

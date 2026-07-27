@@ -4,6 +4,13 @@ const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
 
+// Migración idempotente: columna tolerancia_min en empleados (default 0)
+(async () => {
+  try {
+    await query(`ALTER TABLE fac_empleados ADD COLUMN IF NOT EXISTS tolerancia_min INT DEFAULT 0`);
+  } catch (e) { console.warn('Migración tolerancia_min:', e.message); }
+})();
+
 // Migración idempotente: notificaciones dirigidas a colaboradores para mostrar al marcar entrada
 (async () => {
   try {
@@ -808,8 +815,10 @@ router.get('/empleados', async (req, res) => {
   try {
     const r = await query(`
       SELECT id, nombre, puesto, departamento, numero_colaborador,
+        pin_checador,
         (pin_checador IS NOT NULL AND pin_checador != '') AS tiene_pin,
-        hora_entrada_esperada, hora_salida_esperada, dias_descanso
+        hora_entrada_esperada, hora_salida_esperada, dias_descanso,
+        COALESCE(tolerancia_min, 0) AS tolerancia_min
       FROM fac_empleados WHERE activo=TRUE ORDER BY nombre
     `);
     res.json(r.rows);
@@ -841,7 +850,9 @@ router.post('/entrada', async (req, res) => {
     }
 
     const emp = await query(
-      `SELECT id, nombre, pin_checador, hora_entrada_esperada, dias_descanso FROM fac_empleados WHERE id=$1 AND activo=TRUE`,
+      `SELECT id, nombre, pin_checador, hora_entrada_esperada, dias_descanso,
+              COALESCE(tolerancia_min, 0) AS tolerancia_min
+       FROM fac_empleados WHERE id=$1 AND activo=TRUE`,
       [empleado_id]
     );
     if (!emp.rows.length) return res.status(404).json({ error: 'Empleado no encontrado.' });
@@ -875,12 +886,15 @@ router.post('/entrada', async (req, res) => {
     const enVacaciones = vac.rows.length > 0;
 
     // Calcular retardo (minutos) — NO aplica en descanso ni vacaciones
+    // Se resta la tolerancia configurada del empleado (dentro de ese margen no cuenta como retardo)
     let minutosRetardo = 0;
     if (!esDescanso && !enVacaciones && emp.rows[0].hora_entrada_esperada) {
       const esperada = emp.rows[0].hora_entrada_esperada.toString().slice(0,5).split(':');
       const min_esperado = parseInt(esperada[0])*60 + parseInt(esperada[1]);
       const min_actual   = ahora.getHours()*60 + ahora.getMinutes();
-      minutosRetardo = Math.max(0, min_actual - min_esperado);
+      const tolerancia   = parseInt(emp.rows[0].tolerancia_min) || 0;
+      const dif = min_actual - min_esperado;
+      minutosRetardo = dif > tolerancia ? dif : 0;
     }
 
     // Ver si ya existe registro para hoy
@@ -1057,23 +1071,26 @@ router.delete('/:id', requireRol('admin'), async (req, res) => {
 // PUT /api/checador/empleado/:id/pin — configurar PIN + horario + días descanso (admin)
 router.put('/empleado/:id/pin', requireRol('admin'), async (req, res) => {
   try {
-    const { pin, hora_entrada_esperada, hora_salida_esperada, dias_descanso } = req.body;
+    const { pin, hora_entrada_esperada, hora_salida_esperada, dias_descanso, tolerancia_min } = req.body;
     // Normalizar días descanso: string tipo "0,6"
     let dd = '';
     if (Array.isArray(dias_descanso)) dd = dias_descanso.join(',');
     else if (typeof dias_descanso === 'string') dd = dias_descanso;
+    const tol = Math.max(0, Math.min(120, parseInt(tolerancia_min) || 0));
     await query(
       `UPDATE fac_empleados SET
          pin_checador=$1,
          hora_entrada_esperada=$2,
          hora_salida_esperada=$3,
          dias_descanso=$4,
+         tolerancia_min=$5,
          actualizado_en=NOW()
-       WHERE id=$5`,
+       WHERE id=$6`,
       [(pin||'').trim() || null,
        hora_entrada_esperada || '09:00',
        hora_salida_esperada  || '18:00',
        dd,
+       tol,
        req.params.id]
     );
     res.json({ ok: true });
