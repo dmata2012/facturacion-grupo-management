@@ -2053,11 +2053,15 @@ async function openCheque(id) {
 
   $('modal-cheque-body').innerHTML = `
     <style>
-      .ck-wrap{margin:-28px -28px -20px;display:grid;grid-template-columns:340px 1fr;min-height:540px}
+      /* Formulario a la izquierda · vista previa fija arriba a la derecha */
+      .ck-wrap{margin:-28px -28px -20px;display:grid;grid-template-columns:1fr 340px;min-height:540px}
       @media (max-width:880px){ .ck-wrap{grid-template-columns:1fr} }
       .ck-side{background:linear-gradient(160deg,#0f172a 0%,#1e293b 100%);padding:24px 20px;
-        border-radius:var(--r-lg) 0 0 var(--r-lg);display:flex;flex-direction:column;gap:16px;position:relative;overflow:hidden}
-      @media (max-width:880px){ .ck-side{border-radius:var(--r-lg) var(--r-lg) 0 0} }
+        border-radius:0 var(--r-lg) var(--r-lg) 0;display:flex;flex-direction:column;gap:16px;overflow:hidden;
+        order:2;align-self:start;position:sticky;top:0;max-height:88vh}
+      @media (max-width:880px){
+        .ck-side{border-radius:var(--r-lg) var(--r-lg) 0 0;position:static;max-height:none;order:0}
+      }
       .ck-side::before{content:'';position:absolute;top:-90px;left:-70px;width:240px;height:240px;
         background:radial-gradient(circle,rgba(34,197,94,.18) 0%,transparent 70%);pointer-events:none}
       .ck-side-t{font-size:10px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:#64748b}
@@ -2095,7 +2099,9 @@ async function openCheque(id) {
         font-size:11px;font-weight:800;letter-spacing:.4px;align-self:flex-start}
       .ck-hint{font-size:11px;color:#94a3b8;line-height:1.5;margin-top:auto}
       /* Formulario */
-      .ck-main{padding:22px 24px;overflow-y:auto;max-height:80vh}
+      .ck-main{padding:22px 24px;overflow-y:auto;max-height:88vh;order:1;
+        border-radius:var(--r-lg) 0 0 var(--r-lg);background:#fff}
+      @media (max-width:880px){ .ck-main{border-radius:0 0 var(--r-lg) var(--r-lg);order:1} }
       .ck-h{font-size:19px;font-weight:900;color:var(--dark);margin:0 0 2px}
       .ck-sub{font-size:12px;color:var(--muted);margin-bottom:16px}
       .ck-sec{margin-bottom:18px}
