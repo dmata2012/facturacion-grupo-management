@@ -5533,6 +5533,18 @@ async function renderChecadorTablet() {
       .emp-role { font-size:11px;color:#94a3b8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis }
       .emp-hora { font-size:10px;color:#22c55e;margin-top:2px;font-weight:700;font-family:'Consolas',monospace }
       .emp-row.done-completa .emp-hora { color:#60a5fa }
+      /* Badge de notificaciones pendientes */
+      .emp-notif { position:relative;flex-shrink:0;font-size:20px;filter:drop-shadow(0 0 6px rgba(245,158,11,.7));
+        animation:notifRing 2.2s ease-in-out infinite;transform-origin:50% 10% }
+      .emp-notif .n { position:absolute;top:-3px;right:-6px;background:#dc2626;color:#fff;font-size:9px;
+        font-weight:900;min-width:15px;height:15px;border-radius:99px;display:flex;align-items:center;
+        justify-content:center;border:1.5px solid #0f172a;padding:0 3px }
+      @keyframes notifRing {
+        0%,58%,100% { transform:rotate(0) }
+        62% { transform:rotate(14deg) } 66% { transform:rotate(-12deg) }
+        70% { transform:rotate(9deg) }  74% { transform:rotate(-7deg) }
+        78% { transform:rotate(3deg) }
+      }
       .emp-pin-badge { font-size:11px;color:#a78bfa;background:rgba(139,92,246,.15);padding:3px 8px;border-radius:20px;font-weight:700 }
 
       .user-panel { display:flex;flex-direction:column;align-items:center;gap:22px;width:100%;max-width:640px;animation:fadeInUp .35s ease;margin-top:-40px }
@@ -5630,11 +5642,13 @@ async function renderChecadorTablet() {
   if (window._tabClimaTimer) clearInterval(window._tabClimaTimer);
   window._tabClimaTimer = setInterval(cargarClimaTablet, 15 * 60 * 1000); // cada 15 min
 
-  // Cargar empleados
+  // Cargar empleados + conteo de notificaciones pendientes
   try {
     window._tabEmps = await api('/checador/empleados');
     window._tabRegistrosHoy = await api('/checador/hoy?fecha=' + new Date().toISOString().slice(0,10));
   } catch(e) { window._tabEmps = []; window._tabRegistrosHoy = { registros:[] }; }
+  try { window._tabNotifCount = await api('/checador/notificaciones-conteo'); }
+  catch(e) { window._tabNotifCount = {}; }
 
   renderTabSearch();
 }
@@ -5722,8 +5736,12 @@ function renderTabSearch() {
     if (!$('tab-emp-list')) { clearInterval(window._tabPollTimer); return; }
     try {
       const hoy = new Date().toISOString().slice(0,10);
-      const d = await api('/checador/hoy?fecha=' + hoy);
+      const [d, nc] = await Promise.all([
+        api('/checador/hoy?fecha=' + hoy),
+        api('/checador/notificaciones-conteo').catch(() => window._tabNotifCount || {})
+      ]);
       window._tabRegistrosHoy = d;
+      window._tabNotifCount = nc;
       renderTabEmpList();
     } catch(e) {}
   }, 30000);
@@ -5761,6 +5779,8 @@ function renderTabEmpList() {
       claseEstado = 'done-entrada';
       horaInfo = `<div class="emp-hora">📥 Entrada ${String(reg.hora_entrada).slice(0,5)}</div>`;
     }
+    const nPend = (window._tabNotifCount || {})[e.id] || 0;
+    const badgeNotif = nPend ? `<div class="emp-notif" title="${nPend} mensaje${nPend!==1?'s':''} sin leer">🔔${nPend>1?`<span class="n">${nPend}</span>`:''}</div>` : '';
     return `
     <div class="emp-row ${claseEstado}" onclick="seleccionarEmpleadoTablet(${e.id})">
       <div class="emp-avatar">${iniciales(e.nombre)}</div>
@@ -5769,11 +5789,12 @@ function renderTabEmpList() {
         <div class="emp-role">${e.numero_colaborador?'#'+e.numero_colaborador+' · ':''}${e.puesto||'Sin puesto'}</div>
         ${horaInfo}
       </div>
+      ${badgeNotif}
     </div>`;
   }).join('');
 }
 
-function seleccionarEmpleadoTablet(empId) {
+async function seleccionarEmpleadoTablet(empId) {
   const emp = (window._tabEmps||[]).find(e => e.id === empId);
   if (!emp) return;
   window._tabEmpSel = emp;
@@ -5787,12 +5808,24 @@ function seleccionarEmpleadoTablet(empId) {
   else if (regHoy && regHoy.hora_entrada && regHoy.hora_salida) hint = 'YA MARCASTE ENTRADA Y SALIDA HOY';
   window._tabAccion = accion;
 
-  // Si NO tiene PIN, saltar directo a la confirmación
-  if (!emp.tiene_pin) {
-    renderTabConfirmar(emp, accion, hint, false);
-    return;
+  const continuar = () => {
+    // Si NO tiene PIN, saltar directo a la confirmación
+    if (!emp.tiene_pin) renderTabConfirmar(emp, accion, hint, false);
+    else                renderTabPin(emp, accion, hint);
+  };
+
+  // Si tiene mensajes pendientes, mostrarlos ANTES de pedir PIN / confirmar
+  if ((window._tabNotifCount || {})[empId]) {
+    try {
+      const notifs = await api(`/checador/notificaciones-pendientes/${empId}`);
+      if (notifs.length) {
+        window._tabPostNotif = continuar;
+        mostrarNotificacionesEmp(emp.nombre, empId, notifs);
+        return;
+      }
+    } catch(e) { /* si falla, seguir con el flujo normal */ }
   }
-  renderTabPin(emp, accion, hint);
+  continuar();
 }
 
 function renderTabPin(emp, accion, hint) {
@@ -6021,6 +6054,8 @@ async function confirmarNotificacionesEmp(empId, ids) {
       method: 'POST', body: JSON.stringify({ empleado_id: empId })
     })));
   } catch(e) {}
+  // Limpiar el badge 🔔 de este colaborador en el kiosco
+  if (window._tabNotifCount) delete window._tabNotifCount[empId];
   closeModal('modal-notif-show');
   // Si estamos en modo tablet, ejecutar callback (regresar al home)
   if (typeof window._tabPostNotif === 'function') {

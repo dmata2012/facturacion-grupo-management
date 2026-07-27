@@ -1030,11 +1030,51 @@ router.post('/salida', async (req, res) => {
        reg.rows[0].id]
     );
 
+    // Traer notificaciones pendientes también al marcar salida
+    // (si el colaborador ya había entrado antes de que se creara el mensaje)
+    let notificaciones = [];
+    try { notificaciones = await notificacionesPendientes(empleado_id); } catch(e) {}
+
     res.json({
       ok: true, empleado: emp.rows[0].nombre, hora: horaAhora,
       minutos_trabajados: minTrab,
-      ubicacion: ubiInfo ? { nombre: ubiInfo.nombre, distancia: ubiInfo.distancia } : null
+      ubicacion: ubiInfo ? { nombre: ubiInfo.nombre, distancia: ubiInfo.distancia } : null,
+      notificaciones
     });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/checador/notificaciones-pendientes/:empleado_id
+// Permite consultar los mensajes sin necesidad de marcar entrada/salida
+router.get('/notificaciones-pendientes/:empleado_id', async (req, res) => {
+  try {
+    const rows = await notificacionesPendientes(req.params.empleado_id);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/checador/notificaciones-conteo — cuántos mensajes pendientes tiene cada empleado
+// Se usa en el kiosco para mostrar el badge 🔔 en las tarjetas
+router.get('/notificaciones-conteo', async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT e.id AS empleado_id, COUNT(n.id)::int AS pendientes
+      FROM fac_empleados e
+      LEFT JOIN fac_checador_notificaciones n
+        ON n.activa = TRUE
+       AND (n.inicia_en IS NULL OR n.inicia_en <= CURRENT_DATE)
+       AND (n.vence_en  IS NULL OR n.vence_en  >= CURRENT_DATE)
+       AND (n.empleado_id IS NULL OR n.empleado_id = e.id)
+       AND NOT EXISTS (
+         SELECT 1 FROM fac_checador_notif_vistas v
+         WHERE v.notificacion_id = n.id AND v.empleado_id = e.id
+       )
+      WHERE e.activo = TRUE
+      GROUP BY e.id
+    `);
+    const mapa = {};
+    r.rows.forEach(x => { if (x.pendientes > 0) mapa[x.empleado_id] = x.pendientes; });
+    res.json(mapa);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
