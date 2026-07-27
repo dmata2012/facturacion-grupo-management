@@ -7253,19 +7253,40 @@ async function openUbicacionesCH() {
         Configura las coordenadas de tu(s) oficina(s). Cuando la validación esté activa, los colaboradores solo podrán marcar entrada/salida si están dentro del radio autorizado.
       </div>
 
-      <div style="background:${d.validar_ubicacion?'#fef3c7':'#f3f4f6'};border:2px solid ${d.validar_ubicacion?'#f59e0b':'#d1d5db'};border-radius:10px;padding:12px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-        <div>
-          <div style="font-weight:800;color:${d.validar_ubicacion?'#92400e':'#374151'}">
-            ${d.validar_ubicacion ? '🔒 Validación de ubicación ACTIVA' : '🔓 Validación de ubicación INACTIVA'}
-          </div>
-          <div style="font-size:11px;color:${d.validar_ubicacion?'#78350f':'#6b7280'};margin-top:2px">
-            ${d.validar_ubicacion ? 'Solo se puede marcar dentro de las ubicaciones registradas.' : 'Los colaboradores pueden marcar desde cualquier lugar.'}
+      <style>
+        @keyframes ubiGlow {
+          0%,100% { box-shadow:0 0 0 0 rgba(22,163,74,.45), 0 6px 20px rgba(22,163,74,.3) }
+          50%     { box-shadow:0 0 0 8px rgba(22,163,74,0), 0 6px 26px rgba(22,163,74,.45) }
+        }
+        @keyframes ubiDot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.45;transform:scale(.82)} }
+      </style>
+      ${d.validar_ubicacion ? `
+      <div style="background:linear-gradient(135deg,#15803d 0%,#22c55e 100%);border:3px solid #4ade80;border-radius:14px;padding:16px 18px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;animation:ubiGlow 2s ease-in-out infinite;color:#fff">
+        <div style="display:flex;align-items:center;gap:14px">
+          <div style="width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;border:2px solid rgba(255,255,255,.35)">🔒</div>
+          <div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="width:9px;height:9px;background:#bbf7d0;border-radius:50%;box-shadow:0 0 10px #bbf7d0;animation:ubiDot 1.3s infinite;flex-shrink:0"></span>
+              <span style="font-weight:900;font-size:15px;letter-spacing:.6px;text-transform:uppercase">Validación de ubicación ACTIVA</span>
+            </div>
+            <div style="font-size:12px;opacity:.92;margin-top:3px;font-weight:600">
+              Solo se puede marcar entrada/salida dentro de las ubicaciones registradas.
+            </div>
           </div>
         </div>
-        <button class="btn ${d.validar_ubicacion?'bo':'bs'} bsm" onclick="toggleValidarUbicacion(${!d.validar_ubicacion})">
-          ${d.validar_ubicacion ? '🔓 Desactivar' : '🔒 Activar validación'}
-        </button>
-      </div>
+        <button class="btn bsm" style="background:rgba(255,255,255,.18);color:#fff;border:1.5px solid rgba(255,255,255,.45);font-weight:800;white-space:nowrap"
+                onclick="toggleValidarUbicacion(false)">🔓 Desactivar</button>
+      </div>` : `
+      <div style="background:#f3f4f6;border:2px dashed #d1d5db;border-radius:12px;padding:14px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:40px;height:40px;border-radius:50%;background:#e5e7eb;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">🔓</div>
+          <div>
+            <div style="font-weight:800;color:#374151;font-size:14px">Validación de ubicación INACTIVA</div>
+            <div style="font-size:11.5px;color:#6b7280;margin-top:2px">Los colaboradores pueden marcar desde cualquier lugar.</div>
+          </div>
+        </div>
+        <button class="btn bs bsm" style="white-space:nowrap" onclick="toggleValidarUbicacion(true)">🔒 Activar validación</button>
+      </div>`}
 
       <div style="margin-bottom:14px">
         <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.5px;margin-bottom:8px">➕ Agregar nueva ubicación</div>
@@ -7380,6 +7401,21 @@ async function openConfigPINs() {
     const parseDD = s => new Set(String(s||'').split(',').filter(x=>x!=='').map(x=>parseInt(x)));
     $('modal-cambiar-clave-body').innerHTML = `
       <button onclick="closeModal('modal-cambiar-clave')" style="position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;border:2px solid var(--border);background:#fff;cursor:pointer;font-size:14px;font-weight:800;color:var(--muted)">✕</button>
+      <style>
+        .chip-ubi{cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:5px 11px;border-radius:16px;
+          background:#f3f4f6;color:#64748b;border:1.5px solid #e5e7eb;font-size:11px;font-weight:700;
+          transition:all .18s;user-select:none}
+        .chip-ubi input{display:none}
+        .chip-ubi .ck{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;
+          border-radius:50%;background:#d1d5db;color:#fff;font-size:9px;font-weight:900;flex-shrink:0;transition:all .18s}
+        .chip-ubi .ck::before{content:'＋'}
+        .chip-ubi:hover{background:#e5e7eb;border-color:#cbd5e1;color:#475569}
+        .chip-ubi.on{background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;border-color:#4ade80;
+          box-shadow:0 2px 8px rgba(22,163,74,.35);transform:translateY(-1px)}
+        .chip-ubi.on .ck{background:rgba(255,255,255,.28);box-shadow:0 0 0 1.5px rgba(255,255,255,.45)}
+        .chip-ubi.on .ck::before{content:'✓'}
+        .chip-ubi.on:hover{background:linear-gradient(135deg,#15803d,#16a34a);box-shadow:0 4px 12px rgba(22,163,74,.5)}
+      </style>
       <h4>⚙ Configurar Horarios, PINs y Ubicaciones</h4>
       <div class="ibox info" style="margin-bottom:12px;font-size:12px">
         Asigna a cada colaborador su <strong>horario</strong>, <strong>días de descanso</strong>, <strong>tolerancia de llegada</strong>, <strong>PIN</strong> y las <strong>ubicaciones autorizadas</strong> desde las que puede marcar entrada.
@@ -7440,12 +7476,10 @@ async function openConfigPINs() {
                 <div id="cubi-${e.id}" style="display:flex;flex-wrap:wrap;gap:4px">
                   ${ubis.length ? ubis.map(u => {
                     const asig = asignadas.has(u.id);
-                    return `<label style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:14px;background:${asig?'#dcfce7':'#f3f4f6'};color:${asig?'#166534':'var(--muted)'};border:1px solid ${asig?'#86efac':'var(--border)'};font-size:10.5px;font-weight:700"
-                             title="${u.nombre}">
+                    return `<label class="chip-ubi${asig?' on':''}" title="${(u.nombre||'').replace(/"/g,'&quot;')}">
                       <input type="checkbox" data-ubi="${u.id}" ${asig?'checked':''}
-                             onchange="this.parentElement.style.background=this.checked?'#dcfce7':'#f3f4f6';this.parentElement.style.color=this.checked?'#166534':'var(--muted)';this.parentElement.style.borderColor=this.checked?'#86efac':'var(--border)'"
-                             style="display:none">
-                      📍 ${u.nombre}
+                             onchange="this.closest('.chip-ubi').classList.toggle('on', this.checked)">
+                      <span class="ck"></span>${u.nombre}
                     </label>`;
                   }).join('') : '<span style="font-size:10.5px;color:#92400e;font-style:italic">⚠ Sin ubicaciones — créalas en 📍 Ubicaciones</span>'}
                 </div>
