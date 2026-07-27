@@ -642,7 +642,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-vac-editar-tomados"><div class="modal modal-sm" id="modal-vac-editar-tomados-body"></div></div>
 <div class="overlay" id="modal-cc-permisos"><div class="modal" id="modal-cc-permisos-body"></div></div>
 <div class="overlay" id="modal-asist-cell"><div class="modal modal-sm" id="modal-asist-cell-body"></div></div>
-<div class="overlay" id="modal-banco"><div class="modal" style="width:min(680px,96vw)" id="modal-banco-body"></div></div>
+<div class="overlay" id="modal-banco"><div class="modal" style="width:min(940px,96vw)" id="modal-banco-body"></div></div>
 <div class="overlay" id="modal-cheque"><div class="modal" style="width:min(720px,96vw)" id="modal-cheque-body"></div></div>
 <div class="overlay" id="modal-mov-ec"><div class="modal modal-sm" id="modal-mov-ec-body"></div></div>
 <div class="overlay" id="modal-empresas-bnc"><div class="modal modal-sm" id="modal-empresas-bnc-body"></div></div>
@@ -1183,6 +1183,31 @@ function renderCuentasBanco(cuentas) {
   cont.innerHTML = kpisHtml + cardsHtml;
 }
 
+// Paleta por banco para la tarjeta de preview
+const BANCO_TEMA = {
+  'BANORTE':      ['#c8102e','#8b0000'], 'BBVA MEXICO': ['#004481','#1464a5'],
+  'BBVA':         ['#004481','#1464a5'], 'SANTANDER':   ['#ec0000','#990000'],
+  'BANAMEX':      ['#00539f','#003366'], 'CITIBANAMEX': ['#00539f','#003366'],
+  'HSBC':         ['#db0011','#8b0000'], 'SCOTIABANK':  ['#ec111a','#a50d14'],
+  'INBURSA':      ['#005baa','#003d73'], 'BAJIO':       ['#00843d','#00562a'],
+  'AFIRME':       ['#00a94f','#007a39'], 'AZTECA':      ['#00a94f','#00713a'],
+  'BANREGIO':     ['#f47b20','#c25a0a'], 'MIFEL':       ['#8b1a3d','#5e1129'],
+  'MULTIVA':      ['#e4002b','#a30020'], 'BANCOPPEL':   ['#ffd100','#e6a800'],
+  'STP':          ['#5b21b6','#3b1a80'], 'NU MEXICO':   ['#820ad1','#5c0894'],
+  'KLAR':         ['#111827','#374151']
+};
+const TIPO_CTA = [
+  { v:'cheques',   ic:'📝', l:'Cheques',   d:'Operativa, permite emitir cheques' },
+  { v:'ahorro',    ic:'🐖', l:'Ahorro',    d:'Genera rendimiento, uso limitado' },
+  { v:'inversion', ic:'📈', l:'Inversión', d:'Plazo fijo o fondo de inversión' },
+  { v:'tarjeta',   ic:'💳', l:'Tarjeta',   d:'Crédito o débito empresarial' },
+  { v:'otra',      ic:'🔹', l:'Otra',      d:'Cualquier otro tipo' }
+];
+const MONEDAS = [
+  { v:'MXN', f:'🇲🇽', l:'Peso' }, { v:'USD', f:'🇺🇸', l:'Dólar' },
+  { v:'EUR', f:'🇪🇺', l:'Euro' }, { v:'CAD', f:'🇨🇦', l:'CAD' }, { v:'GBP', f:'🇬🇧', l:'Libra' }
+];
+
 async function openCuentaBanco(id) {
   const c = id ? await api(`/bancos/cuentas/${id}`) : {
     banco:'', sucursal:'', alias:'', titular:'', tipo:'cheques',
@@ -1193,81 +1218,302 @@ async function openCuentaBanco(id) {
     api('/bancos/empresas'),
     api('/bancos/catalogo').catch(() => [])
   ]); } catch(e) {}
+  window._bcCatalogo = catalogo;
+
   $('modal-banco-body').innerHTML = `
-    <div style="margin:-28px -28px 20px;padding:20px 28px;background:linear-gradient(135deg,#1e3a8a,#3b82f6);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
-      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">${id?'Editar':'Nueva'} cuenta bancaria</div>
-      <div style="font-size:20px;font-weight:900;margin-top:4px">🏦 ${id?(c.alias||c.banco):'Alta de cuenta'}</div>
-    </div>
-    <div class="fg" style="gap:12px">
-      <div class="fi"><label>Banco <span style="color:var(--red)">*</span>
-        <span style="font-weight:400;color:var(--muted);font-size:10.5px">(elige del catálogo o escribe uno nuevo)</span></label>
-        <input id="bc-banco" list="bc-banco-lista" placeholder="Ej: BANORTE, BBVA MEXICO..." value="${c.banco||''}"
-               autocomplete="off" style="text-transform:uppercase" required>
-        <datalist id="bc-banco-lista">
-          ${catalogo.map(b => `<option value="${b.nombre}">${b.clave_sat?'Clave SAT '+b.clave_sat:''}</option>`).join('')}
-        </datalist>
+    <style>
+      .bc-wrap{margin:-28px -28px -20px;display:grid;grid-template-columns:300px 1fr;min-height:520px}
+      @media (max-width:820px){ .bc-wrap{grid-template-columns:1fr} }
+      /* Panel izquierdo con tarjeta viva */
+      .bc-side{background:linear-gradient(160deg,#0f172a 0%,#1e293b 100%);padding:26px 22px;
+        border-radius:var(--r-lg) 0 0 var(--r-lg);display:flex;flex-direction:column;gap:18px;position:relative;overflow:hidden}
+      @media (max-width:820px){ .bc-side{border-radius:var(--r-lg) var(--r-lg) 0 0} }
+      .bc-side::before{content:'';position:absolute;top:-80px;right:-80px;width:220px;height:220px;
+        background:radial-gradient(circle,rgba(59,130,246,.22) 0%,transparent 70%);pointer-events:none}
+      .bc-side-t{font-size:10px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:#64748b}
+      /* Tarjeta bancaria */
+      .bc-card{border-radius:16px;padding:20px 18px;color:#fff;box-shadow:0 14px 34px rgba(0,0,0,.45);
+        aspect-ratio:1.6/1;display:flex;flex-direction:column;justify-content:space-between;position:relative;
+        overflow:hidden;transition:background .4s ease}
+      .bc-card::after{content:'';position:absolute;top:-40%;left:-20%;width:90%;height:180%;
+        background:linear-gradient(105deg,rgba(255,255,255,.16) 0%,transparent 55%);pointer-events:none}
+      .bc-card .bnk{font-size:14px;font-weight:900;letter-spacing:1.2px;text-transform:uppercase;line-height:1.15}
+      .bc-card .suc{font-size:9.5px;opacity:.75;font-weight:600;margin-top:1px}
+      .bc-card .chip{width:34px;height:25px;border-radius:5px;
+        background:linear-gradient(135deg,#fde68a,#d4a017);opacity:.9;
+        box-shadow:inset 0 0 0 1px rgba(255,255,255,.3)}
+      .bc-card .num{font-family:'Consolas',monospace;font-size:15px;letter-spacing:1.6px;font-weight:700;
+        text-shadow:0 1px 3px rgba(0,0,0,.35)}
+      .bc-card .btm{display:flex;justify-content:space-between;align-items:flex-end;gap:8px}
+      .bc-card .ttl{font-size:9.5px;text-transform:uppercase;letter-spacing:.9px;opacity:.85;font-weight:700;
+        overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
+      .bc-card .cur{font-size:11px;font-weight:900;background:rgba(255,255,255,.2);padding:3px 8px;
+        border-radius:20px;white-space:nowrap}
+      .bc-hints{font-size:11px;color:#94a3b8;line-height:1.55}
+      .bc-hints b{color:#cbd5e1}
+      .bc-prog{margin-top:auto}
+      .bc-prog-bar{height:6px;background:rgba(148,163,184,.18);border-radius:99px;overflow:hidden}
+      .bc-prog-bar i{display:block;height:100%;background:linear-gradient(90deg,#3b82f6,#22c55e);
+        border-radius:99px;transition:width .35s ease}
+      .bc-prog-lbl{font-size:10px;color:#94a3b8;margin-top:5px;font-weight:700;letter-spacing:.5px}
+      /* Panel derecho: formulario */
+      .bc-main{padding:24px 26px;overflow-y:auto;max-height:78vh}
+      .bc-h{font-size:19px;font-weight:900;color:var(--dark);margin:0 0 2px}
+      .bc-sub{font-size:12px;color:var(--muted);margin-bottom:18px}
+      .bc-sec{margin-bottom:20px}
+      .bc-sec-t{display:flex;align-items:center;gap:7px;font-size:10.5px;font-weight:800;
+        text-transform:uppercase;letter-spacing:1px;color:#3b82f6;margin-bottom:10px;
+        padding-bottom:6px;border-bottom:1.5px solid #e0e7ff}
+      .bc-sec-t .n{width:19px;height:19px;border-radius:50%;background:#3b82f6;color:#fff;
+        display:inline-flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0}
+      /* Cards de tipo de cuenta */
+      .bc-tipos{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:7px}
+      .bc-tipo{border:2px solid var(--border);border-radius:11px;padding:10px 7px;cursor:pointer;
+        text-align:center;transition:all .16s;background:#fff}
+      .bc-tipo input{display:none}
+      .bc-tipo .ic{font-size:21px;display:block;margin-bottom:3px}
+      .bc-tipo .l{font-size:11px;font-weight:800;color:#475569}
+      .bc-tipo:hover{border-color:#93c5fd;background:#f8fafc;transform:translateY(-1px)}
+      .bc-tipo.on{border-color:#3b82f6;background:#eff6ff;box-shadow:0 3px 10px rgba(59,130,246,.22)}
+      .bc-tipo.on .l{color:#1e40af}
+      /* Chips de moneda */
+      .bc-mons{display:flex;gap:6px;flex-wrap:wrap}
+      .bc-mon{border:2px solid var(--border);border-radius:20px;padding:6px 13px;cursor:pointer;
+        font-size:12px;font-weight:800;color:#64748b;transition:all .16s;background:#fff;
+        display:inline-flex;align-items:center;gap:5px}
+      .bc-mon input{display:none}
+      .bc-mon:hover{border-color:#93c5fd;background:#f8fafc}
+      .bc-mon.on{border-color:#16a34a;background:#f0fdf4;color:#166534;box-shadow:0 2px 8px rgba(22,163,74,.2)}
+      /* Switch activa */
+      .bc-sw{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;
+        background:var(--bg-alt);border-radius:11px;border:1.5px solid var(--border)}
+      .bc-sw-tg{position:relative;width:46px;height:25px;flex-shrink:0}
+      .bc-sw-tg input{display:none}
+      .bc-sw-tg .tr{position:absolute;inset:0;background:#cbd5e1;border-radius:99px;cursor:pointer;transition:background .2s}
+      .bc-sw-tg .tr::after{content:'';position:absolute;top:3px;left:3px;width:19px;height:19px;background:#fff;
+        border-radius:50%;transition:transform .2s;box-shadow:0 1px 4px rgba(0,0,0,.3)}
+      .bc-sw-tg input:checked + .tr{background:#16a34a}
+      .bc-sw-tg input:checked + .tr::after{transform:translateX(21px)}
+      .bc-clabe-ok{font-size:10.5px;font-weight:700;margin-top:4px;min-height:14px}
+    </style>
+
+    <div class="bc-wrap">
+      <!-- ── PANEL IZQUIERDO: tarjeta viva ── -->
+      <div class="bc-side">
+        <div class="bc-side-t">Vista previa</div>
+        <div class="bc-card" id="bc-prev-card" style="background:linear-gradient(135deg,#334155,#1e293b)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+            <div>
+              <div class="bnk" id="bc-prev-banco">BANCO</div>
+              <div class="suc" id="bc-prev-suc"></div>
+            </div>
+            <div class="chip"></div>
+          </div>
+          <div class="num" id="bc-prev-num">•••• •••• •••• ••••</div>
+          <div class="btm">
+            <div>
+              <div style="font-size:8px;opacity:.6;letter-spacing:1px;text-transform:uppercase;margin-bottom:1px">Titular</div>
+              <div class="ttl" id="bc-prev-titular">—</div>
+            </div>
+            <div class="cur" id="bc-prev-moneda">MXN</div>
+          </div>
+        </div>
+        <div class="bc-hints" id="bc-prev-alias">
+          Completa los datos y verás aquí cómo queda tu cuenta.
+        </div>
+        <div class="bc-prog">
+          <div class="bc-prog-bar"><i id="bc-prog-i" style="width:0%"></i></div>
+          <div class="bc-prog-lbl" id="bc-prog-l">0% completado</div>
+        </div>
       </div>
-      <div class="fi"><label>Sucursal <span style="color:var(--muted);font-weight:400;font-size:10.5px">(opcional)</span></label>
-        <input id="bc-sucursal" placeholder="Ej: Centro Mérida" value="${c.sucursal||''}">
+
+      <!-- ── PANEL DERECHO: formulario ── -->
+      <div class="bc-main">
+        <div class="bc-h">${id ? '✏️ Editar cuenta bancaria' : '🏦 Nueva cuenta bancaria'}</div>
+        <div class="bc-sub">${id ? 'Modifica los datos y guarda los cambios.' : 'Registra una cuenta para usarla en cheques y conciliación.'}</div>
+
+        <!-- 1. Identificación -->
+        <div class="bc-sec">
+          <div class="bc-sec-t"><span class="n">1</span> Identificación</div>
+          <div class="fg" style="gap:11px">
+            <div class="fi"><label>Banco <span style="color:var(--red)">*</span></label>
+              <input id="bc-banco" list="bc-banco-lista" placeholder="Escribe o elige…" value="${c.banco||''}"
+                     autocomplete="off" style="text-transform:uppercase;font-weight:700" oninput="_bcPreview()">
+              <datalist id="bc-banco-lista">
+                ${catalogo.map(b => `<option value="${b.nombre}">${b.clave_sat?'Clave SAT '+b.clave_sat:''}</option>`).join('')}
+              </datalist>
+            </div>
+            <div class="fi"><label>Sucursal <span style="color:var(--muted);font-weight:400;font-size:10px">(opcional)</span></label>
+              <input id="bc-sucursal" placeholder="Ej: Centro Mérida" value="${c.sucursal||''}" oninput="_bcPreview()">
+            </div>
+            <div class="fi"><label>Alias <span style="color:var(--muted);font-weight:400;font-size:10px">(cómo la reconoces)</span></label>
+              <input id="bc-alias" placeholder="Ej: Cuenta principal" value="${c.alias||''}" oninput="_bcPreview()">
+            </div>
+            <div class="fi"><label>Empresa <span style="color:var(--muted);font-weight:400;font-size:10px">(agrupa cheques)</span></label>
+              <select id="bc-empresa">
+                <option value="">— Sin empresa —</option>
+                ${empresas.map(e => `<option value="${e.id}" ${c.empresa_id==e.id?'selected':''}>${e.nombre}</option>`).join('')}
+              </select>
+            </div>
+            <div class="fi full"><label>Titular / Razón social</label>
+              <input id="bc-titular" placeholder="Nombre de la empresa o persona titular" value="${c.titular||''}" oninput="_bcPreview()">
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Tipo y moneda -->
+        <div class="bc-sec">
+          <div class="bc-sec-t"><span class="n">2</span> Tipo de cuenta y moneda</div>
+          <div class="bc-tipos">
+            ${TIPO_CTA.map(t => `
+              <label class="bc-tipo${c.tipo===t.v?' on':''}" title="${t.d}">
+                <input type="radio" name="bc-tipo" value="${t.v}" ${c.tipo===t.v?'checked':''}
+                       onchange="document.querySelectorAll('.bc-tipo').forEach(x=>x.classList.remove('on'));this.closest('.bc-tipo').classList.add('on');_bcPreview()">
+                <span class="ic">${t.ic}</span><span class="l">${t.l}</span>
+              </label>`).join('')}
+          </div>
+          <div class="bc-mons" style="margin-top:11px">
+            ${MONEDAS.map(m => `
+              <label class="bc-mon${c.moneda===m.v?' on':''}">
+                <input type="radio" name="bc-moneda" value="${m.v}" ${c.moneda===m.v?'checked':''}
+                       onchange="document.querySelectorAll('.bc-mon').forEach(x=>x.classList.remove('on'));this.closest('.bc-mon').classList.add('on');_bcPreview()">
+                ${m.f} ${m.v}
+              </label>`).join('')}
+          </div>
+        </div>
+
+        <!-- 3. Datos bancarios -->
+        <div class="bc-sec">
+          <div class="bc-sec-t"><span class="n">3</span> Datos bancarios</div>
+          <div class="fg" style="gap:11px">
+            <div class="fi"><label>N° de cuenta</label>
+              <input id="bc-numero" placeholder="1234567890" value="${c.numero_cuenta||''}" maxlength="30"
+                     style="font-family:monospace;letter-spacing:1px" oninput="_bcPreview()">
+            </div>
+            <div class="fi"><label>N° de tarjeta <span style="color:var(--muted);font-weight:400;font-size:10px">(opcional)</span></label>
+              <input id="bc-tarjeta" placeholder="Últimos 4 o completo" value="${c.tarjeta||''}" maxlength="20"
+                     style="font-family:monospace;letter-spacing:1px">
+            </div>
+            <div class="fi full"><label>CLABE interbancaria <span style="color:var(--muted);font-weight:400;font-size:10px">(18 dígitos)</span></label>
+              <input id="bc-clabe" placeholder="0000 0000 0000 0000 00" value="${_bcFmtClabe(c.clabe||'')}" maxlength="23"
+                     style="font-family:monospace;letter-spacing:2px;font-weight:700" inputmode="numeric"
+                     oninput="_bcOnClabe(this)">
+              <div class="bc-clabe-ok" id="bc-clabe-msg"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Saldo y notas -->
+        <div class="bc-sec">
+          <div class="bc-sec-t"><span class="n">4</span> Saldo inicial y notas</div>
+          <div class="fg" style="gap:11px">
+            <div class="fi"><label>Saldo inicial</label>
+              <div style="position:relative">
+                <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:#166534;font-weight:800;pointer-events:none">$</span>
+                <input type="number" step="0.01" id="bc-saldo" value="${c.saldo_inicial||0}"
+                       style="padding-left:24px;font-weight:800;text-align:right;color:#166534">
+              </div>
+            </div>
+            <div class="fi"><label>&nbsp;</label>
+              <div class="bc-sw">
+                <div>
+                  <div style="font-size:12px;font-weight:800;color:var(--dark)">Cuenta activa</div>
+                  <div style="font-size:10px;color:var(--muted)">Disponible para uso</div>
+                </div>
+                <label class="bc-sw-tg">
+                  <input type="checkbox" id="bc-activa" ${c.activa!==false?'checked':''}>
+                  <span class="tr"></span>
+                </label>
+              </div>
+            </div>
+            <div class="fi full"><label>Notas <span style="color:var(--muted);font-weight:400;font-size:10px">(opcional)</span></label>
+              <textarea id="bc-notas" rows="2" maxlength="400"
+                placeholder="Ej: Cuenta operativa · Cheques bajo firma mancomunada…">${c.notas||''}</textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-actions" style="margin:0;border-top:1.5px solid var(--border);padding-top:14px">
+          <button class="btn bo" onclick="closeModal('modal-banco')">Cancelar</button>
+          <button class="btn bs" onclick="guardarCuentaBanco(${id||'null'})">💾 ${id?'Guardar cambios':'Crear cuenta'}</button>
+        </div>
       </div>
-      <div class="fi"><label>Alias / Nombre corto <span style="color:var(--muted);font-weight:400;font-size:10.5px">(cómo la reconoces)</span></label>
-        <input id="bc-alias" placeholder="Ej: Cuenta principal MXN, Nómina, Reserva USD..." value="${c.alias||''}">
-      </div>
-      <div class="fi"><label>Titular / Razón social</label>
-        <input id="bc-titular" placeholder="Nombre de la empresa o persona titular" value="${c.titular||''}">
-      </div>
-      <div class="fi"><label>Empresa <span style="color:var(--muted);font-weight:400;font-size:10.5px">(agrupa en reporte "Cheques a cobrar")</span></label>
-        <select id="bc-empresa">
-          <option value="">— Sin empresa —</option>
-          ${empresas.map(e => `<option value="${e.id}" ${c.empresa_id==e.id?'selected':''}>${e.nombre}</option>`).join('')}
-        </select>
-      </div>
-      <div class="fi"><label>Tipo de cuenta</label>
-        <select id="bc-tipo">
-          <option value="cheques"   ${c.tipo==='cheques'?'selected':''}>💳 Cheques</option>
-          <option value="ahorro"    ${c.tipo==='ahorro'?'selected':''}>💰 Ahorro</option>
-          <option value="inversion" ${c.tipo==='inversion'?'selected':''}>📈 Inversión</option>
-          <option value="tarjeta"   ${c.tipo==='tarjeta'?'selected':''}>💳 Tarjeta</option>
-          <option value="otra"      ${c.tipo==='otra'?'selected':''}>🔹 Otra</option>
-        </select>
-      </div>
-      <div class="fi"><label>Moneda</label>
-        <select id="bc-moneda">
-          <option value="MXN" ${c.moneda==='MXN'?'selected':''}>🇲🇽 MXN — Peso mexicano</option>
-          <option value="USD" ${c.moneda==='USD'?'selected':''}>🇺🇸 USD — Dólar</option>
-          <option value="EUR" ${c.moneda==='EUR'?'selected':''}>🇪🇺 EUR — Euro</option>
-          <option value="CAD" ${c.moneda==='CAD'?'selected':''}>🇨🇦 CAD — Dólar canadiense</option>
-          <option value="GBP" ${c.moneda==='GBP'?'selected':''}>🇬🇧 GBP — Libra</option>
-        </select>
-      </div>
-      <div class="fi"><label>Número de cuenta</label>
-        <input id="bc-numero" placeholder="Ej: 1234567890" value="${c.numero_cuenta||''}" maxlength="30" style="font-family:monospace">
-      </div>
-      <div class="fi"><label>CLABE interbancaria <span style="color:var(--muted);font-weight:400;font-size:10.5px">(18 dígitos)</span></label>
-        <input id="bc-clabe" placeholder="000000000000000000" value="${c.clabe||''}" maxlength="18" style="font-family:monospace"
-               oninput="this.value=this.value.replace(/\\D/g,'').slice(0,18)">
-      </div>
-      <div class="fi"><label>N° de tarjeta asociada <span style="color:var(--muted);font-weight:400;font-size:10.5px">(opcional)</span></label>
-        <input id="bc-tarjeta" placeholder="Últimos dígitos o completo" value="${c.tarjeta||''}" maxlength="20" style="font-family:monospace">
-      </div>
-      <div class="fi"><label>Saldo inicial</label>
-        <input type="number" step="0.01" id="bc-saldo" value="${c.saldo_inicial||0}">
-      </div>
-      <div class="fi full"><label>Notas <span style="color:var(--muted);font-weight:400;font-size:10.5px">(opcional)</span></label>
-        <textarea id="bc-notas" rows="2" maxlength="400" placeholder="Ej: Cuenta operativa · Cheques bajo firma mancomunada · Etc.">${c.notas||''}</textarea>
-      </div>
-      <div class="fi full">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-          <input type="checkbox" id="bc-activa" ${c.activa!==false?'checked':''}>
-          <span>✓ Cuenta activa (disponible para uso)</span>
-        </label>
-      </div>
-    </div>
-    <div class="form-actions">
-      <button class="btn bo" onclick="closeModal('modal-banco')">Cancelar</button>
-      <button class="btn bs" onclick="guardarCuentaBanco(${id||'null'})">💾 Guardar</button>
     </div>`;
+  $('modal-banco').querySelector('.modal').style.padding = '28px';
   openModal('modal-banco');
+  _bcPreview();
+}
+
+// Formatea CLABE en grupos de 4 para lectura
+function _bcFmtClabe(v) {
+  const d = String(v||'').replace(/\D/g,'').slice(0,18);
+  return d.replace(/(.{4})/g, '$1 ').trim();
+}
+function _bcOnClabe(inp) {
+  const pos = inp.selectionStart, largoAntes = inp.value.length;
+  inp.value = _bcFmtClabe(inp.value);
+  // Reposicionar cursor tras el reformateo
+  const delta = inp.value.length - largoAntes;
+  inp.setSelectionRange(pos + delta, pos + delta);
+  const d = inp.value.replace(/\D/g,'');
+  const msg = $('bc-clabe-msg');
+  if (msg) {
+    if (!d.length)          { msg.innerHTML = ''; inp.style.borderColor = ''; }
+    else if (d.length < 18) { msg.innerHTML = `<span style="color:#d97706">⏳ ${d.length} de 18 dígitos</span>`; inp.style.borderColor = '#fbbf24'; }
+    else                    { msg.innerHTML = '<span style="color:#16a34a">✅ CLABE completa</span>'; inp.style.borderColor = '#22c55e'; }
+  }
+  _bcPreview();
+}
+
+// Actualiza la tarjeta de vista previa y la barra de progreso
+function _bcPreview() {
+  const g = idv => ($(idv)?.value || '').trim();
+  const banco   = g('bc-banco').toUpperCase();
+  const suc     = g('bc-sucursal');
+  const alias   = g('bc-alias');
+  const titular = g('bc-titular');
+  const numero  = g('bc-numero');
+  const clabe   = g('bc-clabe').replace(/\D/g,'');
+  const moneda  = document.querySelector('input[name="bc-moneda"]:checked')?.value || 'MXN';
+  const tipo    = document.querySelector('input[name="bc-tipo"]:checked')?.value || 'cheques';
+
+  // Colores según el banco (match parcial por si escribe "BANORTE SA")
+  let tema = ['#334155','#1e293b'];
+  if (banco) {
+    const key = Object.keys(BANCO_TEMA).find(k => banco.includes(k) || k.includes(banco));
+    if (key) tema = BANCO_TEMA[key];
+  }
+  const card = $('bc-prev-card');
+  if (card) card.style.background = `linear-gradient(135deg,${tema[0]},${tema[1]})`;
+
+  if ($('bc-prev-banco'))   $('bc-prev-banco').textContent = banco || 'BANCO';
+  if ($('bc-prev-suc'))     $('bc-prev-suc').textContent   = suc || '';
+  if ($('bc-prev-titular')) $('bc-prev-titular').textContent = titular || '—';
+  if ($('bc-prev-moneda'))  $('bc-prev-moneda').textContent = moneda;
+
+  // Número mostrado: prioriza CLABE, luego cuenta
+  const fuente = clabe || numero.replace(/\D/g,'');
+  const numEl = $('bc-prev-num');
+  if (numEl) {
+    if (!fuente) numEl.textContent = '•••• •••• •••• ••••';
+    else {
+      const ult = fuente.slice(-4);
+      const grupos = Math.max(0, Math.ceil((fuente.length - 4) / 4));
+      numEl.textContent = (Array(grupos).fill('••••').join(' ') + ' ' + ult).trim();
+    }
+  }
+  const tInfo = TIPO_CTA.find(t => t.v === tipo);
+  if ($('bc-prev-alias')) {
+    $('bc-prev-alias').innerHTML = alias
+      ? `<b>${alias}</b><br>${tInfo?tInfo.ic+' '+tInfo.l:''} · ${moneda}`
+      : `${tInfo?tInfo.ic+' '+tInfo.l:''} · ${moneda}<br><span style="opacity:.7">Agrega un alias para reconocerla fácil.</span>`;
+  }
+
+  // Progreso: banco es lo único obligatorio, el resto suma calidad del registro
+  const campos = [!!banco, !!alias, !!titular, !!(numero||clabe), clabe.length===18, !!suc];
+  const pct = Math.round((campos.filter(Boolean).length / campos.length) * 100);
+  if ($('bc-prog-i')) $('bc-prog-i').style.width = pct + '%';
+  if ($('bc-prog-l')) $('bc-prog-l').textContent = pct === 100 ? '✅ Registro completo' : `${pct}% completado`;
 }
 
 async function guardarCuentaBanco(id) {
@@ -1276,10 +1522,10 @@ async function guardarCuentaBanco(id) {
     sucursal     : $('bc-sucursal').value.trim(),
     alias        : $('bc-alias').value.trim(),
     titular      : $('bc-titular').value.trim(),
-    tipo         : $('bc-tipo').value,
-    moneda       : $('bc-moneda').value,
+    tipo         : document.querySelector('input[name="bc-tipo"]:checked')?.value   || 'cheques',
+    moneda       : document.querySelector('input[name="bc-moneda"]:checked')?.value || 'MXN',
     numero_cuenta: $('bc-numero').value.trim(),
-    clabe        : $('bc-clabe').value.trim(),
+    clabe        : $('bc-clabe').value.replace(/\D/g,''),
     tarjeta      : $('bc-tarjeta').value.trim(),
     saldo_inicial: parseFloat($('bc-saldo').value) || 0,
     notas        : $('bc-notas').value.trim(),
