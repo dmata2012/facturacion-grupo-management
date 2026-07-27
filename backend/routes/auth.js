@@ -5,6 +5,25 @@ const { query } = require('../config/db');
 
 const SECRET = () => process.env.FAC_JWT_SECRET || process.env.JWT_SECRET || 'fac_secret_dev';
 
+// El rol se guarda en la BD sin validación, así que puede llegar con variantes
+// ('Gerencia', 'GERENTE', 'tesorería'…). Se normaliza al valor canónico que
+// entienden requireRol() y los PAGES_* del frontend.
+const ALIAS_ROL = {
+  gerencia: 'gerente', gerentes: 'gerente', gerencial: 'gerente',
+  administrador: 'admin', administradora: 'admin',
+  capturistas: 'capturista', captura: 'capturista',
+  tesoreria: 'tesoreria', tesorera: 'tesoreria', tesorero: 'tesoreria',
+  'tesoreria consulta': 'tesoreria_consulta', 'tesoreria-consulta': 'tesoreria_consulta',
+  consulta: 'lectura', lector: 'lectura', lectora: 'lectura',
+  reloj: 'checador', checadora: 'checador'
+};
+function normalizarRol(rol) {
+  const base = String(rol || '')
+    .trim().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, ''); // quita acentos
+  return ALIAS_ROL[base] || base;
+}
+
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   try {
@@ -18,13 +37,14 @@ router.post('/login', async (req, res) => {
     const ok   = await bcrypt.compare(password, user.password_hash);
     if (!ok) return res.status(401).json({ error: 'Credenciales inválidas.' });
 
+    const rol = normalizarRol(user.rol);
     const token = jwt.sign(
-      { id: user.id, nombre: user.nombre, email: user.email, rol: user.rol },
+      { id: user.id, nombre: user.nombre, email: user.email, rol },
       SECRET(),
       { expiresIn: '12h' }
     );
 
-    res.json({ token, usuario: { id: user.id, nombre: user.nombre, email: user.email, rol: user.rol } });
+    res.json({ token, usuario: { id: user.id, nombre: user.nombre, email: user.email, rol } });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Error interno.' });
@@ -37,3 +57,4 @@ router.get('/me', require('../middleware/auth').verificarToken, (req, res) => {
 });
 
 module.exports = router;
+module.exports.normalizarRol = normalizarRol;
