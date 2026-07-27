@@ -7352,10 +7352,14 @@ async function toggleValidarUbicacion(nuevo) {
 
 async function openConfigPINs() {
   try {
-    const [emps, ubis] = await Promise.all([
+    const [emps, ubisResp] = await Promise.all([
       api('/checador/empleados'),
       api('/checador/ubicaciones')
     ]);
+    // El endpoint devuelve { ubicaciones:[...], validar_ubicacion:bool } — normalizar a array
+    const ubisTodas = Array.isArray(ubisResp) ? ubisResp : (ubisResp?.ubicaciones || []);
+    const ubis = ubisTodas.filter(u => u.activo !== false);
+    const validarUbi = Array.isArray(ubisResp) ? null : ubisResp?.validar_ubicacion;
     window._ubisAll = ubis;
     // Pre-cargar asignaciones actuales de todos los empleados
     const asigMap = {};
@@ -7379,6 +7383,12 @@ async function openConfigPINs() {
         <br><small style="color:var(--muted)">⏰ <strong>Tolerancia</strong>: minutos de gracia. Si el colaborador llega dentro de ese margen NO se marca retardo.</small>
         <br><small style="color:var(--muted)">📍 Si dejas la lista de ubicaciones vacía para un colaborador, podrá marcar desde <strong>cualquiera</strong> de las ubicaciones globales activas.</small>
       </div>
+      ${!ubis.length ? `<div class="ibox warn" style="margin-bottom:12px;font-size:12px">
+        ⚠ <strong>No hay ubicaciones registradas.</strong> Para poder asignarlas, primero créalas en
+        <strong>Reloj Checador → 📍 Ubicaciones</strong> (nombre, latitud, longitud y radio en metros).
+      </div>` : (validarUbi === false ? `<div class="ibox warn" style="margin-bottom:12px;font-size:12px">
+        ⚠ La <strong>validación por ubicación está DESACTIVADA</strong> globalmente. Puedes asignar ubicaciones, pero no se aplicarán hasta activarla en <strong>📍 Ubicaciones → ⚙</strong>.
+      </div>` : '')}
       <div style="max-height:440px;overflow-y:auto">
         <table style="width:100%;font-size:12px;border-collapse:collapse">
           <thead style="background:#f8f9fb;position:sticky;top:0">
@@ -7433,7 +7443,7 @@ async function openConfigPINs() {
                              style="display:none">
                       📍 ${u.nombre}
                     </label>`;
-                  }).join('') : '<span style="font-size:10.5px;color:var(--muted);font-style:italic">Sin ubicaciones registradas</span>'}
+                  }).join('') : '<span style="font-size:10.5px;color:#92400e;font-style:italic">⚠ Sin ubicaciones — créalas en 📍 Ubicaciones</span>'}
                 </div>
               </td>
               <td style="padding:8px"><button class="btn bs bsm" onclick="guardarPINEmp(${e.id})" title="Guardar todos los cambios de esta fila">💾</button></td>
