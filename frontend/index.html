@@ -2054,19 +2054,34 @@ function _mvPintarOtro() {
 
 async function _mvBuscarFacturas() {
   const q = ($('mv-f-buscar')?.value || '').trim();
-  const sel = $('mv-f-factura');
+  const sel  = $('mv-f-factura');
+  const info = $('mv-f-info');
   if (!sel) return;
   try {
     const fs = await api(`/bancos/facturas-pendientes${q?'?buscar='+encodeURIComponent(q):''}`);
     window._mvFacturas = fs;
+    if (!fs.length) {
+      sel.innerHTML = '<option value="">— Sin facturas disponibles —</option>';
+      if (info) info.innerHTML = q
+        ? `<span style="color:#d97706">Ninguna factura coincide con “${q.replace(/</g,'&lt;')}”. Borra el texto para ver todas.</span>`
+        : `<span style="color:#d97706">⚠ No hay facturas registradas en el sistema. Captúralas primero en el módulo <strong>Facturas</strong>.</span>`;
+      return;
+    }
     sel.innerHTML = '<option value="">— Sin vincular —</option>' + fs.map(f => {
       const saldo = parseFloat(f.saldo)||0;
-      return `<option value="${f.id}" ${String(window._mvFacturaSel)===String(f.id)?'selected':''}>
-        ${f.folio} · ${f.cliente||'—'} · Saldo ${fmt(saldo)}
-      </option>`;
+      const liq = saldo <= 0.01 ? ' ✅ pagada' : ` · Saldo ${fmt(saldo)}`;
+      return `<option value="${f.id}" ${String(window._mvFacturaSel)===String(f.id)?'selected':''}>${f.folio || 's/folio'} · ${f.cliente||'sin cliente'}${liq}</option>`;
     }).join('');
-    _mvOnFactura();
-  } catch(e) {}
+    const pend = fs.filter(f => parseFloat(f.saldo) > 0.01).length;
+    if (info && !sel.value) {
+      info.innerHTML = `<span style="color:var(--muted)">${fs.length} factura${fs.length!==1?'s':''} · <strong>${pend}</strong> con saldo pendiente. Selecciona una para vincular.</span>`;
+    } else {
+      _mvOnFactura();
+    }
+  } catch(e) {
+    sel.innerHTML = '<option value="">— Error al cargar —</option>';
+    if (info) info.innerHTML = `<span style="color:var(--red)">⚠ No se pudieron cargar las facturas: ${e.message}</span>`;
+  }
 }
 
 function _mvOnFactura() {

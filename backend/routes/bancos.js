@@ -865,15 +865,19 @@ router.get('/facturas-pendientes', async (req, res) => {
       params.push(`%${buscar}%`);
       extra = ` AND (f.folio ILIKE $${params.length} OR c.razon_social ILIKE $${params.length})`;
     }
+    // COALESCE en estatus: si viene NULL, 'x' <> 'cancelada' da NULL y la fila se perdería
     const r = await query(`
       SELECT f.id, f.folio, TO_CHAR(f.fecha_emision,'YYYY-MM-DD') AS fecha_emision,
-        f.total, c.razon_social AS cliente,
+        f.total, f.estatus, c.razon_social AS cliente,
         COALESCE((SELECT SUM(p.monto) FROM fac_pagos p WHERE p.factura_id=f.id),0) AS cobrado,
         (f.total - COALESCE((SELECT SUM(p.monto) FROM fac_pagos p WHERE p.factura_id=f.id),0)) AS saldo
       FROM fac_facturas f
       LEFT JOIN fac_clientes c ON c.id = f.cliente_id
-      WHERE f.estatus <> 'cancelada'${extra}
-      ORDER BY f.fecha_emision DESC
+      WHERE COALESCE(f.estatus,'') <> 'cancelada'${extra}
+      ORDER BY
+        CASE WHEN (f.total - COALESCE((SELECT SUM(p.monto) FROM fac_pagos p WHERE p.factura_id=f.id),0)) > 0.01
+             THEN 0 ELSE 1 END,
+        f.fecha_emision DESC
       LIMIT 150
     `, params);
     res.json(r.rows);
