@@ -4,23 +4,71 @@ const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
 
+// Migración idempotente: datos personales del colaborador
+(async () => {
+  try {
+    await query(`ALTER TABLE fac_empleados ADD COLUMN IF NOT EXISTS fecha_nacimiento DATE`);
+    await query(`ALTER TABLE fac_empleados ADD COLUMN IF NOT EXISTS telefono TEXT`);
+    await query(`ALTER TABLE fac_empleados ADD COLUMN IF NOT EXISTS email TEXT`);
+  } catch (e) { console.warn('Migración datos empleado:', e.message); }
+})();
+
 // ── EMPLEADOS ─────────────────────────────────
 router.get('/empleados', async (req, res) => {
   try {
-    const r = await query(`SELECT * FROM fac_empleados WHERE activo=TRUE ORDER BY nombre`);
+    const r = await query(`
+      SELECT *,
+        TO_CHAR(fecha_ingreso,'YYYY-MM-DD')     AS fecha_ingreso,
+        TO_CHAR(fecha_nacimiento,'YYYY-MM-DD')  AS fecha_nacimiento
+      FROM fac_empleados WHERE activo=TRUE ORDER BY nombre`);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/nomina/cumpleanos?mes=7 — calendario de cumpleaños
+router.get('/cumpleanos', async (req, res) => {
+  try {
+    const { mes } = req.query;
+    const params = [];
+    let filtro = '';
+    if (mes) { params.push(parseInt(mes)); filtro = ` AND EXTRACT(MONTH FROM fecha_nacimiento) = $${params.length}`; }
+    const r = await query(`
+      SELECT id, nombre, numero_colaborador, puesto, departamento,
+        TO_CHAR(fecha_nacimiento,'YYYY-MM-DD') AS fecha_nacimiento,
+        EXTRACT(DAY   FROM fecha_nacimiento)::int AS dia,
+        EXTRACT(MONTH FROM fecha_nacimiento)::int AS mes,
+        DATE_PART('year', AGE(fecha_nacimiento))::int AS edad,
+        -- Días que faltan para el próximo cumpleaños
+        (
+          (DATE (EXTRACT(YEAR FROM CURRENT_DATE)::text || '-' ||
+                 LPAD(EXTRACT(MONTH FROM fecha_nacimiento)::text,2,'0') || '-' ||
+                 LPAD(EXTRACT(DAY   FROM fecha_nacimiento)::text,2,'0'))
+           + CASE WHEN (EXTRACT(MONTH FROM fecha_nacimiento), EXTRACT(DAY FROM fecha_nacimiento))
+                       < (EXTRACT(MONTH FROM CURRENT_DATE), EXTRACT(DAY FROM CURRENT_DATE))
+                  THEN INTERVAL '1 year' ELSE INTERVAL '0' END
+          )::date - CURRENT_DATE
+        ) AS dias_faltan
+      FROM fac_empleados
+      WHERE activo = TRUE AND fecha_nacimiento IS NOT NULL${filtro}
+      ORDER BY mes, dia
+    `, params);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post('/empleados', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { numero_colaborador, nombre, puesto, departamento, salario_base, fecha_ingreso, notas } = req.body;
+    const { numero_colaborador, nombre, puesto, departamento, salario_base,
+            fecha_ingreso, fecha_nacimiento, telefono, email, notas } = req.body;
     if (!nombre) return res.status(400).json({ error: 'Nombre requerido.' });
     const r = await query(
-      `INSERT INTO fac_empleados(numero_colaborador,nombre,puesto,departamento,salario_base,fecha_ingreso,notas)
-       VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      `INSERT INTO fac_empleados(numero_colaborador,nombre,puesto,departamento,salario_base,
+         fecha_ingreso,fecha_nacimiento,telefono,email,notas)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [(numero_colaborador||'').toString().trim() || null,
-       nombre, puesto, departamento, parseFloat(salario_base) || 0, fecha_ingreso || null, notas]
+       nombre, puesto, departamento, parseFloat(salario_base) || 0,
+       fecha_ingreso || null, fecha_nacimiento || null,
+       telefono || null, email || null, notas]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -28,12 +76,17 @@ router.post('/empleados', requireRol('admin', 'capturista'), async (req, res) =>
 
 router.put('/empleados/:id', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const { numero_colaborador, nombre, puesto, departamento, salario_base, fecha_ingreso, activo, notas } = req.body;
+    const { numero_colaborador, nombre, puesto, departamento, salario_base,
+            fecha_ingreso, fecha_nacimiento, telefono, email, activo, notas } = req.body;
     await query(
-      `UPDATE fac_empleados SET numero_colaborador=$1,nombre=$2,puesto=$3,departamento=$4,salario_base=$5,fecha_ingreso=$6,activo=$7,notas=$8,actualizado_en=NOW()
-       WHERE id=$9`,
+      `UPDATE fac_empleados SET numero_colaborador=$1,nombre=$2,puesto=$3,departamento=$4,
+         salario_base=$5,fecha_ingreso=$6,fecha_nacimiento=$7,telefono=$8,email=$9,
+         activo=$10,notas=$11,actualizado_en=NOW()
+       WHERE id=$12`,
       [(numero_colaborador||'').toString().trim() || null,
-       nombre, puesto, departamento, parseFloat(salario_base) || 0, fecha_ingreso || null, activo, notas, req.params.id]
+       nombre, puesto, departamento, parseFloat(salario_base) || 0,
+       fecha_ingreso || null, fecha_nacimiento || null,
+       telefono || null, email || null, activo, notas, req.params.id]
     );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
