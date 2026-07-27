@@ -995,35 +995,116 @@ function nav(page) {
 // ══ BANCOS — Gestión completa (cuentas · cheques · reporte · conciliación) ══
 async function bancos() {
   $('content').innerHTML = `
-    <div class="page-header">
-      <div class="page-header-left">
-        <div class="page-title">🏦 Bancos</div>
-        <div class="page-sub">Cuentas · Cheques emitidos · Reporte a cobrar · Conciliación</div>
+    <style>
+      /* ── Hero del módulo ── */
+      .bn-hero{background:linear-gradient(135deg,#0f2557 0%,#1e3a8a 45%,#2563eb 100%);
+        border-radius:16px;padding:22px 26px;color:#fff;margin-bottom:16px;position:relative;overflow:hidden}
+      .bn-hero::before{content:'';position:absolute;top:-90px;right:-60px;width:280px;height:280px;
+        background:radial-gradient(circle,rgba(255,255,255,.13) 0%,transparent 70%);pointer-events:none}
+      .bn-hero::after{content:'🏦';position:absolute;right:24px;bottom:-22px;font-size:110px;
+        opacity:.07;pointer-events:none;line-height:1}
+      .bn-hero-t{display:flex;align-items:center;gap:12px}
+      .bn-hero-ic{width:46px;height:46px;border-radius:13px;background:rgba(255,255,255,.16);
+        display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;
+        border:1.5px solid rgba(255,255,255,.25)}
+      .bn-hero h2{margin:0;font-size:23px;font-weight:900;letter-spacing:-.3px}
+      .bn-hero .sub{font-size:12.5px;opacity:.82;margin-top:1px}
+      .bn-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:10px;
+        margin-top:18px;position:relative;z-index:1}
+      .bn-kpi{background:rgba(255,255,255,.11);border:1px solid rgba(255,255,255,.16);
+        border-radius:11px;padding:10px 13px;backdrop-filter:blur(6px)}
+      .bn-kpi .l{font-size:9.5px;text-transform:uppercase;letter-spacing:1.1px;opacity:.78;font-weight:700}
+      .bn-kpi .v{font-size:20px;font-weight:900;margin-top:2px;line-height:1.1}
+      .bn-kpi .s{font-size:10px;opacity:.72;margin-top:1px}
+      /* ── Tabs tipo pill ── */
+      .bn-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;background:var(--bg-alt);
+        padding:5px;border-radius:12px;border:1px solid var(--border)}
+      .bn-tab{padding:9px 16px;border-radius:9px;cursor:pointer;font-size:12.5px;font-weight:800;
+        color:#64748b;transition:all .18s;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+      .bn-tab:hover{background:rgba(59,130,246,.09);color:#3b82f6}
+      .bn-tab.active{background:#fff;color:#1e3a8a;box-shadow:0 2px 8px rgba(15,37,87,.14)}
+      /* ── Barra de herramientas ── */
+      .bn-toolbar{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+      .bn-search{flex:1;min-width:230px;display:flex;align-items:center;gap:9px;background:#fff;
+        border:1.5px solid var(--border);border-radius:11px;padding:9px 14px;transition:all .18s}
+      .bn-search:focus-within{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.13)}
+      .bn-search .ic{color:#94a3b8;font-size:14px}
+      .bn-search input{flex:1;border:none;outline:none;font-size:13px;background:none;color:var(--dark)}
+      .bn-filtro{border:1.5px solid var(--border);border-radius:11px;padding:9px 12px;
+        font-size:12.5px;font-weight:700;background:#fff;cursor:pointer;color:#475569}
+      .bn-acciones{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+      /* ── Tarjetas de cuenta ── */
+      .bn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+      .bn-cta{background:#fff;border:1.5px solid var(--border);border-radius:15px;overflow:hidden;
+        transition:all .2s;display:flex;flex-direction:column}
+      .bn-cta:hover{transform:translateY(-3px);box-shadow:0 12px 28px rgba(15,37,87,.15);border-color:#93c5fd}
+      .bn-cta.inactiva{opacity:.55;filter:grayscale(.4)}
+      .bn-cta-top{padding:16px 18px;color:#fff;position:relative;overflow:hidden}
+      .bn-cta-top::after{content:'';position:absolute;top:-45%;left:-15%;width:85%;height:190%;
+        background:linear-gradient(105deg,rgba(255,255,255,.15) 0%,transparent 55%);pointer-events:none}
+      .bn-cta-bnk{font-size:10px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;opacity:.87}
+      .bn-cta-alias{font-size:18px;font-weight:900;margin-top:2px;line-height:1.15}
+      .bn-cta-meta{font-size:11px;opacity:.85;margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+      .bn-cta-body{padding:14px 18px;flex:1;display:flex;flex-direction:column}
+      .bn-dato{display:flex;justify-content:space-between;align-items:center;gap:10px;
+        padding:5px 0;font-size:12px;border-bottom:1px dashed #f1f5f9}
+      .bn-dato:last-of-type{border-bottom:none}
+      .bn-dato .k{color:var(--muted);font-weight:600;flex-shrink:0}
+      .bn-dato .v{font-weight:800;font-family:'Consolas',monospace;text-align:right;
+        overflow:hidden;text-overflow:ellipsis}
+      .bn-saldo{background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:1.5px solid #86efac;
+        border-radius:10px;padding:10px 13px;margin:10px 0;display:flex;justify-content:space-between;align-items:center}
+      .bn-saldo .l{font-size:9.5px;text-transform:uppercase;letter-spacing:1px;color:#166534;font-weight:800}
+      .bn-saldo .v{font-size:18px;font-weight:900;color:#166534;font-family:'Consolas',monospace}
+      /* ── Estado vacío ── */
+      .bn-empty{background:linear-gradient(160deg,#f8fafc,#eff6ff);border:2px dashed #bfdbfe;
+        border-radius:18px;padding:44px 30px;text-align:center}
+      .bn-empty-ic{font-size:64px;margin-bottom:14px;filter:drop-shadow(0 6px 14px rgba(37,99,235,.22))}
+      .bn-empty h3{margin:0 0 6px;font-size:20px;font-weight:900;color:#1e3a8a}
+      .bn-empty p{font-size:13px;color:#475569;max-width:460px;margin:0 auto 24px;line-height:1.6}
+      .bn-pasos{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;
+        max-width:660px;margin:0 auto 24px;text-align:left}
+      .bn-paso{background:#fff;border:1.5px solid #dbeafe;border-radius:12px;padding:14px}
+      .bn-paso .n{width:24px;height:24px;border-radius:50%;background:#2563eb;color:#fff;
+        display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;margin-bottom:8px}
+      .bn-paso .t{font-size:12.5px;font-weight:800;color:#1e3a8a;margin-bottom:3px}
+      .bn-paso .d{font-size:11px;color:#64748b;line-height:1.45}
+    </style>
+
+    <div class="bn-hero">
+      <div class="bn-hero-t">
+        <div class="bn-hero-ic">🏦</div>
+        <div>
+          <h2>Bancos</h2>
+          <div class="sub">Cuentas · Chequeras · Cheques emitidos · Conciliación bancaria</div>
+        </div>
       </div>
+      <div class="bn-kpis" id="bn-kpis"></div>
     </div>
-    <div class="tabs">
-      <div class="tab active" onclick="showTab(this,'bnc-tab-cuentas')">🏦 Cuentas</div>
-      <div class="tab" onclick="showTab(this,'bnc-tab-cheques');cargarCheques()">📝 Cheques Emitidos</div>
-      <div class="tab" onclick="showTab(this,'bnc-tab-reporte');cargarReporteACobrar()">📋 Reporte a Cobrar</div>
-      <div class="tab" onclick="showTab(this,'bnc-tab-concil');cargarConciliacion()">⚖ Conciliación</div>
+
+    <div class="bn-tabs">
+      <div class="bn-tab active" onclick="showTab(this,'bnc-tab-cuentas')">🏦 Cuentas</div>
+      <div class="bn-tab" onclick="showTab(this,'bnc-tab-cheques');cargarCheques()">📝 Cheques Emitidos</div>
+      <div class="bn-tab" onclick="showTab(this,'bnc-tab-reporte');cargarReporteACobrar()">📋 Reporte a Cobrar</div>
+      <div class="bn-tab" onclick="showTab(this,'bnc-tab-concil');cargarConciliacion()">⚖ Conciliación</div>
     </div>
 
     <!-- CUENTAS -->
     <div class="tab-panel active" id="bnc-tab-cuentas">
-      <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:10px">
-        ${canWrite()?`<button class="btn bo bsm" onclick="gestionCatalogoBancos()">🏛 Catálogo de Bancos</button>`:''}
-        ${canWrite()?`<button class="btn bo bsm" onclick="gestionEmpresasBanco()">🏢 Empresas</button>`:''}
-        ${canWrite()?`<button class="btn bs bsm" onclick="openCuentaBanco()">+ Nueva cuenta</button>`:''}
-      </div>
-      <div class="card" style="margin-bottom:14px">
-        <div class="filters">
-          <input id="bnc-buscar" placeholder="🔍 Buscar por banco, alias, titular, N° cuenta o CLABE..." oninput="cargarCuentasBanco()" style="flex:1;min-width:260px">
-          <label style="font-size:11px;font-weight:700;color:var(--gray-d)">ESTADO</label>
-          <select id="bnc-activa" onchange="cargarCuentasBanco()">
-            <option value="true" selected>Solo activas</option>
-            <option value="false">Solo inactivas</option>
-            <option value="">Todas</option>
-          </select>
+      <div class="bn-toolbar">
+        <div class="bn-search">
+          <span class="ic">🔍</span>
+          <input id="bnc-buscar" placeholder="Buscar por banco, alias, titular, N° de cuenta o CLABE…" oninput="cargarCuentasBanco()">
+        </div>
+        <select id="bnc-activa" onchange="cargarCuentasBanco()" class="bn-filtro">
+          <option value="true" selected>✅ Solo activas</option>
+          <option value="false">⏸ Solo inactivas</option>
+          <option value="">📋 Todas</option>
+        </select>
+        <div class="bn-acciones">
+          ${canWrite()?`<button class="btn bo bsm" onclick="gestionCatalogoBancos()" title="Administrar el catálogo de bancos">🏛 Bancos</button>`:''}
+          ${canWrite()?`<button class="btn bo bsm" onclick="gestionEmpresasBanco()" title="Administrar empresas">🏢 Empresas</button>`:''}
+          ${canWrite()?`<button class="btn bs bsm" onclick="openCuentaBanco()">＋ Nueva cuenta</button>`:''}
         </div>
       </div>
       <div id="bnc-lista"><p class="empty">Cargando...</p></div>
@@ -1164,74 +1245,113 @@ function _bancoChequeraBanda(c) {
 function renderCuentasBanco(cuentas) {
   const cont = $('bnc-lista');
   if (!cont) return;
+
+  // ── KPIs en el hero ──
+  const kp = $('bn-kpis');
+  if (kp) {
+    const activas = cuentas.filter(c => c.activa);
+    const porMoneda = {};
+    activas.forEach(c => { porMoneda[c.moneda] = (porMoneda[c.moneda]||0) + parseFloat(c.saldo_inicial||0); });
+    const conChequera = cuentas.filter(c => c.chequera && !c.chequera.agotada).length;
+    const porAgotarse = cuentas.filter(c => c.chequera && (c.chequera.agotada || c.chequera.restantes <= 5)).length;
+    kp.innerHTML = `
+      <div class="bn-kpi">
+        <div class="l">Cuentas</div>
+        <div class="v">${cuentas.length}</div>
+        <div class="s">${activas.length} activa${activas.length!==1?'s':''}${cuentas.length-activas.length?` · ${cuentas.length-activas.length} inactiva${cuentas.length-activas.length!==1?'s':''}`:''}</div>
+      </div>
+      ${Object.entries(porMoneda).map(([m,s]) => `
+      <div class="bn-kpi">
+        <div class="l">Saldo inicial ${m}</div>
+        <div class="v" style="font-size:17px">${fmt(s)}</div>
+        <div class="s">Configurado al alta</div>
+      </div>`).join('')}
+      <div class="bn-kpi">
+        <div class="l">Chequeras activas</div>
+        <div class="v">${conChequera}</div>
+        <div class="s">${porAgotarse ? `⚠ ${porAgotarse} por agotarse` : 'Todo en orden'}</div>
+      </div>`;
+  }
+
+  // ── Estado vacío con onboarding ──
   if (!cuentas.length) {
+    const q = ($('bnc-buscar')?.value || '').trim();
+    if (q) {
+      cont.innerHTML = `<div class="bn-empty" style="padding:34px">
+        <div class="bn-empty-ic" style="font-size:46px">🔍</div>
+        <h3>Sin resultados</h3>
+        <p>Ninguna cuenta coincide con “<strong>${q.replace(/</g,'&lt;')}</strong>”. Prueba con otro término o cambia el filtro de estado.</p>
+      </div>`;
+      return;
+    }
     cont.innerHTML = `
-      <div class="card" style="text-align:center;padding:40px">
-        <div style="font-size:48px;margin-bottom:10px">🏦</div>
-        <p class="empty" style="margin:0">Sin cuentas bancarias registradas.</p>
-        ${canWrite()?`<button class="btn bs" style="margin-top:14px" onclick="openCuentaBanco()">+ Registrar primera cuenta</button>`:''}
+      <div class="bn-empty">
+        <div class="bn-empty-ic">🏦</div>
+        <h3>Registra tu primera cuenta bancaria</h3>
+        <p>Las cuentas son la base del módulo: con ellas emites cheques con folio consecutivo, generas el reporte diario y concilias contra el estado de cuenta.</p>
+        <div class="bn-pasos">
+          <div class="bn-paso">
+            <div class="n">1</div>
+            <div class="t">Da de alta la cuenta</div>
+            <div class="d">Banco, alias, CLABE y saldo inicial. El catálogo ya trae los bancos de México precargados.</div>
+          </div>
+          <div class="bn-paso">
+            <div class="n">2</div>
+            <div class="t">Asigna una chequera</div>
+            <div class="d">Captura el folio inicial y final. El sistema controla el consecutivo y no deja saltar cheques.</div>
+          </div>
+          <div class="bn-paso">
+            <div class="n">3</div>
+            <div class="t">Emite y concilia</div>
+            <div class="d">Registra cheques, manda el reporte por WhatsApp y concilia contra el banco.</div>
+          </div>
+        </div>
+        ${canWrite()?`<button class="btn bs" onclick="openCuentaBanco()" style="font-size:14px;padding:12px 26px">＋ Registrar primera cuenta</button>`:
+          '<p style="font-size:12px;color:var(--muted)">Tu perfil no tiene permisos para dar de alta cuentas.</p>'}
       </div>`;
     return;
   }
-  // KPIs
-  const activas = cuentas.filter(c => c.activa);
-  const porMoneda = {};
-  activas.forEach(c => {
-    porMoneda[c.moneda] = (porMoneda[c.moneda]||0) + parseFloat(c.saldo_inicial||0);
-  });
-  const kpisHtml = `
-    <div class="kpi-grid" style="margin-bottom:14px">
-      <div class="kpi primary">
-        <div class="kpi-icon">🏦</div>
-        <div class="label">Cuentas registradas</div>
-        <div class="value">${cuentas.length}</div>
-        <div class="sub">${activas.length} activas · ${cuentas.length-activas.length} inactivas</div>
+
+  // ── Tarjetas ──
+  cont.innerHTML = `<div class="bn-grid">${cuentas.map(c => {
+    const tipoLbl = TIPO_LABEL[c.tipo] || TIPO_LABEL.otra;
+    const cuentaMask = c.numero_cuenta ? '••••' + String(c.numero_cuenta).slice(-4) : '—';
+    const clabeMask  = c.clabe ? '•••• •••• •••• ' + String(c.clabe).slice(-4) : '—';
+    // Color del encabezado según el banco (misma paleta del modal de alta)
+    const bnk = (c.banco||'').toUpperCase();
+    const key = Object.keys(BANCO_TEMA).find(k => bnk.includes(k) || k.includes(bnk));
+    const tema = key ? BANCO_TEMA[key] : ['#1e3a8a','#2563eb'];
+    return `
+    <div class="bn-cta${c.activa?'':' inactiva'}">
+      <div class="bn-cta-top" style="background:linear-gradient(135deg,${tema[0]},${tema[1]})">
+        ${!c.activa?'<div style="position:absolute;top:10px;right:12px;background:rgba(0,0,0,.32);padding:3px 9px;border-radius:12px;font-size:9px;font-weight:900;letter-spacing:1px;z-index:1">⏸ INACTIVA</div>':''}
+        <div class="bn-cta-bnk">${c.banco}${c.sucursal?' · '+c.sucursal:''}</div>
+        <div class="bn-cta-alias">${c.alias || c.banco}</div>
+        <div class="bn-cta-meta">
+          <span>${tipoLbl}</span>
+          <span style="background:rgba(255,255,255,.22);padding:1px 8px;border-radius:20px;font-weight:800">${c.moneda}</span>
+          ${c.empresa_nombre?`<span style="background:rgba(255,255,255,.22);padding:1px 8px;border-radius:20px;font-weight:800">🏢 ${c.empresa_nombre}</span>`:''}
+        </div>
       </div>
-      ${Object.entries(porMoneda).map(([m, s]) => `
-        <div class="kpi success">
-          <div class="kpi-icon">💵</div>
-          <div class="label">Saldo inicial ${m}</div>
-          <div class="value" style="font-size:17px">${fmt(s)}</div>
-          <div class="sub">Suma de saldos iniciales configurados</div>
-        </div>`).join('')}
+      <div class="bn-cta-body">
+        ${c.titular ? `<div class="bn-dato"><span class="k">Titular</span><span class="v" style="font-family:inherit">${c.titular}</span></div>` : ''}
+        <div class="bn-dato"><span class="k">Cuenta</span><span class="v">${cuentaMask}</span></div>
+        <div class="bn-dato"><span class="k">CLABE</span><span class="v" style="font-size:11px">${clabeMask}</span></div>
+        ${c.tarjeta ? `<div class="bn-dato"><span class="k">Tarjeta</span><span class="v">••••${String(c.tarjeta).slice(-4)}</span></div>` : ''}
+        <div class="bn-saldo">
+          <span class="l">Saldo inicial</span>
+          <span class="v">${fmt(c.saldo_inicial)}</span>
+        </div>
+        ${c.notas ? `<div style="font-size:11px;color:var(--muted);padding:8px 10px;background:var(--bg-alt);border-radius:7px;margin-bottom:10px;line-height:1.4">📝 ${(c.notas||'').replace(/</g,'&lt;')}</div>` : ''}
+        ${_bancoChequeraBanda(c)}
+        <div style="display:flex;gap:6px;justify-content:flex-end;border-top:1px solid var(--border);padding-top:10px;flex-wrap:wrap;margin-top:auto">
+          <button class="btn bo bsm" style="background:#fef3c7;border-color:#fbbf24;color:#92400e;font-weight:800" onclick="openChequeras(${c.id},'${(c.alias||c.banco).replace(/'/g,"\\'")}')">📕 Chequeras</button>
+          ${canWrite()?`<button class="btn bg bsm" onclick="openCuentaBanco(${c.id})">✏️ Editar</button>`:''}
+          ${canAdmin()&&c.activa?`<button class="btn bd bsm" onclick="eliminarCuentaBanco(${c.id},'${(c.alias||c.banco).replace(/'/g,"\\'")}')">🗑</button>`:''}
+        </div>
+      </div>
     </div>`;
-
-  // Tarjetas por cuenta
-  const cardsHtml = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px">
-    ${cuentas.map(c => {
-      const tipoLbl = TIPO_LABEL[c.tipo] || TIPO_LABEL.otra;
-      const cuentaMask = c.numero_cuenta ? '••••' + String(c.numero_cuenta).slice(-4) : '—';
-      const clabeMask  = c.clabe ? '••••••••••••••' + String(c.clabe).slice(-4) : '—';
-      const inactiva = !c.activa;
-      return `
-      <div class="card" style="padding:0;overflow:hidden;position:relative${inactiva?';opacity:.55':''}">
-        <div style="background:linear-gradient(135deg,#1e3a8a,#3b82f6);color:#fff;padding:16px 18px;position:relative">
-          ${inactiva?'<div style="position:absolute;top:8px;right:12px;background:rgba(0,0,0,.3);padding:3px 8px;border-radius:12px;font-size:9.5px;font-weight:800;letter-spacing:1px">⏸ INACTIVA</div>':''}
-          <div style="font-size:11px;opacity:.85;letter-spacing:1.5px;text-transform:uppercase;font-weight:700">${c.banco}${c.sucursal?' · '+c.sucursal:''}</div>
-          <div style="font-size:18px;font-weight:900;margin-top:2px">${c.alias || c.banco}</div>
-          <div style="font-size:11px;opacity:.85;margin-top:4px">${tipoLbl} · ${c.moneda}</div>
-        </div>
-        <div style="padding:14px 18px">
-          <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12px;margin-bottom:10px">
-            ${c.titular ? `<div style="color:var(--muted);font-weight:600">Titular:</div><div style="font-weight:700">${c.titular}</div>` : ''}
-            <div style="color:var(--muted);font-weight:600">Cuenta:</div><div style="font-family:monospace;font-weight:700">${cuentaMask}</div>
-            <div style="color:var(--muted);font-weight:600">CLABE:</div><div style="font-family:monospace;font-weight:700;font-size:11px">${clabeMask}</div>
-            ${c.tarjeta ? `<div style="color:var(--muted);font-weight:600">Tarjeta:</div><div style="font-family:monospace;font-weight:700">••••${String(c.tarjeta).slice(-4)}</div>` : ''}
-            <div style="color:var(--muted);font-weight:600">Saldo inicial:</div><div style="font-weight:900;color:#166534">${fmt(c.saldo_inicial)} ${c.moneda}</div>
-          </div>
-          ${c.notas ? `<div style="font-size:11px;color:var(--muted);padding:8px 10px;background:var(--bg-alt);border-radius:6px;margin-bottom:10px">📝 ${(c.notas||'').replace(/</g,'&lt;')}</div>` : ''}
-          ${_bancoChequeraBanda(c)}
-          <div style="display:flex;gap:6px;justify-content:flex-end;border-top:1px solid var(--border);padding-top:10px;flex-wrap:wrap">
-            <button class="btn bo bsm" style="background:#fef3c7;border-color:#fbbf24;color:#92400e;font-weight:800" onclick="openChequeras(${c.id},'${(c.alias||c.banco).replace(/'/g,"\\'")}')">📕 Chequeras</button>
-            ${canWrite()?`<button class="btn bg bsm" onclick="openCuentaBanco(${c.id})">✏️ Editar</button>`:''}
-            ${canAdmin()&&c.activa?`<button class="btn bd bsm" onclick="eliminarCuentaBanco(${c.id},'${(c.alias||c.banco).replace(/'/g,"\\'")}')">🗑 Dar de baja</button>`:''}
-          </div>
-        </div>
-      </div>`;
-    }).join('')}
-  </div>`;
-
-  cont.innerHTML = kpisHtml + cardsHtml;
+  }).join('')}</div>`;
 }
 
 // Paleta por banco para la tarjeta de preview
@@ -3647,10 +3767,12 @@ async function detalleFactura(id) {
 }
 
 function showTab(el, panelId) {
-  // Buscar el contenedor padre que contiene los tabs y los paneles
-  const tabsRow = el.closest('.tabs');
+  // Soporta tanto la barra clásica (.tabs > .tab) como la moderna (.bn-tabs > .bn-tab)
+  const tabsRow = el.closest('.tabs, .bn-tabs');
   const container = tabsRow ? tabsRow.parentElement : el.parentElement.parentElement;
-  container.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
+  // Desactivar solo los hermanos de la misma barra (evita tocar tabs anidados)
+  if (tabsRow) tabsRow.querySelectorAll(':scope > .tab, :scope > .bn-tab').forEach(t => t.classList.remove('active'));
+  else container.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
   container.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   el.classList.add('active');
   const panel = document.getElementById(panelId);
