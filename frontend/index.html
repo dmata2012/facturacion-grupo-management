@@ -6883,7 +6883,7 @@ function renderProductividadPorDia(d) {
         </div>
         <div style="text-align:right;font-size:12px;color:${totColor.chipFg}">
           <div><strong>${tot.horas_laboradas.toFixed(1)} h</strong> laboradas · <strong>${tot.horas_esperadas.toFixed(1)} h</strong> esperadas</div>
-          <div style="margin-top:2px">${tot.faltas} faltas · ${tot.ausencias} ausencias justificadas · ${(tot.retardo_min/60).toFixed(1)} h retardo</div>
+          <div style="margin-top:2px" title="Total: ${(tot.retardo_min/60).toFixed(1)}h">${tot.faltas} faltas · ${tot.ausencias} ausencias · ${d.dias.length>0?Math.round(tot.retardo_min/d.dias.length):0} min retardo prom./día</div>
         </div>
       </div>
       <div style="background:rgba(255,255,255,.5);height:12px;border-radius:99px;overflow:hidden">
@@ -6900,7 +6900,7 @@ function renderProductividadPorDia(d) {
         <th title="Vacaciones + Permisos + Incapacidades">V+PG+In</th>
         <th>Horas esperadas</th>
         <th>Horas laboradas</th>
-        <th>Retardo total</th>
+        <th title="Promedio de retardo por empleado que trabajó ese día">Retardo<br>prom.</th>
         <th style="min-width:260px">Productividad del día</th>
       </tr></thead>
       <tbody>`;
@@ -6908,7 +6908,8 @@ function renderProductividadPorDia(d) {
     const c = _prodColor(row.productividad_pct);
     const esDom = row.dow === 0;
     const dtStr = fmtDate(row.fecha);
-    const retH = Math.floor(row.retardo_min/60), retM = row.retardo_min%60;
+    const retPromMin = row.empleados_trabajados > 0 ? Math.round(row.retardo_min / row.empleados_trabajados) : 0;
+    const retH = Math.floor(retPromMin/60), retM = retPromMin%60;
     // Días sin colaboradores esperados (todo el mundo en descanso/vacaciones): mostrar sutil
     const sinEsp = row.empleados_esperados === 0;
     html += `<tr style="${esDom?'background:#fef2f2':''}${sinEsp?';opacity:.5':''}">
@@ -6922,7 +6923,7 @@ function renderProductividadPorDia(d) {
       <td style="text-align:center;color:var(--muted)">${row.ausencias||'—'}</td>
       <td style="text-align:right;font-weight:700;padding-right:10px">${row.horas_esperadas.toFixed(1)} h</td>
       <td style="text-align:right;font-weight:900;color:#166534;padding-right:10px">${row.horas_laboradas.toFixed(1)} h</td>
-      <td style="text-align:center;color:${row.retardo_min>0?'#d97706':'var(--muted)'};font-weight:${row.retardo_min>0?'800':'400'}">${retH}h ${String(retM).padStart(2,'0')}m</td>
+      <td style="text-align:center;color:${retPromMin>0?'#d97706':'var(--muted)'};font-weight:${retPromMin>0?'800':'400'}" title="Total del día: ${(row.retardo_min/60).toFixed(1)}h en ${row.empleados_trabajados} empleados">${retH>0?retH+'h ':''}${String(retM).padStart(2,'0')}m${retPromMin===0?'':'/emp'}</td>
       <td style="padding:6px 8px">
         ${sinEsp ? '<span style="color:var(--muted);font-size:11px;font-style:italic">Sin colaboradores esperados</span>' : `
         <div style="display:flex;align-items:center;gap:8px">
@@ -6964,7 +6965,7 @@ function renderProductividad(d) {
         <div style="text-align:right;font-size:12px;color:${totColor.chipFg}">
           <div><strong>${tot.horas_laboradas.toFixed(1)} h</strong> laboradas</div>
           <div>de <strong>${tot.horas_esperadas.toFixed(1)} h</strong> esperadas</div>
-          <div style="margin-top:4px;font-size:11px;opacity:.85">${tot.dias_trabajados}/${tot.dias_laborables} días · ${(tot.retardo_min/60).toFixed(1)} h retardo</div>
+          <div style="margin-top:4px;font-size:11px;opacity:.85" title="Total: ${(tot.retardo_min/60).toFixed(1)}h">${tot.dias_trabajados}/${tot.dias_laborables} días · ${tot.dias_trabajados>0?Math.round(tot.retardo_min/tot.dias_trabajados):0} min retardo prom./día</div>
         </div>
       </div>
       <div style="background:rgba(255,255,255,.5);height:14px;border-radius:99px;overflow:hidden;position:relative">
@@ -6982,14 +6983,15 @@ function renderProductividad(d) {
         <th>V+PG+In</th>
         <th title="Horas totales esperadas (jornada × dias lab)">Horas<br>esperadas</th>
         <th title="Horas efectivamente trabajadas (suma de minutos_trabajados)">Horas<br>laboradas</th>
-        <th title="Suma de minutos de retardo">Retardo</th>
+        <th title="Promedio de retardo por día trabajado (retardo total / días trabajados)">Retardo<br>prom.</th>
         <th style="min-width:260px">Productividad</th>
       </tr></thead>
       <tbody>`;
   d.empleados.forEach(e => {
     const c = _prodColor(e.productividad_pct);
     const ausencias = e.vacaciones + e.permiso_goce + e.incapacidad;
-    const retH = Math.floor(e.retardo_min/60), retM = e.retardo_min%60;
+    const retPromMin = e.dias_trabajados > 0 ? Math.round(e.retardo_min / e.dias_trabajados) : 0;
+    const retH = Math.floor(retPromMin/60), retM = retPromMin%60;
     html += `<tr>
       <td style="position:sticky;left:0;background:#fff;z-index:1;border-right:1.5px solid #e5e7eb;padding:8px">
         <div style="font-weight:800">${e.nombre}</div>
@@ -7002,7 +7004,7 @@ function renderProductividad(d) {
       <td style="text-align:center;color:var(--muted)">${ausencias||'—'}</td>
       <td style="text-align:right;font-weight:700;padding-right:10px">${e.horas_esperadas.toFixed(1)} h</td>
       <td style="text-align:right;font-weight:900;color:#166534;padding-right:10px">${e.horas_laboradas.toFixed(1)} h</td>
-      <td style="text-align:center;color:${e.retardo_min>0?'#d97706':'var(--muted)'};font-weight:${e.retardo_min>0?'800':'400'}">${retH}h ${String(retM).padStart(2,'0')}m</td>
+      <td style="text-align:center;color:${retPromMin>0?'#d97706':'var(--muted)'};font-weight:${retPromMin>0?'800':'400'}" title="Total: ${Math.floor(e.retardo_min/60)}h ${e.retardo_min%60}m en ${e.dias_trabajados} días">${retH>0?retH+'h ':''}${String(retM).padStart(2,'0')}m${retPromMin===0?'':'/día'}</td>
       <td style="padding:6px 8px">
         <div style="display:flex;align-items:center;gap:8px">
           <div style="flex:1;background:#f1f5f9;height:16px;border-radius:99px;overflow:hidden;position:relative;min-width:120px">
@@ -7038,13 +7040,14 @@ function exportarProductividadExcel() {
   aoa.push([]);
   aoa.push([`Productividad global: ${d.totales.productividad_pct}%`, '', 'Horas laboradas:', d.totales.horas_laboradas, 'de', d.totales.horas_esperadas]);
   aoa.push([]);
-  aoa.push(['#','Colaborador','Puesto','Departamento','Jornada (h)','Días laborables','Días trabajados','Faltas','FJ','Vacaciones','P/G','Incapacidad','Horas esperadas','Horas laboradas','Retardo (min)','Productividad %']);
+  aoa.push(['#','Colaborador','Puesto','Departamento','Jornada (h)','Días laborables','Días trabajados','Faltas','FJ','Vacaciones','P/G','Incapacidad','Horas esperadas','Horas laboradas','Retardo prom. (min/día)','Productividad %']);
   d.empleados.forEach(e => {
+    const retProm = e.dias_trabajados > 0 ? Math.round(e.retardo_min / e.dias_trabajados) : 0;
     aoa.push([
       e.numero_colaborador||'', e.nombre, e.puesto||'', e.departamento||'',
       e.jornada_diaria_hrs, e.dias_laborables, e.dias_trabajados,
       e.faltas, e.fj, e.vacaciones, e.permiso_goce, e.incapacidad,
-      e.horas_esperadas, e.horas_laboradas, e.retardo_min, e.productividad_pct
+      e.horas_esperadas, e.horas_laboradas, retProm, e.productividad_pct
     ]);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -7066,11 +7069,12 @@ function exportarProductividadDiaExcel() {
   aoa.push([]);
   aoa.push([`Productividad del rango: ${d.totales.productividad_pct}%`, '', 'Horas laboradas:', d.totales.horas_laboradas, 'de', d.totales.horas_esperadas]);
   aoa.push([]);
-  aoa.push(['Fecha','Día','Empleados esperados','Trabajaron','Faltas','V+PG+In','Horas esperadas','Horas laboradas','Retardo (min)','Productividad %']);
+  aoa.push(['Fecha','Día','Empleados esperados','Trabajaron','Faltas','V+PG+In','Horas esperadas','Horas laboradas','Retardo prom. (min/emp)','Productividad %']);
   d.dias.forEach(r => {
+    const retProm = r.empleados_trabajados > 0 ? Math.round(r.retardo_min / r.empleados_trabajados) : 0;
     aoa.push([
       r.fecha, nomsDia[r.dow], r.empleados_esperados, r.empleados_trabajados,
-      r.faltas, r.ausencias, r.horas_esperadas, r.horas_laboradas, r.retardo_min, r.productividad_pct
+      r.faltas, r.ausencias, r.horas_esperadas, r.horas_laboradas, retProm, r.productividad_pct
     ]);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -7088,6 +7092,7 @@ function imprimirProductividad() {
   const filasHtml = d.empleados.map(e => {
     const c = _prodColor(e.productividad_pct);
     const ausencias = e.vacaciones + e.permiso_goce + e.incapacidad;
+    const retProm = e.dias_trabajados > 0 ? Math.round(e.retardo_min / e.dias_trabajados) : 0;
     return `<tr>
       <td class="name">${e.nombre}<div class="sub">${e.numero_colaborador?'#'+e.numero_colaborador+' · ':''}${e.puesto||''}</div></td>
       <td class="c">${e.jornada_diaria_hrs}h</td>
@@ -7097,7 +7102,7 @@ function imprimirProductividad() {
       <td class="c">${ausencias||'—'}</td>
       <td class="r">${e.horas_esperadas.toFixed(1)}</td>
       <td class="r" style="font-weight:900">${e.horas_laboradas.toFixed(1)}</td>
-      <td class="r" style="color:${e.retardo_min>0?'#d97706':'#888'}">${(e.retardo_min/60).toFixed(1)}h</td>
+      <td class="c" style="color:${retProm>0?'#d97706':'#888'}">${retProm} min/día</td>
       <td style="padding:4px 8px">
         <div style="display:flex;align-items:center;gap:6px">
           <div style="flex:1;background:#e5e7eb;height:12px;border-radius:99px;min-width:70px;position:relative;overflow:hidden">
@@ -7136,12 +7141,12 @@ function imprimirProductividad() {
   <div class="head"><div><h1>📊 PRODUCTIVIDAD DEL PERSONAL</h1><div class="sub">${fmtDate(d.desde)} al ${fmtDate(d.hasta)} · ${d.empleados.length} colaboradores</div></div><div class="sub">Impreso ${hoy}</div></div>
   <div class="global">
     <div><div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:1.2px">Productividad Global — ${totColor.label}</div><div class="p">${d.totales.productividad_pct}%</div></div>
-    <div class="r"><div><strong>${d.totales.horas_laboradas.toFixed(1)} h</strong> laboradas de <strong>${d.totales.horas_esperadas.toFixed(1)} h</strong> esperadas</div><div>${d.totales.dias_trabajados}/${d.totales.dias_laborables} días · ${(d.totales.retardo_min/60).toFixed(1)}h retardo</div></div>
+    <div class="r"><div><strong>${d.totales.horas_laboradas.toFixed(1)} h</strong> laboradas de <strong>${d.totales.horas_esperadas.toFixed(1)} h</strong> esperadas</div><div>${d.totales.dias_trabajados}/${d.totales.dias_laborables} días · ${d.totales.dias_trabajados>0?Math.round(d.totales.retardo_min/d.totales.dias_trabajados):0} min retardo prom./día</div></div>
   </div>
   <table>
     <thead><tr>
       <th class="l">Colaborador</th><th>Jornada</th><th>Días lab.</th><th>Días trab.</th>
-      <th>Faltas</th><th>V+PG+In</th><th>H. esp.</th><th>H. lab.</th><th>Retardo</th><th style="min-width:160px">Productividad</th>
+      <th>Faltas</th><th>V+PG+In</th><th>H. esp.</th><th>H. lab.</th><th>Retardo prom.</th><th style="min-width:160px">Productividad</th>
     </tr></thead>
     <tbody>${filasHtml}</tbody>
   </table>
@@ -7169,7 +7174,7 @@ function imprimirProductividadDia() {
       <td class="c">${r.ausencias||'—'}</td>
       <td class="r">${r.horas_esperadas.toFixed(1)}</td>
       <td class="r" style="font-weight:900">${r.horas_laboradas.toFixed(1)}</td>
-      <td class="c" style="color:${r.retardo_min>0?'#d97706':'#888'}">${(r.retardo_min/60).toFixed(1)}h</td>
+      <td class="c" style="color:${r.retardo_min>0?'#d97706':'#888'}">${r.empleados_trabajados>0?Math.round(r.retardo_min/r.empleados_trabajados):0} min/emp</td>
       <td style="padding:4px 8px">
         ${sinEsp ? '<span style="color:#888;font-size:9px;font-style:italic">sin colaboradores</span>' : `
         <div style="display:flex;align-items:center;gap:6px">
@@ -7205,12 +7210,12 @@ function imprimirProductividadDia() {
   <div class="head"><div><h1>📊 PRODUCTIVIDAD POR DÍA</h1><div class="sub">${fmtDate(d.desde)} al ${fmtDate(d.hasta)} · ${d.dias.length} días</div></div><div class="sub">Impreso ${hoy}</div></div>
   <div class="global">
     <div><div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:1.2px">Productividad del Rango — ${totColor.label}</div><div class="p">${d.totales.productividad_pct}%</div></div>
-    <div class="r"><div><strong>${d.totales.horas_laboradas.toFixed(1)} h</strong> laboradas de <strong>${d.totales.horas_esperadas.toFixed(1)} h</strong> esperadas</div><div>${d.totales.faltas} faltas · ${d.totales.ausencias} ausencias · ${(d.totales.retardo_min/60).toFixed(1)}h retardo</div></div>
+    <div class="r"><div><strong>${d.totales.horas_laboradas.toFixed(1)} h</strong> laboradas de <strong>${d.totales.horas_esperadas.toFixed(1)} h</strong> esperadas</div><div>${d.totales.faltas} faltas · ${d.totales.ausencias} ausencias · ${d.dias.length>0?Math.round(d.totales.retardo_min/d.dias.length):0} min retardo prom./día</div></div>
   </div>
   <table>
     <thead><tr>
       <th style="text-align:left">Día</th><th>Esperados</th><th>Trabajaron</th><th>Faltas</th><th>V+PG+In</th>
-      <th>H. esp.</th><th>H. lab.</th><th>Retardo</th><th style="min-width:130px">Productividad</th>
+      <th>H. esp.</th><th>H. lab.</th><th>Retardo prom.</th><th style="min-width:130px">Productividad</th>
     </tr></thead>
     <tbody>${filasHtml}</tbody>
   </table>
