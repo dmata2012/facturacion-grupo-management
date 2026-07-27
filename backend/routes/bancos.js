@@ -107,6 +107,29 @@ router.use(verificarToken);
         CHECK (folio_final >= folio_inicial)
       )`);
     await query(`ALTER TABLE fac_bancos_cheques ADD COLUMN IF NOT EXISTS chequera_id INT REFERENCES fac_bancos_chequeras(id) ON DELETE SET NULL`);
+    // Libro de movimientos de la cuenta (registro propio de la empresa)
+    await query(`
+      CREATE TABLE IF NOT EXISTS fac_bancos_movimientos (
+        id SERIAL PRIMARY KEY,
+        cuenta_bancaria_id INT NOT NULL REFERENCES fac_bancos_cuentas(id) ON DELETE CASCADE,
+        fecha DATE NOT NULL,
+        tipo TEXT NOT NULL,
+        naturaleza TEXT NOT NULL,
+        monto NUMERIC(14,2) NOT NULL,
+        concepto TEXT,
+        referencia TEXT,
+        contraparte TEXT,
+        factura_id INT REFERENCES fac_facturas(id) ON DELETE SET NULL,
+        cheque_id INT REFERENCES fac_bancos_cheques(id) ON DELETE SET NULL,
+        conciliado BOOLEAN DEFAULT FALSE,
+        notas TEXT,
+        creado_por INT,
+        creado_en TIMESTAMP DEFAULT NOW(),
+        actualizado_en TIMESTAMP DEFAULT NOW(),
+        CHECK (naturaleza IN ('CARGO','ABONO')),
+        CHECK (monto > 0)
+      )`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_bmov_cuenta_fecha ON fac_bancos_movimientos(cuenta_bancaria_id, fecha)`);
     // Movimientos del estado de cuenta bancario
     await query(`
       CREATE TABLE IF NOT EXISTS fac_bancos_movimientos_ec (
@@ -734,6 +757,198 @@ router.get('/cheques/reporte-a-cobrar', async (req, res) => {
       importe_total: importeTotal,
       total_cheques: r.rows.length
     });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══ LIBRO DE MOVIMIENTOS DE LA CUENTA ══════════════
+// Naturaleza fija por tipo: ABONO = entra dinero, CARGO = sale dinero
+const TIPO_MOV = {
+  DEPOSITO:                'ABONO',
+  TRANSFERENCIA_RECIBIDA:  'ABONO',
+  COBRO_FACTURA:           'ABONO',
+  INTERES:                 'ABONO',
+  DEVOLUCION:              'ABONO',
+  TRANSFERENCIA_ENVIADA:   'CARGO',
+  PAGO_FACTURA:            'CARGO',
+  PAGO_PROVEEDOR:          'CARGO',
+  RETIRO:                  'CARGO',
+  COMISION:                'CARGO',
+  IMPUESTO:                'CARGO',
+  NOMINA:                  'CARGO',
+  OTRO:                    null   // el usuario elige la naturaleza
+};
+
+// Saldo de una cuenta = saldo inicial + abonos − cargos − cheques cobrados sin movimiento asociado
+async function saldoCuenta(cuentaId, hasta) {
+  const params = [cuentaId];
+  let filtroFecha = '';
+  if (hasta) { params.push(hasta); filtroFecha = ` AND fecha <= $${params.length}`; }
+  const r = await query(`
+    SELECT
+      (SELECT saldo_inicial FROM fac_bancos_cuentas WHERE id=$1) AS inicial,
+      COALESCE((SELECT SUM(monto) FROM fac_bancos_movimientos
+                WHERE cuenta_bancaria_id=$1 AND naturaleza='ABONO'${filtroFecha}),0) AS abonos,
+      COALESCE((SELECT SUM(monto) FROM fac_bancos_movimientos
+                WHERE cuenta_bancaria_id=$1 AND naturaleza='CARGO'${filtroFecha}),0) AS cargos,
+      COALESCE((SELECT SUM(c.monto) FROM fac_bancos_cheques c
+                WHERE c.cuenta_bancaria_id=$1 AND c.estatus='COBRADO'
+                  AND NOT EXISTS (SELECT 1 FROM fac_bancos_movimientos m WHERE m.cheque_id=c.id)),0) AS cheques
+  `, params);
+  const x = r.rows[0];
+  const inicial = parseFloat(x.inicial)||0, abonos = parseFloat(x.abonos)||0;
+  const cargos  = parseFloat(x.cargos)||0,  cheques = parseFloat(x.cheques)||0;
+  return {
+    saldo_inicial: inicial, abonos, cargos, cheques_cobrados: cheques,
+    saldo_actual: +(inicial + abonos - cargos - cheques).toFixed(2)
+  };
+}
+
+// GET /api/bancos/movimientos?cuenta_id=&desde=&hasta=&tipo=&naturaleza=&buscar=
+router.get('/movimientos', async (req, res) => {
+  try {
+    const { cuenta_id, desde, hasta, tipo, naturaleza, buscar } = req.query;
+    const params = [];
+    let where = 'WHERE 1=1';
+    if (cuenta_id)  { params.push(cuenta_id);  where += ` AND m.cuenta_bancaria_id=$${params.length}`; }
+    if (desde)      { params.push(desde);      where += ` AND m.fecha >= $${params.length}`; }
+    if (hasta)      { params.push(hasta);      where += ` AND m.fecha <= $${params.length}`; }
+    if (tipo)       { params.push(tipo);       where += ` AND m.tipo=$${params.length}`; }
+    if (naturaleza) { params.push(naturaleza); where += ` AND m.naturaleza=$${params.length}`; }
+    if (buscar) {
+      params.push(`%${buscar}%`);
+      where += ` AND (m.concepto ILIKE $${params.length} OR m.referencia ILIKE $${params.length} OR m.contraparte ILIKE $${params.length})`;
+    }
+    const r = await query(`
+      SELECT m.*, TO_CHAR(m.fecha,'YYYY-MM-DD') AS fecha,
+        cu.banco, cu.alias AS cuenta_alias, cu.moneda,
+        f.folio AS factura_folio, f.uuid_cfdi AS factura_uuid,
+        cl.razon_social AS cliente_nombre,
+        ch.no_cheque AS cheque_folio
+      FROM fac_bancos_movimientos m
+      JOIN fac_bancos_cuentas cu ON cu.id = m.cuenta_bancaria_id
+      LEFT JOIN fac_facturas f ON f.id = m.factura_id
+      LEFT JOIN fac_clientes cl ON cl.id = f.cliente_id
+      LEFT JOIN fac_bancos_cheques ch ON ch.id = m.cheque_id
+      ${where}
+      ORDER BY m.fecha DESC, m.id DESC
+      LIMIT 500
+    `, params);
+
+    // Totales del periodo consultado
+    const tot = r.rows.reduce((a, m) => {
+      const v = parseFloat(m.monto) || 0;
+      if (m.naturaleza === 'ABONO') a.abonos += v; else a.cargos += v;
+      return a;
+    }, { abonos: 0, cargos: 0 });
+    tot.neto = +(tot.abonos - tot.cargos).toFixed(2);
+    tot.abonos = +tot.abonos.toFixed(2);
+    tot.cargos = +tot.cargos.toFixed(2);
+
+    const saldo = cuenta_id ? await saldoCuenta(cuenta_id) : null;
+    res.json({ movimientos: r.rows, totales: tot, saldo });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/bancos/cuentas/:id/saldo
+router.get('/cuentas/:id/saldo', async (req, res) => {
+  try { res.json(await saldoCuenta(req.params.id, req.query.hasta)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/bancos/facturas-pendientes — facturas con saldo, para vincular cobros
+router.get('/facturas-pendientes', async (req, res) => {
+  try {
+    const { buscar } = req.query;
+    const params = [];
+    let extra = '';
+    if (buscar) {
+      params.push(`%${buscar}%`);
+      extra = ` AND (f.folio ILIKE $${params.length} OR c.razon_social ILIKE $${params.length})`;
+    }
+    const r = await query(`
+      SELECT f.id, f.folio, TO_CHAR(f.fecha_emision,'YYYY-MM-DD') AS fecha_emision,
+        f.total, c.razon_social AS cliente,
+        COALESCE((SELECT SUM(p.monto) FROM fac_pagos p WHERE p.factura_id=f.id),0) AS cobrado,
+        (f.total - COALESCE((SELECT SUM(p.monto) FROM fac_pagos p WHERE p.factura_id=f.id),0)) AS saldo
+      FROM fac_facturas f
+      LEFT JOIN fac_clientes c ON c.id = f.cliente_id
+      WHERE f.estatus <> 'cancelada'${extra}
+      ORDER BY f.fecha_emision DESC
+      LIMIT 150
+    `, params);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/movimientos', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
+  try {
+    const { cuenta_bancaria_id, fecha, tipo, naturaleza, monto, concepto,
+            referencia, contraparte, factura_id, notas, registrar_pago } = req.body;
+    if (!cuenta_bancaria_id || !fecha || !tipo || !monto)
+      return res.status(400).json({ error: 'Cuenta, fecha, tipo y monto son requeridos.' });
+    if (!(tipo in TIPO_MOV)) return res.status(400).json({ error: 'Tipo de movimiento inválido.' });
+    const m = parseFloat(monto);
+    if (!(m > 0)) return res.status(400).json({ error: 'El monto debe ser mayor a 0.' });
+    // La naturaleza la define el tipo, salvo en OTRO
+    const nat = TIPO_MOV[tipo] || (['CARGO','ABONO'].includes(naturaleza) ? naturaleza : 'CARGO');
+
+    const r = await query(
+      `INSERT INTO fac_bancos_movimientos(
+         cuenta_bancaria_id, fecha, tipo, naturaleza, monto, concepto,
+         referencia, contraparte, factura_id, notas, creado_por
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [cuenta_bancaria_id, fecha, tipo, nat, m, concepto || null,
+       referencia || null, contraparte || null, factura_id || null, notas || null, req.usuario.id]
+    );
+
+    // Si es cobro de factura y se pidió, registrar también el pago en el módulo de cobranza
+    let pagoCreado = null;
+    if (registrar_pago && factura_id && nat === 'ABONO') {
+      try {
+        const p = await query(
+          `INSERT INTO fac_pagos(factura_id, fecha_pago, monto, forma_pago, referencia, notas, creado_por)
+           VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+          [factura_id, fecha, m, 'transferencia', referencia || null,
+           `Registrado desde Bancos · mov #${r.rows[0].id}`, req.usuario.id]
+        );
+        pagoCreado = p.rows[0].id;
+        // Mantener el estatus de la factura al día (pendiente/parcial/pagada)
+        try {
+          const { recalcularEstatus } = require('./facturas');
+          if (typeof recalcularEstatus === 'function') await recalcularEstatus(factura_id);
+        } catch (e) { /* no bloquear si falla el recálculo */ }
+      } catch (e) { /* si falla el pago, el movimiento bancario igual queda */ }
+    }
+
+    const saldo = await saldoCuenta(cuenta_bancaria_id);
+    res.status(201).json({ ...r.rows[0], saldo, pago_id: pagoCreado });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/movimientos/:id', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
+  try {
+    const { fecha, tipo, naturaleza, monto, concepto, referencia, contraparte, factura_id, notas } = req.body;
+    if (!fecha || !tipo || !monto) return res.status(400).json({ error: 'Fecha, tipo y monto requeridos.' });
+    if (!(tipo in TIPO_MOV)) return res.status(400).json({ error: 'Tipo de movimiento inválido.' });
+    const m = parseFloat(monto);
+    if (!(m > 0)) return res.status(400).json({ error: 'El monto debe ser mayor a 0.' });
+    const nat = TIPO_MOV[tipo] || (['CARGO','ABONO'].includes(naturaleza) ? naturaleza : 'CARGO');
+    await query(
+      `UPDATE fac_bancos_movimientos SET
+         fecha=$1, tipo=$2, naturaleza=$3, monto=$4, concepto=$5,
+         referencia=$6, contraparte=$7, factura_id=$8, notas=$9, actualizado_en=NOW()
+       WHERE id=$10`,
+      [fecha, tipo, nat, m, concepto || null, referencia || null,
+       contraparte || null, factura_id || null, notas || null, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/movimientos/:id', requireRol('admin', 'tesoreria'), async (req, res) => {
+  try {
+    await query(`DELETE FROM fac_bancos_movimientos WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

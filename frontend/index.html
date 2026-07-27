@@ -648,6 +648,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-empresas-bnc"><div class="modal modal-sm" id="modal-empresas-bnc-body"></div></div>
 <div class="overlay" id="modal-catbancos"><div class="modal" style="width:min(640px,96vw)" id="modal-catbancos-body"></div></div>
 <div class="overlay" id="modal-chequeras"><div class="modal" style="width:min(780px,96vw)" id="modal-chequeras-body"></div></div>
+<div class="overlay" id="modal-mov-banco"><div class="modal" style="width:min(720px,96vw)" id="modal-mov-banco-body"></div></div>
 <div class="overlay" id="modal-benef-bnc"><div class="modal" style="width:min(640px,96vw)" id="modal-benef-bnc-body"></div></div>
 <div class="overlay" id="modal-notif-ch"><div class="modal" style="width:min(720px,96vw)" id="modal-notif-ch-body"></div></div>
 <div class="overlay" id="modal-notif-show"><div class="modal modal-sm" id="modal-notif-show-body"></div></div>
@@ -1084,6 +1085,7 @@ async function bancos() {
 
     <div class="bn-tabs">
       <div class="bn-tab active" onclick="showTab(this,'bnc-tab-cuentas')">🏦 Cuentas</div>
+      <div class="bn-tab" onclick="showTab(this,'bnc-tab-movs');inicializarMovsBanco()">💸 Movimientos</div>
       <div class="bn-tab" onclick="showTab(this,'bnc-tab-cheques');cargarCheques()">📝 Cheques Emitidos</div>
       <div class="bn-tab" onclick="showTab(this,'bnc-tab-reporte');cargarReporteACobrar()">📋 Reporte a Cobrar</div>
       <div class="bn-tab" onclick="showTab(this,'bnc-tab-concil');cargarConciliacion()">⚖ Conciliación</div>
@@ -1108,6 +1110,27 @@ async function bancos() {
         </div>
       </div>
       <div id="bnc-lista"><p class="empty">Cargando...</p></div>
+    </div>
+
+    <!-- MOVIMIENTOS -->
+    <div class="tab-panel" id="bnc-tab-movs">
+      <div class="bn-toolbar">
+        <select id="mv-cuenta" onchange="cargarMovsBanco()" class="bn-filtro" style="min-width:220px">
+          <option value="">Todas las cuentas</option>
+        </select>
+        <select id="mv-nat" onchange="cargarMovsBanco()" class="bn-filtro">
+          <option value="">↕ Cargos y abonos</option>
+          <option value="ABONO">↓ Solo abonos (entradas)</option>
+          <option value="CARGO">↑ Solo cargos (salidas)</option>
+        </select>
+        <input type="date" id="mv-desde" onchange="cargarMovsBanco()" class="bn-filtro" title="Desde">
+        <input type="date" id="mv-hasta" onchange="cargarMovsBanco()" class="bn-filtro" title="Hasta">
+        <div class="bn-acciones">
+          <button class="btn bo bsm" onclick="exportarMovsExcel()">⬇ Excel</button>
+          ${canWrite()?`<button class="btn bs bsm" onclick="openMovBanco()">＋ Nuevo movimiento</button>`:''}
+        </div>
+      </div>
+      <div id="mv-body"><p class="empty">Cargando...</p></div>
     </div>
 
     <!-- CHEQUES -->
@@ -1724,6 +1747,412 @@ async function eliminarCuentaBanco(id, alias) {
     toast('Cuenta dada de baja.');
     cargarCuentasBanco();
   } catch(e) { toast(e.message, 'err'); }
+}
+
+// ═══ MOVIMIENTOS BANCARIOS ══════════════════════════
+const TIPOS_MOV = [
+  { v:'DEPOSITO',               n:'ABONO', ic:'💵', l:'Depósito',              d:'Efectivo o cheque depositado' },
+  { v:'TRANSFERENCIA_RECIBIDA', n:'ABONO', ic:'📥', l:'Transferencia recibida', d:'SPEI o traspaso que entra' },
+  { v:'COBRO_FACTURA',          n:'ABONO', ic:'🧾', l:'Cobro de factura',       d:'Un cliente pagó una factura emitida' },
+  { v:'INTERES',                n:'ABONO', ic:'📈', l:'Intereses',              d:'Rendimiento que abona el banco' },
+  { v:'DEVOLUCION',             n:'ABONO', ic:'↩️', l:'Devolución',             d:'Reverso o reembolso a favor' },
+  { v:'TRANSFERENCIA_ENVIADA',  n:'CARGO', ic:'📤', l:'Transferencia enviada',  d:'SPEI o traspaso que sale' },
+  { v:'PAGO_PROVEEDOR',         n:'CARGO', ic:'🏭', l:'Pago a proveedor',       d:'Pago de una factura recibida' },
+  { v:'NOMINA',                 n:'CARGO', ic:'👥', l:'Nómina',                 d:'Dispersión de sueldos' },
+  { v:'RETIRO',                 n:'CARGO', ic:'🏧', l:'Retiro',                 d:'Efectivo retirado' },
+  { v:'COMISION',               n:'CARGO', ic:'💳', l:'Comisión bancaria',      d:'Cargo por servicios del banco' },
+  { v:'IMPUESTO',               n:'CARGO', ic:'🏛', l:'Impuesto',               d:'IVA, ISR, retenciones' },
+  { v:'OTRO',                   n:null,    ic:'🔹', l:'Otro',                   d:'Eliges si entra o sale' }
+];
+const _tipoMov = v => TIPOS_MOV.find(t => t.v === v) || TIPOS_MOV[TIPOS_MOV.length-1];
+
+async function inicializarMovsBanco() {
+  const sel = $('mv-cuenta');
+  if (sel && sel.options.length <= 1) {
+    try {
+      const cs = await api('/bancos/cuentas?activa=true');
+      window._mvCuentas = cs;
+      sel.innerHTML = '<option value="">Todas las cuentas</option>' +
+        cs.map(c => `<option value="${c.id}">${c.banco} · ${c.alias||c.numero_cuenta||''}</option>`).join('');
+      // Preseleccionar si solo hay una
+      if (cs.length === 1) sel.value = cs[0].id;
+    } catch(e) {}
+  }
+  if (!$('mv-desde').value) {
+    const hoy = new Date(), y = hoy.getFullYear(), m = String(hoy.getMonth()+1).padStart(2,'0');
+    $('mv-desde').value = `${y}-${m}-01`;
+    $('mv-hasta').value = new Date(y, hoy.getMonth()+1, 0).toISOString().slice(0,10);
+  }
+  cargarMovsBanco();
+}
+
+async function cargarMovsBanco() {
+  const p = [];
+  const cta = $('mv-cuenta')?.value, nat = $('mv-nat')?.value;
+  const d = $('mv-desde')?.value, h = $('mv-hasta')?.value;
+  if (cta) p.push(`cuenta_id=${cta}`);
+  if (nat) p.push(`naturaleza=${nat}`);
+  if (d)   p.push(`desde=${d}`);
+  if (h)   p.push(`hasta=${h}`);
+  $('mv-body').innerHTML = '<p class="empty">Cargando...</p>';
+  try {
+    const r = await api(`/bancos/movimientos${p.length?'?'+p.join('&'):''}`);
+    window._mvData = r;
+    renderMovsBanco(r);
+  } catch(e) { $('mv-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function renderMovsBanco(r) {
+  const cont = $('mv-body');
+  const t = r.totales, s = r.saldo;
+  // Panel de saldo (solo si hay una cuenta seleccionada)
+  let panelSaldo = '';
+  if (s) {
+    panelSaldo = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:11px;margin-bottom:14px">
+        <div class="bn-kpi" style="background:linear-gradient(135deg,#0f2557,#2563eb);color:#fff;border:none">
+          <div class="l">Saldo actual</div>
+          <div class="v">${fmt(s.saldo_actual)}</div>
+          <div class="s">Inicial ${fmt(s.saldo_inicial)}</div>
+        </div>
+        <div class="bn-kpi" style="background:#f0fdf4;border-color:#86efac;color:#166534">
+          <div class="l">Abonos del periodo</div>
+          <div class="v">+${fmt(t.abonos)}</div>
+          <div class="s">Dinero que entró</div>
+        </div>
+        <div class="bn-kpi" style="background:#fef2f2;border-color:#fca5a5;color:#991b1b">
+          <div class="l">Cargos del periodo</div>
+          <div class="v">−${fmt(t.cargos)}</div>
+          <div class="s">Dinero que salió</div>
+        </div>
+        <div class="bn-kpi" style="background:${t.neto>=0?'#eff6ff':'#fff7ed'};border-color:${t.neto>=0?'#93c5fd':'#fdba74'};color:${t.neto>=0?'#1e40af':'#9a3412'}">
+          <div class="l">Neto del periodo</div>
+          <div class="v">${t.neto>=0?'+':''}${fmt(t.neto)}</div>
+          <div class="s">${r.movimientos.length} movimiento${r.movimientos.length!==1?'s':''}</div>
+        </div>
+      </div>`;
+  }
+
+  if (!r.movimientos.length) {
+    cont.innerHTML = panelSaldo + `
+      <div class="bn-empty" style="padding:36px">
+        <div class="bn-empty-ic" style="font-size:52px">💸</div>
+        <h3>Sin movimientos en este periodo</h3>
+        <p>Registra depósitos, transferencias, cobros de facturas emitidas, pagos a proveedores, comisiones y más para llevar el control del saldo de tus cuentas.</p>
+        ${canWrite()?`<button class="btn bs" onclick="openMovBanco()">＋ Registrar movimiento</button>`:''}
+      </div>`;
+    return;
+  }
+
+  cont.innerHTML = panelSaldo + `
+    <div class="tscroll"><table>
+      <thead><tr>
+        <th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Contraparte / Factura</th>
+        <th>Referencia</th><th style="text-align:right">Cargo</th><th style="text-align:right">Abono</th><th></th>
+      </tr></thead>
+      <tbody>${r.movimientos.map(m => {
+        const tp = _tipoMov(m.tipo);
+        const esAbono = m.naturaleza === 'ABONO';
+        return `<tr>
+          <td style="white-space:nowrap">${fmtDate(m.fecha)}</td>
+          <td>
+            <span style="display:inline-flex;align-items:center;gap:5px;background:${esAbono?'#dcfce7':'#fee2e2'};color:${esAbono?'#166534':'#991b1b'};padding:3px 9px;border-radius:12px;font-size:11px;font-weight:800;white-space:nowrap">
+              ${tp.ic} ${tp.l}
+            </span>
+            ${!$('mv-cuenta')?.value ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${m.banco} · ${m.cuenta_alias||''}</div>` : ''}
+          </td>
+          <td style="max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(m.concepto||'').replace(/"/g,'&quot;')}">${m.concepto||'—'}</td>
+          <td style="font-size:11.5px">
+            ${m.contraparte ? `<div style="font-weight:700">${m.contraparte}</div>` : ''}
+            ${m.factura_folio ? `<div style="color:#2563eb;font-weight:700">🧾 ${m.factura_folio}${m.cliente_nombre?` · ${m.cliente_nombre}`:''}</div>` : ''}
+            ${m.cheque_folio ? `<div style="color:#92400e;font-weight:700">📝 Cheque ${m.cheque_folio}</div>` : ''}
+            ${(!m.contraparte && !m.factura_folio && !m.cheque_folio) ? '<span style="color:var(--muted)">—</span>' : ''}
+          </td>
+          <td style="font-family:monospace;font-size:11px;color:var(--muted)">${m.referencia||'—'}</td>
+          <td style="text-align:right;font-weight:800;color:#991b1b">${esAbono?'':fmt(m.monto)}</td>
+          <td style="text-align:right;font-weight:800;color:#166534">${esAbono?fmt(m.monto):''}</td>
+          <td style="white-space:nowrap">
+            ${canWrite()?`<button class="btn bg bsm" style="padding:4px 8px" onclick="openMovBanco(${m.id})" title="Editar">✏️</button>`:''}
+            ${canWrite()?`<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarMovBanco(${m.id})" title="Eliminar">🗑</button>`:''}
+          </td>
+        </tr>`;
+      }).join('')}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--dark);background:var(--bg-alt);font-weight:900">
+        <td colspan="5" style="padding:10px;text-align:right">TOTALES DEL PERIODO:</td>
+        <td style="text-align:right;padding:10px;color:#991b1b">${fmt(t.cargos)}</td>
+        <td style="text-align:right;padding:10px;color:#166534">${fmt(t.abonos)}</td>
+        <td></td>
+      </tr></tfoot>
+    </table></div>`;
+}
+
+async function openMovBanco(id) {
+  const cuentas = window._mvCuentas || await api('/bancos/cuentas?activa=true');
+  window._mvCuentas = cuentas;
+  let m = { cuenta_bancaria_id: $('mv-cuenta')?.value || '', fecha: new Date().toISOString().slice(0,10),
+            tipo:'DEPOSITO', naturaleza:'ABONO', monto:'', concepto:'', referencia:'',
+            contraparte:'', factura_id:'', notas:'' };
+  if (id) {
+    const enLista = (window._mvData?.movimientos || []).find(x => x.id === id);
+    if (enLista) m = { ...m, ...enLista };
+  }
+
+  $('modal-mov-banco-body').innerHTML = `
+    <style>
+      .mv-tipos{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:7px}
+      .mv-tipo{border:2px solid var(--border);border-radius:11px;padding:9px 7px;cursor:pointer;
+        text-align:center;transition:all .16s;background:#fff}
+      .mv-tipo input{display:none}
+      .mv-tipo .ic{font-size:19px;display:block;margin-bottom:2px}
+      .mv-tipo .l{font-size:10.5px;font-weight:800;color:#475569;line-height:1.2}
+      .mv-tipo:hover{border-color:#93c5fd;background:#f8fafc;transform:translateY(-1px)}
+      .mv-tipo.on.abono{border-color:#16a34a;background:#f0fdf4;box-shadow:0 3px 10px rgba(22,163,74,.2)}
+      .mv-tipo.on.abono .l{color:#166534}
+      .mv-tipo.on.cargo{border-color:#dc2626;background:#fef2f2;box-shadow:0 3px 10px rgba(220,38,38,.2)}
+      .mv-tipo.on.cargo .l{color:#991b1b}
+      .mv-grupo-t{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:1px;
+        margin:0 0 6px;display:flex;align-items:center;gap:6px}
+      .mv-sec-t{display:flex;align-items:center;gap:7px;font-size:10.5px;font-weight:800;
+        text-transform:uppercase;letter-spacing:1px;color:#3b82f6;margin-bottom:10px;
+        padding-bottom:6px;border-bottom:1.5px solid #e0e7ff}
+      .mv-sec-t .n{width:19px;height:19px;border-radius:50%;background:#3b82f6;color:#fff;
+        display:inline-flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0}
+    </style>
+    <div style="margin:-28px -28px 20px;padding:20px 26px;background:linear-gradient(135deg,#0f2557,#2563eb);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">${id?'Editar':'Nuevo'} movimiento bancario</div>
+      <div style="font-size:20px;font-weight:900;margin-top:3px">💸 Registro en cuenta</div>
+    </div>
+
+    <div style="margin-bottom:18px">
+      <div class="mv-sec-t"><span class="n">1</span> Tipo de movimiento</div>
+      <div class="mv-grupo-t" style="color:#166534">↓ Entra dinero (abono)</div>
+      <div class="mv-tipos" style="margin-bottom:11px">
+        ${TIPOS_MOV.filter(t => t.n==='ABONO').map(t => `
+          <label class="mv-tipo abono${m.tipo===t.v?' on abono':''}" title="${t.d}">
+            <input type="radio" name="mv-tipo" value="${t.v}" ${m.tipo===t.v?'checked':''} onchange="_mvOnTipo(this)">
+            <span class="ic">${t.ic}</span><span class="l">${t.l}</span>
+          </label>`).join('')}
+      </div>
+      <div class="mv-grupo-t" style="color:#991b1b">↑ Sale dinero (cargo)</div>
+      <div class="mv-tipos">
+        ${TIPOS_MOV.filter(t => t.n==='CARGO').map(t => `
+          <label class="mv-tipo cargo${m.tipo===t.v?' on cargo':''}" title="${t.d}">
+            <input type="radio" name="mv-tipo" value="${t.v}" ${m.tipo===t.v?'checked':''} onchange="_mvOnTipo(this)">
+            <span class="ic">${t.ic}</span><span class="l">${t.l}</span>
+          </label>`).join('')}
+        <label class="mv-tipo${m.tipo==='OTRO'?' on '+(m.naturaleza==='ABONO'?'abono':'cargo'):''}" title="Eliges si entra o sale">
+          <input type="radio" name="mv-tipo" value="OTRO" ${m.tipo==='OTRO'?'checked':''} onchange="_mvOnTipo(this)">
+          <span class="ic">🔹</span><span class="l">Otro</span>
+        </label>
+      </div>
+      <div id="mv-nat-otro" style="display:${m.tipo==='OTRO'?'block':'none'};margin-top:10px">
+        <div class="fi" style="margin:0"><label>¿El dinero entra o sale?</label>
+          <select id="mv-naturaleza" onchange="_mvPintarOtro()">
+            <option value="ABONO" ${m.naturaleza==='ABONO'?'selected':''}>↓ Entra (abono)</option>
+            <option value="CARGO" ${m.naturaleza==='CARGO'?'selected':''}>↑ Sale (cargo)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:18px">
+      <div class="mv-sec-t"><span class="n">2</span> Datos del movimiento</div>
+      <div class="fg" style="gap:11px">
+        <div class="fi"><label>Cuenta bancaria <span style="color:var(--red)">*</span></label>
+          <select id="mv-f-cuenta">
+            <option value="">— Seleccionar —</option>
+            ${cuentas.map(c => `<option value="${c.id}" ${m.cuenta_bancaria_id==c.id?'selected':''}>${c.banco} · ${c.alias||c.numero_cuenta||''}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fi"><label>Fecha <span style="color:var(--red)">*</span></label>
+          <input type="date" id="mv-f-fecha" value="${(m.fecha||'').slice(0,10)}">
+        </div>
+        <div class="fi full"><label>Monto <span style="color:var(--red)">*</span></label>
+          <div style="position:relative">
+            <span id="mv-f-signo" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-weight:900;font-size:18px;pointer-events:none">$</span>
+            <input type="number" step="0.01" id="mv-f-monto" value="${m.monto||''}" placeholder="0.00"
+                   style="padding-left:30px;font-size:20px;font-weight:900;text-align:right" oninput="_mvPintarOtro()">
+          </div>
+        </div>
+        <div class="fi full"><label>Concepto</label>
+          <input id="mv-f-concepto" value="${(m.concepto||'').replace(/"/g,'&quot;')}" maxlength="300"
+                 placeholder="Ej: Pago de cliente ACME · Traspaso a nómina · Comisión mensual">
+        </div>
+        <div class="fi"><label>Contraparte <span style="color:var(--muted);font-weight:400;font-size:10px">(quién paga o a quién se paga)</span></label>
+          <input id="mv-f-contraparte" value="${(m.contraparte||'').replace(/"/g,'&quot;')}" placeholder="Nombre o razón social">
+        </div>
+        <div class="fi"><label>Referencia <span style="color:var(--muted);font-weight:400;font-size:10px">(folio SPEI, ficha)</span></label>
+          <input id="mv-f-referencia" value="${(m.referencia||'').replace(/"/g,'&quot;')}" style="font-family:monospace">
+        </div>
+      </div>
+    </div>
+
+    <!-- Vinculación con factura (solo cobros) -->
+    <div id="mv-fact-box" style="display:none;margin-bottom:18px">
+      <div class="mv-sec-t"><span class="n">3</span> Factura emitida que se está cobrando</div>
+      <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:11px;padding:13px">
+        <div class="fi" style="margin:0 0 9px"><label>Buscar factura</label>
+          <input id="mv-f-buscar" placeholder="Folio o cliente…" oninput="_mvBuscarFacturas()">
+        </div>
+        <div class="fi" style="margin:0"><label>Factura</label>
+          <select id="mv-f-factura" onchange="_mvOnFactura()">
+            <option value="">— Sin vincular —</option>
+          </select>
+        </div>
+        <div id="mv-f-info" style="font-size:11.5px;margin-top:8px;min-height:16px"></div>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:9px;cursor:pointer;font-size:12px;font-weight:700;color:#1e40af">
+          <input type="checkbox" id="mv-f-regpago" checked>
+          También registrar el pago en Cobranza (actualiza el saldo de la factura)
+        </label>
+      </div>
+    </div>
+
+    <div class="fi full" style="margin-bottom:6px"><label>Notas <span style="color:var(--muted);font-weight:400;font-size:10px">(opcional)</span></label>
+      <textarea id="mv-f-notas" rows="2" maxlength="400">${m.notas||''}</textarea>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-mov-banco')">Cancelar</button>
+      <button class="btn bs" onclick="guardarMovBanco(${id||'null'})">💾 ${id?'Guardar cambios':'Registrar movimiento'}</button>
+    </div>`;
+  openModal('modal-mov-banco');
+  window._mvFacturaSel = m.factura_id || '';
+  _mvPintarOtro();
+  if (m.tipo === 'COBRO_FACTURA') _mvBuscarFacturas();
+}
+
+// Al cambiar el tipo: repinta selección, muestra/oculta naturaleza y bloque de factura
+function _mvOnTipo(inp) {
+  document.querySelectorAll('.mv-tipo').forEach(x => x.classList.remove('on','abono','cargo'));
+  const t = _tipoMov(inp.value);
+  const lbl = inp.closest('.mv-tipo');
+  lbl.classList.add('on');
+  if (t.n) lbl.classList.add(t.n === 'ABONO' ? 'abono' : 'cargo');
+  $('mv-nat-otro').style.display = inp.value === 'OTRO' ? 'block' : 'none';
+  _mvPintarOtro();
+  if (inp.value === 'COBRO_FACTURA') _mvBuscarFacturas();
+}
+
+// Sincroniza colores del monto y la caja de factura con la naturaleza vigente
+function _mvPintarOtro() {
+  const tipo = document.querySelector('input[name="mv-tipo"]:checked')?.value || 'DEPOSITO';
+  const t = _tipoMov(tipo);
+  const nat = t.n || ($('mv-naturaleza')?.value || 'CARGO');
+  const esAbono = nat === 'ABONO';
+  const col = esAbono ? '#166534' : '#991b1b';
+  const inp = $('mv-f-monto'), sg = $('mv-f-signo');
+  if (inp) inp.style.color = col;
+  if (sg)  { sg.style.color = col; sg.textContent = esAbono ? '+$' : '−$'; }
+  // Si es OTRO, repintar el borde de la card según lo elegido
+  if (tipo === 'OTRO') {
+    const lbl = document.querySelector('input[name="mv-tipo"]:checked')?.closest('.mv-tipo');
+    if (lbl) { lbl.classList.remove('abono','cargo'); lbl.classList.add(esAbono ? 'abono' : 'cargo'); }
+  }
+  const box = $('mv-fact-box');
+  if (box) box.style.display = tipo === 'COBRO_FACTURA' ? 'block' : 'none';
+}
+
+async function _mvBuscarFacturas() {
+  const q = ($('mv-f-buscar')?.value || '').trim();
+  const sel = $('mv-f-factura');
+  if (!sel) return;
+  try {
+    const fs = await api(`/bancos/facturas-pendientes${q?'?buscar='+encodeURIComponent(q):''}`);
+    window._mvFacturas = fs;
+    sel.innerHTML = '<option value="">— Sin vincular —</option>' + fs.map(f => {
+      const saldo = parseFloat(f.saldo)||0;
+      return `<option value="${f.id}" ${String(window._mvFacturaSel)===String(f.id)?'selected':''}>
+        ${f.folio} · ${f.cliente||'—'} · Saldo ${fmt(saldo)}
+      </option>`;
+    }).join('');
+    _mvOnFactura();
+  } catch(e) {}
+}
+
+function _mvOnFactura() {
+  const id = $('mv-f-factura')?.value;
+  window._mvFacturaSel = id;
+  const info = $('mv-f-info');
+  if (!info) return;
+  const f = (window._mvFacturas || []).find(x => String(x.id) === String(id));
+  if (!f) { info.innerHTML = ''; return; }
+  const saldo = parseFloat(f.saldo)||0;
+  const monto = parseFloat($('mv-f-monto')?.value) || 0;
+  let msg = `Total ${fmt(f.total)} · Cobrado ${fmt(f.cobrado)} · <strong>Saldo ${fmt(saldo)}</strong>`;
+  if (monto > 0) {
+    if (monto > saldo + 0.01) msg += ` <span style="color:#dc2626">⚠ El monto excede el saldo por ${fmt(monto - saldo)}</span>`;
+    else if (Math.abs(monto - saldo) < 0.01) msg += ` <span style="color:#16a34a">✅ Liquida la factura</span>`;
+    else msg += ` <span style="color:#d97706">Quedará un saldo de ${fmt(saldo - monto)}</span>`;
+  }
+  info.innerHTML = `<div style="color:#1e40af">${msg}</div>`;
+  // Sugerir el saldo como monto si aún no se captura nada
+  const inp = $('mv-f-monto');
+  if (inp && !inp.value && saldo > 0) { inp.value = saldo.toFixed(2); _mvPintarOtro(); }
+}
+
+async function guardarMovBanco(id) {
+  const tipo = document.querySelector('input[name="mv-tipo"]:checked')?.value || 'DEPOSITO';
+  const t = _tipoMov(tipo);
+  const body = {
+    cuenta_bancaria_id: $('mv-f-cuenta').value,
+    fecha      : $('mv-f-fecha').value,
+    tipo,
+    naturaleza : t.n || $('mv-naturaleza')?.value || 'CARGO',
+    monto      : parseFloat($('mv-f-monto').value) || 0,
+    concepto   : $('mv-f-concepto').value.trim(),
+    referencia : $('mv-f-referencia').value.trim(),
+    contraparte: $('mv-f-contraparte').value.trim(),
+    factura_id : tipo === 'COBRO_FACTURA' ? ($('mv-f-factura')?.value || null) : null,
+    notas      : $('mv-f-notas').value.trim()
+  };
+  if (!id && tipo === 'COBRO_FACTURA' && body.factura_id) {
+    body.registrar_pago = $('mv-f-regpago')?.checked !== false;
+  }
+  if (!body.cuenta_bancaria_id) return toast('Selecciona la cuenta bancaria.', 'warn');
+  if (!body.fecha)  return toast('Captura la fecha.', 'warn');
+  if (!(body.monto > 0)) return toast('El monto debe ser mayor a 0.', 'warn');
+  try {
+    let r;
+    if (id) await api(`/bancos/movimientos/${id}`, { method:'PUT', body: JSON.stringify(body) });
+    else    r = await api('/bancos/movimientos',    { method:'POST', body: JSON.stringify(body) });
+    toast('Movimiento registrado.');
+    if (r?.pago_id) setTimeout(() => toast('🧾 Pago registrado también en Cobranza.'), 900);
+    closeModal('modal-mov-banco');
+    cargarMovsBanco();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarMovBanco(id) {
+  if (!await confirm2('¿Eliminar este movimiento? El saldo se recalculará.')) return;
+  try { await api(`/bancos/movimientos/${id}`, { method:'DELETE' }); toast('Movimiento eliminado.'); cargarMovsBanco(); }
+  catch(e) { toast(e.message, 'err'); }
+}
+
+function exportarMovsExcel() {
+  const r = window._mvData;
+  if (!r || !r.movimientos.length) return toast('No hay movimientos para exportar.', 'warn');
+  if (typeof XLSX === 'undefined') return toast('Librería XLSX no disponible.', 'err');
+  const wb = XLSX.utils.book_new();
+  const aoa = [['MOVIMIENTOS BANCARIOS — GRUPO MANAGEMENT'], [`Generado: ${new Date().toLocaleString('es-MX')}`], []];
+  if (r.saldo) {
+    aoa.push(['Saldo inicial:', r.saldo.saldo_inicial, 'Saldo actual:', r.saldo.saldo_actual]);
+    aoa.push([]);
+  }
+  aoa.push(['Fecha','Banco','Cuenta','Tipo','Naturaleza','Concepto','Contraparte','Factura','Referencia','Cargo','Abono']);
+  r.movimientos.forEach(m => {
+    const esAbono = m.naturaleza === 'ABONO';
+    aoa.push([
+      m.fecha, m.banco, m.cuenta_alias||'', _tipoMov(m.tipo).l, m.naturaleza,
+      m.concepto||'', m.contraparte||'', m.factura_folio||'', m.referencia||'',
+      esAbono ? '' : parseFloat(m.monto), esAbono ? parseFloat(m.monto) : ''
+    ]);
+  });
+  aoa.push([]);
+  aoa.push(['','','','','','','','','TOTALES:', r.totales.cargos, r.totales.abonos]);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:12},{wch:16},{wch:20},{wch:22},{wch:11},{wch:34},{wch:24},{wch:12},{wch:16},{wch:13},{wch:13}];
+  XLSX.utils.book_append_sheet(wb, ws, 'Movimientos');
+  XLSX.writeFile(wb, `Movimientos_bancarios_${$('mv-desde')?.value||''}_a_${$('mv-hasta')?.value||''}.xlsx`);
 }
 
 // ═══ CHEQUERAS ══════════════════════════════════════
