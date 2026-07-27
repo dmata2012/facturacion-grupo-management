@@ -7402,19 +7402,31 @@ async function openConfigPINs() {
     $('modal-cambiar-clave-body').innerHTML = `
       <button onclick="closeModal('modal-cambiar-clave')" style="position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;border:2px solid var(--border);background:#fff;cursor:pointer;font-size:14px;font-weight:800;color:var(--muted)">✕</button>
       <style>
-        .chip-ubi{cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:5px 11px;border-radius:16px;
-          background:#f3f4f6;color:#64748b;border:1.5px solid #e5e7eb;font-size:11px;font-weight:700;
-          transition:all .18s;user-select:none}
-        .chip-ubi input{display:none}
-        .chip-ubi .ck{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;
-          border-radius:50%;background:#d1d5db;color:#fff;font-size:9px;font-weight:900;flex-shrink:0;transition:all .18s}
-        .chip-ubi .ck::before{content:'＋'}
-        .chip-ubi:hover{background:#e5e7eb;border-color:#cbd5e1;color:#475569}
-        .chip-ubi.on{background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;border-color:#4ade80;
-          box-shadow:0 2px 8px rgba(22,163,74,.35);transform:translateY(-1px)}
-        .chip-ubi.on .ck{background:rgba(255,255,255,.28);box-shadow:0 0 0 1.5px rgba(255,255,255,.45)}
-        .chip-ubi.on .ck::before{content:'✓'}
-        .chip-ubi.on:hover{background:linear-gradient(135deg,#15803d,#16a34a);box-shadow:0 4px 12px rgba(22,163,74,.5)}
+        /* Selector desplegable de ubicaciones */
+        .ubi-dd-btn{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-width:180px;
+          padding:7px 11px;border-radius:8px;border:1.5px solid var(--border);background:#fff;cursor:pointer;
+          font-size:11.5px;font-weight:700;color:#475569;transition:all .18s;text-align:left}
+        .ubi-dd-btn:hover{border-color:#94a3b8;background:#f8fafc}
+        .ubi-dd-btn.tiene{border-color:#4ade80;background:#f0fdf4;color:#166534}
+        .ubi-dd-btn .cv{font-size:9px;opacity:.6;flex-shrink:0}
+        .ubi-dd-btn.abierto .cv{transform:rotate(180deg)}
+        .ubi-dd-panel{display:none;position:fixed;z-index:9999;background:#fff;border:1.5px solid #cbd5e1;
+          border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.18);padding:6px;min-width:220px;max-height:260px;overflow-y:auto}
+        .ubi-dd-panel.abierto{display:block}
+        .ubi-dd-panel .hd{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;
+          color:var(--muted);padding:6px 8px 4px}
+        .ubi-op{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:7px;cursor:pointer;
+          font-size:12px;font-weight:600;color:#334155;transition:background .14s}
+        .ubi-op:hover{background:#f1f5f9}
+        .ubi-op input{display:none}
+        .ubi-op .bx{width:17px;height:17px;border-radius:5px;border:2px solid #cbd5e1;background:#fff;
+          display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:#fff;
+          font-weight:900;flex-shrink:0;transition:all .14s}
+        .ubi-op.on{background:#f0fdf4;color:#166534;font-weight:800}
+        .ubi-op.on .bx{background:#16a34a;border-color:#16a34a}
+        .ubi-op.on .bx::before{content:'✓'}
+        .ubi-dd-panel .ft{border-top:1px solid var(--border);margin-top:4px;padding:6px 8px 2px;
+          font-size:10px;color:var(--muted);line-height:1.35}
       </style>
       <h4>⚙ Configurar Horarios, PINs y Ubicaciones</h4>
       <div class="ibox info" style="margin-bottom:12px;font-size:12px">
@@ -7472,17 +7484,27 @@ async function openConfigPINs() {
                 </div>
               </td>
               <td style="padding:8px"><input type="text" id="cpin-${e.id}" placeholder="****" maxlength="10" value="${e.pin_checador||''}" style="width:80px;text-align:center;letter-spacing:3px;font-weight:800"></td>
-              <td style="padding:8px;max-width:280px">
-                <div id="cubi-${e.id}" style="display:flex;flex-wrap:wrap;gap:4px">
-                  ${ubis.length ? ubis.map(u => {
-                    const asig = asignadas.has(u.id);
-                    return `<label class="chip-ubi${asig?' on':''}" title="${(u.nombre||'').replace(/"/g,'&quot;')}">
-                      <input type="checkbox" data-ubi="${u.id}" ${asig?'checked':''}
-                             onchange="this.closest('.chip-ubi').classList.toggle('on', this.checked)">
-                      <span class="ck"></span>${u.nombre}
-                    </label>`;
-                  }).join('') : '<span style="font-size:10.5px;color:#92400e;font-style:italic">⚠ Sin ubicaciones — créalas en 📍 Ubicaciones</span>'}
-                </div>
+              <td style="padding:8px;min-width:200px">
+                ${ubis.length ? `
+                <div id="cubi-${e.id}" style="position:relative">
+                  <button type="button" class="ubi-dd-btn${asignadas.size?' tiene':''}" id="ubi-btn-${e.id}"
+                          onclick="toggleUbiDD(${e.id}, event)">
+                    <span id="ubi-lbl-${e.id}">${_lblUbi(asignadas, ubis)}</span>
+                    <span class="cv">▼</span>
+                  </button>
+                  <div class="ubi-dd-panel" id="ubi-panel-${e.id}">
+                    <div class="hd">Ubicaciones autorizadas</div>
+                    ${ubis.map(u => {
+                      const asig = asignadas.has(u.id);
+                      return `<label class="ubi-op${asig?' on':''}">
+                        <input type="checkbox" data-ubi="${u.id}" ${asig?'checked':''}
+                               onchange="onToggleUbi(this, ${e.id})">
+                        <span class="bx"></span>📍 ${u.nombre}
+                      </label>`;
+                    }).join('')}
+                    <div class="ft">Sin selección = puede marcar en <strong>cualquier</strong> ubicación activa.</div>
+                  </div>
+                </div>` : '<span style="font-size:10.5px;color:#92400e;font-style:italic">⚠ Sin ubicaciones — créalas en 📍 Ubicaciones</span>'}
               </td>
               <td style="padding:8px"><button class="btn bs bsm" onclick="guardarPINEmp(${e.id})" title="Guardar todos los cambios de esta fila">💾</button></td>
             </tr>`;
@@ -7498,6 +7520,68 @@ async function openConfigPINs() {
     openModal('modal-cambiar-clave');
   } catch(e) { toast(e.message, 'err'); }
 }
+
+// ── Selector desplegable de ubicaciones por colaborador ──
+function _lblUbi(setAsig, ubis) {
+  const n = setAsig.size;
+  if (n === 0) return '🌐 Cualquier ubicación';
+  if (n === 1) {
+    const u = ubis.find(x => setAsig.has(x.id));
+    return `📍 ${u ? u.nombre : '1 ubicación'}`;
+  }
+  return `📍 ${n} ubicaciones`;
+}
+
+function toggleUbiDD(empId, ev) {
+  if (ev) ev.stopPropagation();
+  const panel = $(`ubi-panel-${empId}`);
+  const btn   = $(`ubi-btn-${empId}`);
+  if (!panel || !btn) return;
+  const abierto = panel.classList.contains('abierto');
+  // Cerrar todos los demás
+  cerrarTodosUbiDD();
+  if (abierto) return;
+  // Posicionar con fixed para que no lo corte el overflow de la tabla
+  const r = btn.getBoundingClientRect();
+  panel.style.minWidth = Math.max(220, r.width) + 'px';
+  panel.classList.add('abierto');
+  const ph = panel.offsetHeight;
+  const espacioAbajo = window.innerHeight - r.bottom;
+  // Si no cabe abajo, abrir hacia arriba
+  panel.style.top  = (espacioAbajo < ph + 12 && r.top > ph + 12)
+    ? (r.top - ph - 4) + 'px'
+    : (r.bottom + 4) + 'px';
+  panel.style.left = Math.min(r.left, window.innerWidth - panel.offsetWidth - 12) + 'px';
+  btn.classList.add('abierto');
+}
+
+function cerrarTodosUbiDD() {
+  document.querySelectorAll('.ubi-dd-panel.abierto').forEach(p => p.classList.remove('abierto'));
+  document.querySelectorAll('.ubi-dd-btn.abierto').forEach(b => b.classList.remove('abierto'));
+}
+
+function onToggleUbi(input, empId) {
+  input.closest('.ubi-op').classList.toggle('on', input.checked);
+  // Recalcular label del botón
+  const panel = $(`ubi-panel-${empId}`);
+  const btn   = $(`ubi-btn-${empId}`);
+  const lbl   = $(`ubi-lbl-${empId}`);
+  if (!panel || !btn || !lbl) return;
+  const marcados = [...panel.querySelectorAll('input[type="checkbox"]:checked')];
+  const ids = new Set(marcados.map(cb => parseInt(cb.dataset.ubi)));
+  lbl.textContent = _lblUbi(ids, window._ubisAll || []);
+  btn.classList.toggle('tiene', ids.size > 0);
+}
+
+// Cerrar los desplegables al hacer clic fuera o al presionar Escape
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.ubi-dd-panel') && !e.target.closest('.ubi-dd-btn')) cerrarTodosUbiDD();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrarTodosUbiDD(); });
+// El panel usa position:fixed — si se hace scroll queda desalineado, mejor cerrarlo
+document.addEventListener('scroll', () => {
+  if (document.querySelector('.ubi-dd-panel.abierto')) cerrarTodosUbiDD();
+}, true);
 
 async function guardarPINEmp(empId) {
   const pin      = $(`cpin-${empId}`)?.value || '';
@@ -7529,7 +7613,10 @@ async function guardarPINEmp(empId) {
       method: 'PUT',
       body: JSON.stringify({ ubicacion_ids })
     });
-    toast('Configuración guardada.');
+    cerrarTodosUbiDD();
+    toast(ubicacion_ids.length
+      ? `Guardado · ${ubicacion_ids.length} ubicación${ubicacion_ids.length!==1?'es':''} autorizada${ubicacion_ids.length!==1?'s':''}.`
+      : 'Guardado · sin restricción de ubicación.');
   } catch(e) { toast(e.message, 'err'); }
 }
 
