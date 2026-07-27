@@ -144,6 +144,20 @@ router.get('/cuentas', async (req, res) => {
        ORDER BY c.activa DESC, c.banco ASC, c.alias ASC`,
       params
     );
+    // Adjuntar el estado de la chequera activa de cada cuenta
+    for (const cta of r.rows) {
+      try {
+        const ec = await estadoChequera(cta.id);
+        cta.chequera = ec.chequera ? {
+          folio_inicial: ec.chequera.folio_inicial,
+          folio_final:   ec.chequera.folio_final,
+          siguiente:     ec.siguiente,
+          restantes:     ec.restantes,
+          usados:        ec.usados,
+          agotada:       !!ec.agotada
+        } : null;
+      } catch (e) { cta.chequera = null; }
+    }
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

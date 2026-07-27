@@ -1113,6 +1113,54 @@ const TIPO_LABEL = {
   tarjeta:'💳 Tarjeta', otra:'🔹 Otra'
 };
 
+// Banda con el estado de la chequera dentro de la tarjeta de cuenta
+function _bancoChequeraBanda(c) {
+  const q = c.chequera;
+  if (!q) {
+    return `<div onclick="openChequeras(${c.id},'${(c.alias||c.banco).replace(/'/g,"\\'")}')"
+      style="cursor:pointer;background:#f8fafc;border:1.5px dashed #cbd5e1;border-radius:8px;padding:9px 11px;margin-bottom:10px;
+             display:flex;justify-content:space-between;align-items:center;gap:8px;transition:all .16s"
+      onmouseover="this.style.borderColor='#fbbf24';this.style.background='#fffbeb'"
+      onmouseout="this.style.borderColor='#cbd5e1';this.style.background='#f8fafc'">
+      <div style="font-size:11.5px;color:var(--muted);font-weight:700">📕 Sin chequera asignada</div>
+      <div style="font-size:10.5px;color:#d97706;font-weight:800;white-space:nowrap">Asignar →</div>
+    </div>`;
+  }
+  if (q.agotada) {
+    return `<div onclick="openChequeras(${c.id},'${(c.alias||c.banco).replace(/'/g,"\\'")}')"
+      style="cursor:pointer;background:#fee2e2;border:1.5px solid #fca5a5;border-radius:8px;padding:9px 11px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div style="font-size:11.5px;color:#991b1b;font-weight:800">📕 ${q.folio_inicial}–${q.folio_final}</div>
+        <div style="font-size:10px;background:#dc2626;color:#fff;padding:2px 8px;border-radius:10px;font-weight:900;white-space:nowrap">AGOTADA</div>
+      </div>
+      <div style="font-size:10.5px;color:#991b1b;margin-top:3px">Asigna una nueva chequera para seguir emitiendo →</div>
+    </div>`;
+  }
+  const total = q.folio_final - q.folio_inicial + 1;
+  const pct = Math.round((q.usados / total) * 100);
+  const alerta = q.restantes <= 5;
+  return `<div onclick="openChequeras(${c.id},'${(c.alias||c.banco).replace(/'/g,"\\'")}')"
+    style="cursor:pointer;background:${alerta?'#fffbeb':'#f0fdf4'};border:1.5px solid ${alerta?'#fbbf24':'#86efac'};
+           border-radius:8px;padding:9px 11px;margin-bottom:10px;transition:all .16s"
+    onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 3px 10px rgba(0,0,0,.09)'"
+    onmouseout="this.style.transform='';this.style.boxShadow=''">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px">
+      <div style="font-size:11.5px;color:${alerta?'#92400e':'#166534'};font-weight:800">
+        📕 Chequera ${q.folio_inicial}–${q.folio_final}
+      </div>
+      <div style="font-size:10.5px;color:${alerta?'#92400e':'#166534'};font-weight:800;white-space:nowrap">
+        Sigue: <strong style="font-family:monospace;font-size:12px">${q.siguiente}</strong>
+      </div>
+    </div>
+    <div style="background:rgba(0,0,0,.07);height:5px;border-radius:99px;overflow:hidden">
+      <div style="height:100%;width:${pct}%;background:${alerta?'linear-gradient(90deg,#f59e0b,#dc2626)':'linear-gradient(90deg,#3b82f6,#22c55e)'};border-radius:99px"></div>
+    </div>
+    <div style="font-size:10px;color:${alerta?'#92400e':'#166534'};margin-top:4px;font-weight:700">
+      ${q.restantes} de ${total} disponibles${alerta?' ⚠ por agotarse':''}
+    </div>
+  </div>`;
+}
+
 function renderCuentasBanco(cuentas) {
   const cont = $('bnc-lista');
   if (!cont) return;
@@ -1172,8 +1220,9 @@ function renderCuentasBanco(cuentas) {
             <div style="color:var(--muted);font-weight:600">Saldo inicial:</div><div style="font-weight:900;color:#166534">${fmt(c.saldo_inicial)} ${c.moneda}</div>
           </div>
           ${c.notas ? `<div style="font-size:11px;color:var(--muted);padding:8px 10px;background:var(--bg-alt);border-radius:6px;margin-bottom:10px">📝 ${(c.notas||'').replace(/</g,'&lt;')}</div>` : ''}
+          ${_bancoChequeraBanda(c)}
           <div style="display:flex;gap:6px;justify-content:flex-end;border-top:1px solid var(--border);padding-top:10px;flex-wrap:wrap">
-            <button class="btn bo bsm" onclick="openChequeras(${c.id},'${(c.alias||c.banco).replace(/'/g,"\\'")}')">📕 Chequeras</button>
+            <button class="btn bo bsm" style="background:#fef3c7;border-color:#fbbf24;color:#92400e;font-weight:800" onclick="openChequeras(${c.id},'${(c.alias||c.banco).replace(/'/g,"\\'")}')">📕 Chequeras</button>
             ${canWrite()?`<button class="btn bg bsm" onclick="openCuentaBanco(${c.id})">✏️ Editar</button>`:''}
             ${canAdmin()&&c.activa?`<button class="btn bd bsm" onclick="eliminarCuentaBanco(${c.id},'${(c.alias||c.banco).replace(/'/g,"\\'")}')">🗑 Dar de baja</button>`:''}
           </div>
