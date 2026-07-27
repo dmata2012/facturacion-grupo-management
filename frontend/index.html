@@ -7300,7 +7300,10 @@ async function openUbicacionesCH() {
         </tr>`).join('')}</tbody>
       </table></div>` : '<p class="empty">Sin ubicaciones registradas. Agrega una arriba.</p>'}
 
-      <div class="form-actions" style="margin-top:14px"><button class="btn bo" onclick="closeModal('modal-cambiar-clave')">Cerrar</button></div>`;
+      <div class="form-actions" style="margin-top:14px">
+        <button class="btn bo" onclick="closeModal('modal-cambiar-clave')">Cerrar</button>
+        <button class="btn bs" onclick="openConfigPINs()">⚙ Ir a asignar por colaborador →</button>
+      </div>`;
     $('modal-cambiar-clave').querySelector('.modal').style.width = 'min(820px,96vw)';
     openModal('modal-cambiar-clave');
   } catch(e) { toast(e.message, 'err'); }
@@ -7383,11 +7386,12 @@ async function openConfigPINs() {
         <br><small style="color:var(--muted)">⏰ <strong>Tolerancia</strong>: minutos de gracia. Si el colaborador llega dentro de ese margen NO se marca retardo.</small>
         <br><small style="color:var(--muted)">📍 Si dejas la lista de ubicaciones vacía para un colaborador, podrá marcar desde <strong>cualquiera</strong> de las ubicaciones globales activas.</small>
       </div>
-      ${!ubis.length ? `<div class="ibox warn" style="margin-bottom:12px;font-size:12px">
-        ⚠ <strong>No hay ubicaciones registradas.</strong> Para poder asignarlas, primero créalas en
-        <strong>Reloj Checador → 📍 Ubicaciones</strong> (nombre, latitud, longitud y radio en metros).
-      </div>` : (validarUbi === false ? `<div class="ibox warn" style="margin-bottom:12px;font-size:12px">
-        ⚠ La <strong>validación por ubicación está DESACTIVADA</strong> globalmente. Puedes asignar ubicaciones, pero no se aplicarán hasta activarla en <strong>📍 Ubicaciones → ⚙</strong>.
+      ${!ubis.length ? `<div class="ibox warn" style="margin-bottom:12px;font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>⚠ <strong>No hay ubicaciones registradas.</strong> Primero debes crear al menos una sucursal/oficina para poder asignarla.</div>
+        <button class="btn bs bsm" onclick="openUbicacionesCH()" style="white-space:nowrap">📍 Crear ubicaciones ahora</button>
+      </div>` : (validarUbi === false ? `<div class="ibox warn" style="margin-bottom:12px;font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>⚠ La <strong>validación por ubicación está DESACTIVADA</strong> globalmente. Puedes asignar ubicaciones, pero no se aplicarán hasta activarla.</div>
+        <button class="btn bo bsm" onclick="openUbicacionesCH()" style="white-space:nowrap">📍 Ir a Ubicaciones</button>
       </div>` : '')}
       <div style="max-height:440px;overflow-y:auto">
         <table style="width:100%;font-size:12px;border-collapse:collapse">

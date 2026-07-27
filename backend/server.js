@@ -27,17 +27,18 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(express.static(FRONTEND_DIR, { etag: false, lastModified: false }));
-
-// Sin caché para index.html — garantiza que el browser siempre descargue la versión más reciente
+// Sin caché para index.html — DEBE ir ANTES de express.static, de lo contrario
+// express.static responde primero y estos headers nunca se aplican.
 app.use((req, res, next) => {
   if (req.path === '/' || req.path.endsWith('.html')) {
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
   }
   next();
 });
+
+app.use(express.static(FRONTEND_DIR, { etag: false, lastModified: false }));
 
 // Archivos subidos protegidos
 const { verificarToken } = require('./middleware/auth');
@@ -71,6 +72,10 @@ app.get('/api/health', async (req, res) => {
 
 // ── SPA fallback ──────────────────────────────
 app.get('*', (req, res) => {
+  // Cualquier ruta SPA devuelve index.html — nunca debe cachearse
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.sendFile(path.join(FRONTEND_DIR, 'index.html'));
 });
 
