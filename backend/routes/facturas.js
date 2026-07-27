@@ -74,7 +74,34 @@ router.get('/', async (req, res) => {
       ${where.replace(/LIMIT.*/, '')}
     `, params.slice(0, -2));
 
-    res.json({ data: r.rows, total: parseInt(cnt.rows[0].total), page: parseInt(page), limit: parseInt(limit) });
+    // Totales de TODO el período filtrado (no sólo de la página visible).
+    // Se excluyen las canceladas de los montos, igual que en dashboard y reportes.
+    const tot = await query(`
+      SELECT
+        COUNT(f.id) FILTER (WHERE f.estatus != 'cancelada')::int          AS facturas,
+        COUNT(f.id) FILTER (WHERE f.estatus  = 'cancelada')::int          AS canceladas,
+        COUNT(DISTINCT f.cliente_id) FILTER (WHERE f.estatus != 'cancelada')::int AS clientes,
+        COALESCE(SUM(f.total)    FILTER (WHERE f.estatus != 'cancelada'),0) AS facturado,
+        COALESCE(SUM(f.subtotal) FILTER (WHERE f.estatus != 'cancelada'),0) AS subtotal,
+        COALESCE(SUM(f.iva)      FILTER (WHERE f.estatus != 'cancelada'),0) AS iva,
+        COALESCE(SUM(COALESCE(sub_p.cobrado,0)) FILTER (WHERE f.estatus != 'cancelada'),0) AS cobrado,
+        COALESCE(SUM(f.total - COALESCE(sub_p.cobrado,0))
+                 FILTER (WHERE f.estatus NOT IN ('cancelada','pagada')),0)  AS saldo
+      FROM fac_facturas f
+      LEFT JOIN fac_clientes c ON c.id = f.cliente_id
+      LEFT JOIN (
+        SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
+      ) sub_p ON sub_p.factura_id = f.id
+      ${where}
+    `, params.slice(0, -2));
+
+    res.json({
+      data   : r.rows,
+      total  : parseInt(cnt.rows[0].total),
+      page   : parseInt(page),
+      limit  : parseInt(limit),
+      totales: tot.rows[0]
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
