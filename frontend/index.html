@@ -646,6 +646,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-cheque"><div class="modal" style="width:min(720px,96vw)" id="modal-cheque-body"></div></div>
 <div class="overlay" id="modal-mov-ec"><div class="modal modal-sm" id="modal-mov-ec-body"></div></div>
 <div class="overlay" id="modal-empresas-bnc"><div class="modal modal-sm" id="modal-empresas-bnc-body"></div></div>
+<div class="overlay" id="modal-catbancos"><div class="modal" style="width:min(640px,96vw)" id="modal-catbancos-body"></div></div>
 <div class="overlay" id="modal-benef-bnc"><div class="modal" style="width:min(640px,96vw)" id="modal-benef-bnc-body"></div></div>
 <div class="overlay" id="modal-notif-ch"><div class="modal" style="width:min(720px,96vw)" id="modal-notif-ch-body"></div></div>
 <div class="overlay" id="modal-notif-show"><div class="modal modal-sm" id="modal-notif-show-body"></div></div>
@@ -1009,6 +1010,7 @@ async function bancos() {
     <!-- CUENTAS -->
     <div class="tab-panel active" id="bnc-tab-cuentas">
       <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:10px">
+        ${canWrite()?`<button class="btn bo bsm" onclick="gestionCatalogoBancos()">🏛 Catálogo de Bancos</button>`:''}
         ${canWrite()?`<button class="btn bo bsm" onclick="gestionEmpresasBanco()">🏢 Empresas</button>`:''}
         ${canWrite()?`<button class="btn bs bsm" onclick="openCuentaBanco()">+ Nueva cuenta</button>`:''}
       </div>
@@ -1186,16 +1188,24 @@ async function openCuentaBanco(id) {
     banco:'', sucursal:'', alias:'', titular:'', tipo:'cheques',
     numero_cuenta:'', clabe:'', tarjeta:'', moneda:'MXN', saldo_inicial:0, notas:'', activa:true, empresa_id:null
   };
-  let empresas = [];
-  try { empresas = await api('/bancos/empresas'); } catch(e) {}
+  let empresas = [], catalogo = [];
+  try { [empresas, catalogo] = await Promise.all([
+    api('/bancos/empresas'),
+    api('/bancos/catalogo').catch(() => [])
+  ]); } catch(e) {}
   $('modal-banco-body').innerHTML = `
     <div style="margin:-28px -28px 20px;padding:20px 28px;background:linear-gradient(135deg,#1e3a8a,#3b82f6);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
       <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">${id?'Editar':'Nueva'} cuenta bancaria</div>
       <div style="font-size:20px;font-weight:900;margin-top:4px">🏦 ${id?(c.alias||c.banco):'Alta de cuenta'}</div>
     </div>
     <div class="fg" style="gap:12px">
-      <div class="fi"><label>Banco <span style="color:var(--red)">*</span></label>
-        <input id="bc-banco" placeholder="Ej: Banorte, BBVA, Santander..." value="${c.banco||''}" required>
+      <div class="fi"><label>Banco <span style="color:var(--red)">*</span>
+        <span style="font-weight:400;color:var(--muted);font-size:10.5px">(elige del catálogo o escribe uno nuevo)</span></label>
+        <input id="bc-banco" list="bc-banco-lista" placeholder="Ej: BANORTE, BBVA MEXICO..." value="${c.banco||''}"
+               autocomplete="off" style="text-transform:uppercase" required>
+        <datalist id="bc-banco-lista">
+          ${catalogo.map(b => `<option value="${b.nombre}">${b.clave_sat?'Clave SAT '+b.clave_sat:''}</option>`).join('')}
+        </datalist>
       </div>
       <div class="fi"><label>Sucursal <span style="color:var(--muted);font-weight:400;font-size:10.5px">(opcional)</span></label>
         <input id="bc-sucursal" placeholder="Ej: Centro Mérida" value="${c.sucursal||''}">
@@ -1278,9 +1288,12 @@ async function guardarCuentaBanco(id) {
   };
   if (!body.banco) return toast('El nombre del banco es requerido.', 'warn');
   if (body.clabe && !/^\d{18}$/.test(body.clabe)) return toast('La CLABE debe tener 18 dígitos.', 'warn');
+  body.banco = body.banco.toUpperCase();
   try {
     if (id) await api(`/bancos/cuentas/${id}`, { method:'PUT',  body: JSON.stringify(body) });
     else    await api('/bancos/cuentas',       { method:'POST', body: JSON.stringify(body) });
+    // Mantener el catálogo al día: si el banco no existía, lo agrega (ON CONFLICT no duplica)
+    try { await api('/bancos/catalogo', { method:'POST', body: JSON.stringify({ nombre: body.banco }) }); } catch(e) {}
     toast('Cuenta bancaria guardada.');
     closeModal('modal-banco');
     cargarCuentasBanco();
@@ -1293,6 +1306,90 @@ async function eliminarCuentaBanco(id, alias) {
     await api(`/bancos/cuentas/${id}`, { method:'DELETE' });
     toast('Cuenta dada de baja.');
     cargarCuentasBanco();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+// ═══ CATÁLOGO DE BANCOS ═════════════════════════════
+async function gestionCatalogoBancos() {
+  $('modal-catbancos-body').innerHTML = '<h4>🏛 Catálogo de Bancos</h4><p class="empty">Cargando...</p>';
+  openModal('modal-catbancos');
+  try {
+    const bancos = await api('/bancos/catalogo');
+    $('modal-catbancos-body').innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h4 style="margin:0;padding:0;border:none">🏛 Catálogo de Bancos</h4>
+        <button class="btn bo bsm" onclick="closeModal('modal-catbancos')">✕ Cerrar</button>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px">
+        Los bancos de este catálogo aparecen como sugerencia al dar de alta una cuenta bancaria.
+        Se guardan en mayúsculas para evitar duplicados por diferencias de escritura.
+      </p>
+
+      <div style="background:var(--bg-alt);border-radius:10px;padding:12px;margin-bottom:14px">
+        <div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">➕ Agregar banco</div>
+        <div style="display:grid;grid-template-columns:1fr 130px auto;gap:8px;align-items:end">
+          <div class="fi" style="margin:0"><label style="font-size:10px">Nombre del banco *</label>
+            <input id="cb-nombre" placeholder="Ej: BANORTE" style="text-transform:uppercase"
+                   onkeydown="if(event.key==='Enter')crearBancoCatalogo()">
+          </div>
+          <div class="fi" style="margin:0"><label style="font-size:10px">Clave SAT (opcional)</label>
+            <input id="cb-clave" placeholder="072" maxlength="5" style="text-align:center;font-family:monospace">
+          </div>
+          <button class="btn bs bsm" onclick="crearBancoCatalogo()" style="height:36px">+ Agregar</button>
+        </div>
+      </div>
+
+      <div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">
+        Bancos registrados (${bancos.length})
+      </div>
+      <div class="tscroll" style="max-height:340px;overflow-y:auto">
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <thead style="background:var(--bg-alt);position:sticky;top:0"><tr>
+            <th style="text-align:left;padding:7px 8px">Banco</th>
+            <th style="padding:7px 8px;width:90px">Clave SAT</th>
+            <th style="padding:7px 8px;width:80px" title="Cuentas que usan este banco">Cuentas</th>
+            <th style="padding:7px 8px;width:50px"></th>
+          </tr></thead>
+          <tbody>${bancos.map(b => `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:8px;font-weight:700">🏦 ${b.nombre}</td>
+            <td style="padding:8px;text-align:center;font-family:monospace;color:var(--muted)">${b.clave_sat||'—'}</td>
+            <td style="padding:8px;text-align:center">
+              ${b.n_cuentas > 0
+                ? `<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:800">${b.n_cuentas}</span>`
+                : '<span style="color:var(--muted);font-size:11px">—</span>'}
+            </td>
+            <td style="padding:8px;text-align:right">
+              ${canAdmin() ? `<button class="btn bd bsm" style="padding:4px 8px"
+                onclick="eliminarBancoCatalogo(${b.id},'${(b.nombre||'').replace(/'/g,"\\'")}')"
+                ${b.n_cuentas>0?'title="No se puede: hay cuentas usando este banco"':'title="Eliminar del catálogo"'}>🗑</button>` : ''}
+            </td>
+          </tr>`).join('') || '<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--muted)">Sin bancos en el catálogo</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-catbancos')">Cerrar</button></div>`;
+    setTimeout(() => $('cb-nombre')?.focus(), 80);
+  } catch(e) {
+    $('modal-catbancos-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`;
+  }
+}
+
+async function crearBancoCatalogo() {
+  const nombre = ($('cb-nombre')?.value || '').trim();
+  const clave_sat = ($('cb-clave')?.value || '').trim();
+  if (!nombre) return toast('Escribe el nombre del banco.', 'warn');
+  try {
+    await api('/bancos/catalogo', { method:'POST', body: JSON.stringify({ nombre, clave_sat }) });
+    toast(`Banco "${nombre.toUpperCase()}" agregado.`);
+    gestionCatalogoBancos();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarBancoCatalogo(id, nombre) {
+  if (!await confirm2(`¿Eliminar "${nombre}" del catálogo?\nNo afecta a las cuentas ya registradas.`)) return;
+  try {
+    await api(`/bancos/catalogo/${id}`, { method:'DELETE' });
+    toast('Banco eliminado del catálogo.');
+    gestionCatalogoBancos();
   } catch(e) { toast(e.message, 'err'); }
 }
 

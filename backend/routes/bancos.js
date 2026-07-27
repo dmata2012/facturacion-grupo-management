@@ -34,6 +34,33 @@ router.use(verificarToken);
         activa BOOLEAN DEFAULT TRUE,
         creado_en TIMESTAMP DEFAULT NOW()
       )`);
+    // Catálogo de bancos (ej: BANORTE, BBVA)
+    await query(`
+      CREATE TABLE IF NOT EXISTS fac_bancos_catalogo (
+        id SERIAL PRIMARY KEY,
+        nombre TEXT NOT NULL UNIQUE,
+        clave_sat TEXT,
+        activo BOOLEAN DEFAULT TRUE,
+        creado_en TIMESTAMP DEFAULT NOW()
+      )`);
+    // Semilla inicial con los bancos más usados en México (solo si está vacío)
+    const cnt = await query(`SELECT COUNT(*)::int AS n FROM fac_bancos_catalogo`);
+    if (cnt.rows[0].n === 0) {
+      const seed = [
+        ['BANORTE','072'], ['BBVA MEXICO','012'], ['SANTANDER','014'],
+        ['BANAMEX','002'], ['HSBC','021'], ['SCOTIABANK','044'],
+        ['INBURSA','036'], ['BAJIO','030'], ['AFIRME','062'],
+        ['AZTECA','127'], ['BANREGIO','058'], ['MIFEL','042'],
+        ['MULTIVA','132'], ['COMPARTAMOS','130'], ['BANCOPPEL','137'],
+        ['STP','646'], ['NU MEXICO','638'], ['KLAR','661']
+      ];
+      for (const [nombre, clave] of seed) {
+        await query(
+          `INSERT INTO fac_bancos_catalogo(nombre, clave_sat) VALUES($1,$2) ON CONFLICT(nombre) DO NOTHING`,
+          [nombre, clave]
+        );
+      }
+    }
     await query(`ALTER TABLE fac_bancos_cuentas ADD COLUMN IF NOT EXISTS empresa_id INT REFERENCES fac_bancos_empresas(id) ON DELETE SET NULL`);
     // Beneficiarios (proveedores/personas que reciben cheques)
     await query(`
@@ -175,6 +202,64 @@ router.put('/cuentas/:id', requireRol('admin', 'capturista', 'tesoreria', 'geren
 router.delete('/cuentas/:id', requireRol('admin'), async (req, res) => {
   try {
     await query(`UPDATE fac_bancos_cuentas SET activa=FALSE, actualizado_en=NOW() WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══ CATÁLOGO DE BANCOS ═════════════════════════════
+router.get('/catalogo', async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT c.*,
+        (SELECT COUNT(*)::int FROM fac_bancos_cuentas cu WHERE UPPER(cu.banco) = UPPER(c.nombre)) AS n_cuentas
+       FROM fac_bancos_catalogo c
+       WHERE c.activo = TRUE ORDER BY c.nombre`
+    );
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/catalogo', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
+  try {
+    const { nombre, clave_sat } = req.body;
+    if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Nombre del banco requerido.' });
+    const r = await query(
+      `INSERT INTO fac_bancos_catalogo(nombre, clave_sat) VALUES($1,$2)
+       ON CONFLICT(nombre) DO UPDATE SET activo=TRUE, clave_sat=COALESCE(EXCLUDED.clave_sat, fac_bancos_catalogo.clave_sat)
+       RETURNING *`,
+      [nombre.trim().toUpperCase(), (clave_sat || '').trim() || null]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/catalogo/:id', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
+  try {
+    const { nombre, clave_sat } = req.body;
+    if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Nombre del banco requerido.' });
+    await query(
+      `UPDATE fac_bancos_catalogo SET nombre=$1, clave_sat=$2 WHERE id=$3`,
+      [nombre.trim().toUpperCase(), (clave_sat || '').trim() || null, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/catalogo/:id', requireRol('admin'), async (req, res) => {
+  try {
+    // No permitir baja si hay cuentas que lo usan
+    const b = await query(`SELECT nombre FROM fac_bancos_catalogo WHERE id=$1`, [req.params.id]);
+    if (!b.rows.length) return res.status(404).json({ error: 'Banco no encontrado.' });
+    const uso = await query(
+      `SELECT COUNT(*)::int AS n FROM fac_bancos_cuentas WHERE UPPER(banco) = UPPER($1)`,
+      [b.rows[0].nombre]
+    );
+    if (uso.rows[0].n > 0) {
+      return res.status(400).json({
+        error: `No se puede eliminar: ${uso.rows[0].n} cuenta(s) usan este banco. Reasígnalas primero.`
+      });
+    }
+    await query(`UPDATE fac_bancos_catalogo SET activo=FALSE WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
