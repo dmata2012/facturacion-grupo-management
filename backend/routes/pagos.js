@@ -17,18 +17,23 @@ router.get('/', async (req, res) => {
     if (hasta)      { params.push(hasta); where += ` AND f.fecha_emision<=$${params.length}`; }
     if (vencidas === 'true') where += ` AND f.estatus='vencida'`;
 
+    // Se devuelven todas las facturas con saldo. Las de clientes que NO requieren
+    // desglose se marcan con cuenta_en_saldo=false: se muestran en la lista pero
+    // quedan fuera de los KPIs de cobranza.
     const r = await query(`
       SELECT f.id, f.folio, f.fecha_emision, f.fecha_vencimiento, f.total, f.estatus,
         c.razon_social, c.rfc,
+        COALESCE(c.aplica_desglose, TRUE) AS cuenta_en_saldo,
         COALESCE(SUM(p.monto),0)           AS cobrado,
         f.total - COALESCE(SUM(p.monto),0) AS saldo
       FROM fac_facturas f
       LEFT JOIN fac_clientes c ON c.id=f.cliente_id
       LEFT JOIN fac_pagos p ON p.factura_id=f.id
       ${where}
-      GROUP BY f.id, c.razon_social, c.rfc
+      GROUP BY f.id, c.razon_social, c.rfc, c.aplica_desglose
       HAVING f.total - COALESCE(SUM(p.monto),0) > 0
-      ORDER BY f.fecha_vencimiento NULLS LAST, f.fecha_emision
+      ORDER BY COALESCE(c.aplica_desglose, TRUE) DESC,
+               f.fecha_vencimiento NULLS LAST, f.fecha_emision
     `, params);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -54,7 +59,7 @@ router.get('/cobrado-mes', async (req, res) => {
 // GET /api/pagos/kpi — indicadores de cobranza
 router.get('/kpi', async (req, res) => {
   try {
-    const [cobradoMes, porCobrar, porVencer, vencidas15, morosos] = await Promise.all([
+    const [cobradoMes, porCobrar, porVencer, vencidas15, morosos, excluido] = await Promise.all([
 
       // Cobrado en el mes actual
       query(`
@@ -64,15 +69,18 @@ router.get('/kpi', async (req, res) => {
       `),
 
       // Total saldo por cobrar + conteo de facturas
+      // Los clientes que NO requieren desglose quedan fuera de todos los saldos.
       query(`
         SELECT
           COALESCE(SUM(f.total - COALESCE(sub_p.cobrado,0)), 0) AS total,
           COUNT(DISTINCT f.id)::int                              AS facturas
         FROM fac_facturas f
+        LEFT JOIN fac_clientes c ON c.id = f.cliente_id
         LEFT JOIN (
           SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
         ) sub_p ON sub_p.factura_id = f.id
         WHERE f.estatus NOT IN ('cancelada','pagada')
+          AND COALESCE(c.aplica_desglose, TRUE) = TRUE
           AND f.total - COALESCE(sub_p.cobrado,0) > 0
       `),
 
@@ -80,10 +88,12 @@ router.get('/kpi', async (req, res) => {
       query(`
         SELECT COUNT(DISTINCT f.id)::int AS facturas
         FROM fac_facturas f
+        LEFT JOIN fac_clientes c ON c.id = f.cliente_id
         LEFT JOIN (
           SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
         ) sub_p ON sub_p.factura_id = f.id
         WHERE f.estatus NOT IN ('cancelada','pagada')
+          AND COALESCE(c.aplica_desglose, TRUE) = TRUE
           AND f.fecha_vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '15 days'
           AND f.total - COALESCE(sub_p.cobrado,0) > 0
       `),
@@ -94,10 +104,12 @@ router.get('/kpi', async (req, res) => {
           COUNT(DISTINCT f.id)::int                              AS facturas,
           COALESCE(SUM(f.total - COALESCE(sub_p.cobrado,0)), 0) AS monto
         FROM fac_facturas f
+        LEFT JOIN fac_clientes c ON c.id = f.cliente_id
         LEFT JOIN (
           SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
         ) sub_p ON sub_p.factura_id = f.id
         WHERE f.estatus NOT IN ('cancelada','pagada')
+          AND COALESCE(c.aplica_desglose, TRUE) = TRUE
           AND f.fecha_vencimiento < CURRENT_DATE - INTERVAL '15 days'
           AND f.total - COALESCE(sub_p.cobrado,0) > 0
       `),
@@ -106,11 +118,29 @@ router.get('/kpi', async (req, res) => {
       query(`
         SELECT COUNT(DISTINCT f.cliente_id)::int AS clientes
         FROM fac_facturas f
+        LEFT JOIN fac_clientes c ON c.id = f.cliente_id
         LEFT JOIN (
           SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
         ) sub_p ON sub_p.factura_id = f.id
         WHERE f.estatus NOT IN ('cancelada','pagada')
+          AND COALESCE(c.aplica_desglose, TRUE) = TRUE
           AND f.fecha_vencimiento < CURRENT_DATE
+          AND f.total - COALESCE(sub_p.cobrado,0) > 0
+      `),
+
+      // Saldo EXCLUIDO: facturas de clientes que no requieren desglose (informativo)
+      query(`
+        SELECT
+          COALESCE(SUM(f.total - COALESCE(sub_p.cobrado,0)), 0) AS total,
+          COUNT(DISTINCT f.id)::int                              AS facturas,
+          COUNT(DISTINCT f.cliente_id)::int                      AS clientes
+        FROM fac_facturas f
+        JOIN fac_clientes c ON c.id = f.cliente_id
+        LEFT JOIN (
+          SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
+        ) sub_p ON sub_p.factura_id = f.id
+        WHERE f.estatus NOT IN ('cancelada','pagada')
+          AND c.aplica_desglose = FALSE
           AND f.total - COALESCE(sub_p.cobrado,0) > 0
       `),
     ]);
@@ -123,6 +153,10 @@ router.get('/kpi', async (req, res) => {
       vencidas_15       : vencidas15.rows[0].facturas            || 0,
       monto_vencido_15  : parseFloat(vencidas15.rows[0].monto)   || 0,
       clientes_morosos  : morosos.rows[0].clientes               || 0,
+      // Saldo de clientes sin desglose — informativo, no suma en los KPIs de arriba
+      excluido_monto    : parseFloat(excluido.rows[0].total)     || 0,
+      excluido_facturas : excluido.rows[0].facturas              || 0,
+      excluido_clientes : excluido.rows[0].clientes              || 0,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

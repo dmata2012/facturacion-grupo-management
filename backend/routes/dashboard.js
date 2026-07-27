@@ -12,18 +12,22 @@ router.get('/', async (req, res) => {
 
     const [kpi, porEstatus, mensual, top5, cobranza, nomina, rh] = await Promise.all([
       // KPIs generales del año
+      // 'por_cobrar' y 'vencido' excluyen a los clientes que no requieren desglose,
+      // igual que los KPIs del módulo Cobranza. 'facturado' y 'cobrado' sí los incluyen
+      // porque son montos históricos reales, no saldos pendientes.
       query(`
         SELECT
           COALESCE(SUM(f.total) FILTER (WHERE f.estatus != 'cancelada'),0)              AS facturado,
           COALESCE(SUM(p.monto),0)                                                       AS cobrado,
-          COALESCE(SUM(f.total) FILTER (WHERE f.estatus NOT IN ('cancelada','pagada')),0)
-            - COALESCE(SUM(p.monto) FILTER (WHERE f.estatus NOT IN ('cancelada','pagada')),0) AS por_cobrar,
-          COALESCE(SUM(f.total) FILTER (WHERE f.estatus='vencida'),0)
-            - COALESCE(SUM(p.monto) FILTER (WHERE f.estatus='vencida'),0)                AS vencido,
+          COALESCE(SUM(f.total) FILTER (WHERE f.estatus NOT IN ('cancelada','pagada') AND COALESCE(c.aplica_desglose,TRUE)),0)
+            - COALESCE(SUM(p.monto) FILTER (WHERE f.estatus NOT IN ('cancelada','pagada') AND COALESCE(c.aplica_desglose,TRUE)),0) AS por_cobrar,
+          COALESCE(SUM(f.total) FILTER (WHERE f.estatus='vencida' AND COALESCE(c.aplica_desglose,TRUE)),0)
+            - COALESCE(SUM(p.monto) FILTER (WHERE f.estatus='vencida' AND COALESCE(c.aplica_desglose,TRUE)),0) AS vencido,
           COUNT(f.id) FILTER (WHERE f.estatus != 'cancelada')::int                       AS total_facturas,
           COUNT(DISTINCT f.cliente_id) FILTER (WHERE f.estatus != 'cancelada')::int      AS clientes_activos
         FROM fac_facturas f
         LEFT JOIN fac_pagos p ON p.factura_id = f.id
+        LEFT JOIN fac_clientes c ON c.id = f.cliente_id
         WHERE EXTRACT(YEAR FROM f.fecha_emision) = $1
       `, [año]),
 

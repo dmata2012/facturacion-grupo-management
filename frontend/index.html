@@ -4647,11 +4647,13 @@ async function loadCobranzaKPIs() {
         <div class="sub">${mes}</div>
       </div>
 
-      <div class="kpi primary" id="kpi-porcobrar" onclick="filtrarCobranza('por_cobrar')" style="cursor:pointer" title="Ver todas las facturas con saldo">
+      <div class="kpi primary" id="kpi-porcobrar" onclick="filtrarCobranza('por_cobrar')" style="cursor:pointer"
+           title="${k.excluido_monto ? `No incluye ${fmt(k.excluido_monto)} de clientes sin desglose` : 'Ver todas las facturas con saldo'}">
         <div class="kpi-icon">📋</div>
         <div class="label">Total por Cobrar</div>
         <div class="value">${fmt(k.por_cobrar)}</div>
         <div class="sub">${k.facturas_activas} factura${k.facturas_activas !== 1 ? 's' : ''} activa${k.facturas_activas !== 1 ? 's' : ''}</div>
+        ${k.excluido_monto ? `<div class="sub" style="color:#94a3b8;font-size:10px;margin-top:2px">🚫 Excluye ${fmt(k.excluido_monto)} sin desglose</div>` : ''}
       </div>
 
       <div class="kpi warning" id="kpi-porvencer" onclick="filtrarCobranza('por_vencer')" style="cursor:pointer" title="Ver facturas por vencer">
@@ -4702,27 +4704,39 @@ async function loadCobranza() {
 }
 
 function renderCobranzaTable(d, titulo = null) {
-  const totalSaldo = d.reduce((a,r) => a + parseFloat(r.saldo), 0);
+  // Las facturas de clientes que no requieren desglose se muestran, pero NO suman al saldo
+  const cuenta   = d.filter(r => r.cuenta_en_saldo !== false);
+  const excluida = d.filter(r => r.cuenta_en_saldo === false);
+  const totalSaldo    = cuenta.reduce((a,r) => a + parseFloat(r.saldo), 0);
+  const totalExcluido = excluida.reduce((a,r) => a + parseFloat(r.saldo), 0);
+
   $('cb-table').innerHTML = d.length ? `
     ${titulo ? `<div class="ibox info" style="margin-bottom:8px;font-size:12px">📌 ${titulo}</div>` : ''}
-    <div class="ibox ${totalSaldo > 0 ? 'warn' : 'ok'}" style="margin-bottom:10px">
-      Total por cobrar: <strong>${fmt(totalSaldo)}</strong> en ${d.length} factura${d.length !== 1 ? 's' : ''}
+    <div class="ibox ${totalSaldo > 0 ? 'warn' : 'ok'}" style="margin-bottom:${excluida.length?'6px':'10px'}">
+      Total por cobrar: <strong>${fmt(totalSaldo)}</strong> en ${cuenta.length} factura${cuenta.length !== 1 ? 's' : ''}
     </div>
+    ${excluida.length ? `
+    <div style="margin-bottom:10px;padding:9px 13px;background:#f8fafc;border:1.5px dashed #cbd5e1;border-radius:9px;
+                font-size:12px;color:#64748b;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <span>🚫 <strong>${fmt(totalExcluido)}</strong> en ${excluida.length} factura${excluida.length!==1?'s':''} de clientes <strong>sin desglose</strong> — no suman al total por cobrar.</span>
+    </div>` : ''}
     <div class="tscroll"><table>
       <thead><tr><th>Folio</th><th>Cliente</th><th>RFC</th><th>Emisión</th><th>Vencimiento</th><th>Total</th><th>Cobrado</th><th>Saldo</th><th>Estatus</th><th>Días vencido</th><th></th></tr></thead>
       <tbody>${d.map(r => {
         const diasV = r.fecha_vencimiento && new Date(r.fecha_vencimiento) < new Date()
           ? Math.floor((new Date() - new Date(r.fecha_vencimiento)) / 86400000) : 0;
-        return `<tr>
-          <td><a href="#" onclick="detalleFactura(${r.id})" style="color:var(--red)">${r.folio||'#'+r.id}</a></td>
-          <td>${r.razon_social||'—'}</td><td>${r.rfc||'—'}</td>
+        const noCuenta = r.cuenta_en_saldo === false;
+        return `<tr${noCuenta ? ' style="background:#f8fafc;color:#94a3b8"' : ''}>
+          <td><a href="#" onclick="detalleFactura(${r.id})" style="color:${noCuenta?'#94a3b8':'var(--red)'}">${r.folio||'#'+r.id}</a></td>
+          <td>${r.razon_social||'—'}${noCuenta?' <span title="Cliente sin desglose — no suma al saldo de cobranza" style="display:inline-block;background:#e2e8f0;color:#64748b;padding:1px 6px;border-radius:10px;font-size:9.5px;font-weight:800;vertical-align:middle">SIN DESGLOSE</span>':''}</td>
+          <td>${r.rfc||'—'}</td>
           <td>${fmtDate(r.fecha_emision)}</td>
           <td>${r.fecha_vencimiento ? fmtDate(r.fecha_vencimiento) : '—'}</td>
           <td>${fmt(r.total)}</td>
-          <td style="color:var(--success)">${fmt(r.cobrado)}</td>
-          <td style="color:var(--danger);font-weight:700">${fmt(r.saldo)}</td>
+          <td style="color:${noCuenta?'#94a3b8':'var(--success)'}">${fmt(r.cobrado)}</td>
+          <td style="color:${noCuenta?'#94a3b8':'var(--danger)'};font-weight:700">${fmt(r.saldo)}</td>
           <td>${badgeEstatus(r.estatus)}</td>
-          <td style="color:${diasV>30?'var(--danger)':diasV>0?'var(--warning)':'var(--muted)'}">${diasV > 0 ? diasV+'d' : '—'}</td>
+          <td style="color:${noCuenta?'#94a3b8':(diasV>30?'var(--danger)':diasV>0?'var(--warning)':'var(--muted)')}">${diasV > 0 ? diasV+'d' : '—'}</td>
           <td>${canWrite() ? `<button class="btn bsuc bsm" onclick="openPago(${r.id})">💲 Pagar</button>` : ''}</td>
         </tr>`;
       }).join('')}</tbody>
