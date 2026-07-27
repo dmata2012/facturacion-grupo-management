@@ -3,8 +3,15 @@ const { query } = require('../config/db');
 const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
-// Reportes solo para admin (no capturista)
-router.use(requireRol('admin'));
+
+// Los reportes son solo para admin, con una excepción: el Estado de Cuenta
+// también lo consulta gerencia (es una vista de saldos por cliente, no un reporte
+// operativo). Si en el futuro se abren más reportes a gerente, agregarlos aquí.
+const RUTAS_GERENCIA = ['/estado-cuenta'];
+router.use((req, res, next) => {
+  const roles = RUTAS_GERENCIA.includes(req.path) ? ['admin','gerente'] : ['admin'];
+  return requireRol(...roles)(req, res, next);
+});
 
 // ── REPORTE COBRANZA ──────────────────────────
 router.get('/cobranza', async (req, res) => {
