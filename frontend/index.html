@@ -3769,7 +3769,13 @@ async function facturas(resetPage = true) {
   </div>
   <div class="card">
     <div class="filters">
-      <input id="f-buscar" placeholder="🔍 Folio, cliente, concepto..." style="width:220px" oninput="filtrarFacturas()">
+      <input id="f-buscar" placeholder="🔍 Folio, cliente, concepto..." style="width:200px" oninput="filtrarFacturas()">
+      <select id="f-emisora" onchange="filtrarFacturas()" title="Filtrar por empresa emisora" style="max-width:210px">
+        <option value="">🏛 Todas las emisoras</option>
+      </select>
+      <select id="f-cliente" onchange="filtrarFacturas()" title="Filtrar por cliente" style="max-width:230px">
+        <option value="">🏢 Todos los clientes</option>
+      </select>
       <select id="f-estatus" onchange="filtrarFacturas()">
         <option value="">Todos los estatus</option>
         <option>pendiente</option><option>parcial</option><option>pagada</option><option>vencida</option><option>cancelada</option>
@@ -3781,7 +3787,28 @@ async function facturas(resetPage = true) {
     </div>
     <div id="fac-table"><p class="empty">Cargando...</p></div>
   </div>`;
+  cargarCatalogosFiltroFac();
   await loadFacturas();
+}
+
+// Llena los selects de Emisora y Cliente de la barra de filtros
+async function cargarCatalogosFiltroFac() {
+  try {
+    const [emisoras, clientes] = await Promise.all([
+      api('/receptoras?activo=true').catch(() => []),
+      api('/clientes?activo=true').catch(() => [])
+    ]);
+    const selE = $('f-emisora');
+    if (selE) {
+      selE.innerHTML = '<option value="">🏛 Todas las emisoras</option>' +
+        emisoras.map(e => `<option value="${e.id}">${e.nombre_comercial || e.razon_social}</option>`).join('');
+    }
+    const selC = $('f-cliente');
+    if (selC) {
+      selC.innerHTML = '<option value="">🏢 Todos los clientes</option>' +
+        clientes.map(c => `<option value="${c.id}">${c.razon_social}</option>`).join('');
+    }
+  } catch(e) { /* si falla, los filtros quedan solo con la opción "Todos" */ }
 }
 
 let _facBuscarTO = null;
@@ -3795,6 +3822,8 @@ function limpiarFiltrosFac() {
   $('f-estatus').value = '';
   $('f-desde').value   = '';
   $('f-hasta').value   = '';
+  if ($('f-emisora')) $('f-emisora').value = '';
+  if ($('f-cliente')) $('f-cliente').value = '';
   _facPage = 1;
   loadFacturas();
 }
@@ -3804,11 +3833,15 @@ async function loadFacturas() {
   const estatus = $('f-estatus')?.value || '';
   const desde   = $('f-desde')?.value || '';
   const hasta   = $('f-hasta')?.value || '';
+  const emisora = $('f-emisora')?.value || '';
+  const cliente = $('f-cliente')?.value || '';
   let url = `/facturas?page=${_facPage}&limit=50`;
   if (buscar)  url += `&buscar=${encodeURIComponent(buscar)}`;
   if (estatus) url += `&estatus=${estatus}`;
   if (desde)   url += `&desde=${desde}`;
   if (hasta)   url += `&hasta=${hasta}`;
+  if (emisora) url += `&emisora_id=${emisora}`;
+  if (cliente) url += `&cliente_id=${cliente}`;
   try {
     const d = await api(url);
     $('fac-table').innerHTML = d.data.length ? `
@@ -12388,7 +12421,9 @@ function exportToExcel(data, cols, name) {
 function exportarFacturas() {
   if(!window._facData) return toast('Carga las facturas primero.','warn');
   exportToExcel(window._facData,[
-    ['folio','Folio'],['razon_social','Cliente'],['rfc','RFC'],['fecha_emision','Emisión'],
+    ['folio','Folio'],
+    ['emisora_nombre_comercial','Emisora'],['emisora_rfc','RFC Emisora'],
+    ['razon_social','Cliente'],['rfc','RFC Cliente'],['fecha_emision','Emisión'],
     ['fecha_vencimiento','Vencimiento'],['total','Total'],['cobrado','Cobrado'],['saldo','Saldo'],['estatus','Estatus']
   ],'Facturas');
 }

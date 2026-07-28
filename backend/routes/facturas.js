@@ -25,11 +25,12 @@ router.use(verificarToken);
 // ── LISTAR ────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
-    const { cliente_id, estatus, desde, hasta, buscar, page = 1, limit = 50 } = req.query;
+    const { cliente_id, emisora_id, estatus, desde, hasta, buscar, page = 1, limit = 50 } = req.query;
     const params = [];
     let where = 'WHERE 1=1';
 
     if (cliente_id) { params.push(cliente_id); where += ` AND f.cliente_id=$${params.length}`; }
+    if (emisora_id) { params.push(emisora_id); where += ` AND f.empresa_receptora_id=$${params.length}`; }
     if (estatus)    { params.push(estatus);     where += ` AND f.estatus=$${params.length}`; }
     if (desde)      { params.push(desde);       where += ` AND f.fecha_emision>=$${params.length}`; }
     if (hasta)      { params.push(hasta);       where += ` AND f.fecha_emision<=$${params.length}`; }
