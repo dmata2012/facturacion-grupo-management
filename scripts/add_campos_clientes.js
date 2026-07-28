@@ -1,6 +1,10 @@
 const { Pool } = require('pg');
 
-const DATABASE_URL = 'postgresql://facturacion_db_tbm9_user:X4A6lk6zECS9TBcxOzd2azoZVTyxX974@dpg-d8k5jtojo6nc739n4b70-a.oregon-postgres.render.com/facturacion_db_tbm9';
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  console.error('Falta DATABASE_URL. Uso: DATABASE_URL="postgresql://..." node <script>.js');
+  process.exit(1);
+}
 
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
 

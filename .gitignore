@@ -1,7 +1,29 @@
+# Dependencias
 node_modules/
 backend/node_modules/
+
+# Variables de entorno y secretos — nunca versionar
+.env
+.env.*
 backend/.env
+*.env
+
+# Archivos subidos por usuarios
 backend/uploads/
+uploads/
+
+# Respaldos de base de datos
+*.sql
+respaldos/
+
+# Logs
 *.log
+npm-debug.log*
+
+# Sistema
 .DS_Store
 Thumbs.db
+
+# Editor
+.vscode/
+.idea/
