@@ -3938,6 +3938,9 @@ function resumenPeriodoFac(t) {
   const nFac  = parseInt(t.facturas || 0);
   const nCanc = parseInt(t.canceladas || 0);
   const nCli  = parseInt(t.clientes || 0);
+  // Facturación de clientes marcados como "sin desglose" (se resta del facturado)
+  const sinDesg  = parseFloat(t.facturado_sin_desglose || 0);
+  const nSinDesg = parseInt(t.facturas_sin_desglose || 0);
   const pctCobrado = parseFloat(t.facturado) > 0
     ? (parseFloat(t.cobrado) / parseFloat(t.facturado) * 100).toFixed(1) + '% cobrado'
     : '';
@@ -3956,6 +3959,10 @@ function resumenPeriodoFac(t) {
              nCli ? `${nCli} cliente${nCli === 1 ? '' : 's'}` : '')}
       ${tile('Facturado', fmt(t.facturado), 'var(--dark)',
              `Subtotal ${fmt(t.subtotal)} + IVA ${fmt(t.iva)}`)}
+      ${tile('Facturado con desglose', fmt(t.facturado_con_desglose), '#1e40af',
+             sinDesg > 0
+               ? `Menos ${fmt(sinDesg)} de ${nSinDesg} factura${nSinDesg === 1 ? '' : 's'} sin desglose`
+               : 'Ningún cliente sin desglose en el período')}
       ${tile('Cobrado', fmt(t.cobrado), 'var(--success)', pctCobrado)}
       ${tile('Saldo por cobrar', fmt(t.saldo),
              parseFloat(t.saldo) > 0 ? 'var(--danger)' : 'var(--success)', '')}
