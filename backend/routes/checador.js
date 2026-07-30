@@ -513,7 +513,8 @@ router.get('/asistencia', async (req, res) => {
         ? e.dias_descanso
         : [0]; // 0 = domingo
       const celdas = {};
-      const totales = { A:0, F:0, FJ:0, V:0, 'P/G':0, In:0, D:0 };
+      const totales = { A:0, F:0, FJ:0, V:0, 'P/G':0, In:0, D:0, R:0 };
+      let minutosRetardoTotal = 0;
       dias.forEach(fecha => {
         const dow = new Date(fecha+'T12:00:00').getDay(); // 0=Dom .. 6=Sab
         const sol = solByEmpDia[e.id]?.[fecha];
@@ -528,7 +529,15 @@ router.get('/asistencia', async (req, res) => {
         else if (descanso.includes(dow)) cod = 'D';
         else if (esFutura) cod = '';   // fecha futura sin registro: no es falta
         else cod = 'F';
+
+        // Retardo: solo aplica si asistió. Ya viene descontada la tolerancia
+        // del colaborador desde el registro de entrada.
+        const minRet = parseInt(reg?.minutos_retardo) || 0;
+        const conRetardo = cod === 'A' && minRet > 0;
+        if (conRetardo) { totales.R++; minutosRetardoTotal += minRet; }
+
         celdas[fecha] = { c: cod, n: aj?.notas || null };
+        if (conRetardo) { celdas[fecha].r = minRet; }   // minutos de retardo del día
         if (totales[cod] !== undefined) totales[cod]++;
       });
       return {
@@ -538,7 +547,8 @@ router.get('/asistencia', async (req, res) => {
         puesto: e.puesto,
         departamento: e.departamento,
         celdas,
-        totales
+        totales,
+        minutos_retardo: minutosRetardoTotal
       };
     });
 

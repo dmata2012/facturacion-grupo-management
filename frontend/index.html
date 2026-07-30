@@ -7776,6 +7776,7 @@ async function checador() {
         </div>
         <div id="asist-leyenda" style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;margin-bottom:10px;padding:8px 12px;background:var(--bg-alt);border-radius:8px">
           <span><span style="display:inline-block;width:22px;text-align:center;background:#dcfce7;color:#166534;font-weight:900;border-radius:4px;padding:2px 4px">A</span> Asistencia</span>
+          <span title="Asistió pero llegó fuera de su tolerancia. Cuenta también como asistencia."><span style="display:inline-block;width:22px;text-align:center;background:#fef3c7;color:#92400e;font-weight:900;border-radius:4px;padding:2px 4px">R</span> Retardo</span>
           <span><span style="display:inline-block;width:22px;text-align:center;background:#fee2e2;color:#991b1b;font-weight:900;border-radius:4px;padding:2px 4px">F</span> Falta</span>
           <span><span style="display:inline-block;width:22px;text-align:center;background:#ffedd5;color:#9a3412;font-weight:900;border-radius:4px;padding:2px 4px">FJ</span> Falta justificada</span>
           <span><span style="display:inline-block;width:22px;text-align:center;background:#dbeafe;color:#1e40af;font-weight:900;border-radius:4px;padding:2px 4px">V</span> Vacaciones</span>
@@ -8982,6 +8983,7 @@ function setAsistPreset(p) {
 
 const ASIST_COLOR = {
   'A':   { bg:'#dcfce7', fg:'#166534' },
+  'R':   { bg:'#fef3c7', fg:'#92400e' },   // Asistió con retardo
   'F':   { bg:'#fee2e2', fg:'#991b1b' },
   'FJ':  { bg:'#ffedd5', fg:'#9a3412' },
   'V':   { bg:'#dbeafe', fg:'#1e40af' },
@@ -9009,7 +9011,7 @@ async function cargarAsistencia() {
 function _empleadosConIncidencias(empleados) {
   return empleados.filter(e => {
     const t = e.totales || {};
-    return (t.F||0) + (t.FJ||0) + (t.V||0) + (t['P/G']||0) + (t.In||0) > 0;
+    return (t.F||0) + (t.FJ||0) + (t.V||0) + (t['P/G']||0) + (t.In||0) + (t.R||0) > 0;
   });
 }
 
@@ -9046,6 +9048,7 @@ function renderAsistencia(d) {
         <th style="text-align:left;padding:6px 8px;background:#f8fafc;border-bottom:2px solid #cbd5e1;position:sticky;left:0;z-index:3;min-width:220px">Colaborador</th>
         ${d.dias.map(f => `<th style="padding:2px;text-align:center;background:#f8fafc;border-bottom:2px solid #cbd5e1;min-width:28px">${fmtDiaCorto(f)}</th>`).join('')}
         <th style="padding:6px 4px;background:#dcfce7;border-bottom:2px solid #16a34a;color:#166534;font-weight:900;border-left:3px double #64748b">A</th>
+        <th style="padding:6px 4px;background:#fef3c7;border-bottom:2px solid #d97706;color:#92400e;font-weight:900" title="Días con retardo">R</th>
         <th style="padding:6px 4px;background:#fee2e2;border-bottom:2px solid #dc2626;color:#991b1b;font-weight:900">F</th>
         <th style="padding:6px 4px;background:#ffedd5;border-bottom:2px solid #ea580c;color:#9a3412;font-weight:900">FJ</th>
         <th style="padding:6px 4px;background:#dbeafe;border-bottom:2px solid #2563eb;color:#1e40af;font-weight:900">V</th>
@@ -9063,8 +9066,11 @@ function renderAsistencia(d) {
     const hoyISO = new Date().toISOString().slice(0,10);
     d.dias.forEach(f => {
       const celda = e.celdas[f] || { c:'', n:null };
-      const cod   = typeof celda === 'string' ? celda : (celda.c || '');
+      let   cod   = typeof celda === 'string' ? celda : (celda.c || '');
       const nota  = typeof celda === 'string' ? null : celda.n;
+      // Si asistió pero llegó tarde, la celda muestra R en lugar de A
+      const minRet = typeof celda === 'string' ? 0 : (celda.r || 0);
+      if (cod === 'A' && minRet > 0) cod = 'R';
       const dt = new Date(f+'T12:00:00');
       const esDom = dt.getDay() === 0;
       const esFutura = f > hoyISO;
@@ -9076,7 +9082,7 @@ function renderAsistencia(d) {
         chip = `<div style="display:inline-block;min-width:22px;padding:3px 4px;color:#cbd5e1;font-weight:700;font-size:12px;cursor:pointer" title="${tipFut}">—</div>`;
       } else {
         const c = ASIST_COLOR[cod] || { bg:'#fff', fg:'#000' };
-        const tip = `${fmtDate(f)}: ${cod}${nota?' — '+notaSanit:''}`;
+        const tip = `${fmtDate(f)}: ${cod === 'R' ? `Asistencia con ${minRet} min de retardo` : cod}${nota?' — '+notaSanit:''}`;
         const dot = nota ? '<span style="position:absolute;top:-2px;right:-2px;width:7px;height:7px;background:#f59e0b;border:1.5px solid #fff;border-radius:50%;box-shadow:0 1px 2px rgba(0,0,0,.3)"></span>' : '';
         chip = c.circle
           ? `<div style="position:relative;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:${c.bg};color:${c.fg};font-weight:900;font-size:11px;box-shadow:0 0 0 1.5px #b91c1c inset;cursor:pointer" title="${tip}">${cod}${dot}</div>`
@@ -9086,6 +9092,9 @@ function renderAsistencia(d) {
       html += `<td style="padding:2px;text-align:center;background:${bgTd};cursor:pointer" onclick="editarCeldaAsist(${e.empleado_id},'${f}','${cod}','${notaSanit}','${(e.nombre||'').replace(/'/g,"\\'")}')">${chip}</td>`;
     });
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#166534;background:#f0fdf4;border-left:3px double #64748b">${e.totales.A}</td>`;
+    html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#92400e;background:#fffbeb"${
+      e.minutos_retardo ? ` title="${Math.floor(e.minutos_retardo/60)}h ${e.minutos_retardo%60}m de retardo acumulado"` : ''
+    }>${e.totales.R||0}</td>`;
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#991b1b;background:#fef2f2">${e.totales.F}</td>`;
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#9a3412;background:#fff7ed">${e.totales.FJ||0}</td>`;
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#1e40af;background:#eff6ff">${e.totales.V}</td>`;
@@ -9214,7 +9223,9 @@ function imprimirAsistencia() {
   const filas = d.empleados.map(e => {
     const celdas = d.dias.map(f => {
       const cel = e.celdas[f];
-      const cod = typeof cel === 'string' ? cel : (cel?.c || '');
+      let   cod = typeof cel === 'string' ? cel : (cel?.c || '');
+      // Asistencia con retardo se imprime como R
+      if (cod === 'A' && typeof cel === 'object' && cel?.r > 0) cod = 'R';
       if (!cod) {
         // Celda pendiente / fecha futura — placeholder sutil
         return `<td><span style="color:#cbd5e1">—</span></td>`;
@@ -9232,6 +9243,7 @@ function imprimirAsistencia() {
       </td>
       ${celdas}
       <td class="tot" style="color:#166534">${e.totales.A}</td>
+      <td class="tot" style="color:#92400e">${e.totales.R||0}</td>
       <td class="tot" style="color:#991b1b">${e.totales.F}</td>
       <td class="tot" style="color:#9a3412">${e.totales.FJ||0}</td>
       <td class="tot" style="color:#1e40af">${e.totales.V}</td>
@@ -9312,6 +9324,7 @@ function imprimirAsistencia() {
   </div>
   <div class="leyenda">
     <span><span style="background:#dcfce7;color:#166534">A</span>Asistencia</span>
+    <span><span style="background:#fef3c7;color:#92400e">R</span>Retardo</span>
     <span><span style="background:#fee2e2;color:#991b1b">F</span>Falta</span>
     <span><span style="background:#ffedd5;color:#9a3412">FJ</span>Falta justificada</span>
     <span><span style="background:#dbeafe;color:#1e40af">V</span>Vacaciones</span>
@@ -9324,6 +9337,7 @@ function imprimirAsistencia() {
       <th style="text-align:left;padding-left:4px">Colaborador</th>
       ${headDias}
       <th style="background:#dcfce7;color:#166534">A</th>
+      <th style="background:#fef3c7;color:#92400e">R</th>
       <th style="background:#fee2e2;color:#991b1b">F</th>
       <th style="background:#ffedd5;color:#9a3412">FJ</th>
       <th style="background:#dbeafe;color:#1e40af">V</th>
@@ -9358,14 +9372,18 @@ function exportarAsistenciaExcel() {
   aoa.push([`Rango: ${fmtDate(d.desde)} al ${fmtDate(d.hasta)}`]);
   aoa.push([`Generado: ${new Date().toLocaleString('es-MX')}`]);
   aoa.push([]);
-  aoa.push([`Códigos: A=Asistencia · F=Falta · V=Vacaciones · P/G=Permiso con Goce · In=Incapacidad · D=Descanso`]);
+  aoa.push([`Códigos: A=Asistencia · R=Retardo (asistió tarde) · F=Falta · FJ=Falta justificada · V=Vacaciones · P/G=Permiso con Goce · In=Incapacidad · D=Descanso`]);
   aoa.push([]);
   const header = ['#','Colaborador','Puesto','Departamento', ...d.dias.map(f => {
     const dt = new Date(f+'T12:00:00');
     return `${String(dt.getDate()).padStart(2,'0')}-${['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dt.getDay()]}`;
-  }), 'A','F','FJ','V','P/G','In','D'];
+  }), 'A','R','F','FJ','V','P/G','In','D'];
   aoa.push(header);
-  const celVal = (v) => typeof v === 'string' ? v : (v?.c || '');
+  const celVal = (v) => {
+    if (typeof v === 'string') return v;
+    if (!v) return '';
+    return (v.c === 'A' && v.r > 0) ? 'R' : (v.c || '');
+  };
   d.empleados.forEach(e => {
     aoa.push([
       e.numero_colaborador||'',
@@ -9373,7 +9391,7 @@ function exportarAsistenciaExcel() {
       e.puesto||'',
       e.departamento||'',
       ...d.dias.map(f => celVal(e.celdas[f])),
-      e.totales.A, e.totales.F, e.totales.FJ||0, e.totales.V, e.totales['P/G'], e.totales.In, e.totales.D
+      e.totales.A, e.totales.R||0, e.totales.F, e.totales.FJ||0, e.totales.V, e.totales['P/G'], e.totales.In, e.totales.D
     ]);
   });
   // Hoja de notas/justificaciones
