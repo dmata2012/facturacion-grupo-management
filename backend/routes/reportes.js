@@ -277,9 +277,26 @@ router.get('/comisiones', async (req, res) => {
 // ── ANÁLISIS POR CONCEPTO DE DESGLOSE ────────
 router.get('/concepto', async (req, res) => {
   try {
-    const { concepto } = req.query;
+    const { concepto, desde, hasta } = req.query;
     if (!concepto) return res.status(400).json({ error: 'Parámetro concepto requerido.' });
-    const param = `%${concepto}%`;
+
+    // El rango de fechas es opcional; cuando viene se aplica a todas las consultas.
+    // $1 siempre es el concepto; las fechas ocupan $2/$3 según se reciban.
+    const params = [`%${concepto}%`];
+    let rango = '';
+    if (desde) { params.push(desde); rango += ` AND f.fecha_emision >= $${params.length}`; }
+    if (hasta) { params.push(hasta); rango += ` AND f.fecha_emision <= $${params.length}`; }
+    const hayRango = !!(desde || hasta);
+
+    // El facturado total (denominador de la participación) debe medirse en el mismo
+    // período, si no el porcentaje compararía peras con manzanas.
+    // Sus placeholders continúan la numeración de `params`, porque en la consulta
+    // del KPI ambos arreglos se concatenan.
+    const paramsTot = [];
+    let rangoTot = '';
+    const baseTot = params.length;
+    if (desde) { paramsTot.push(desde); rangoTot += ` AND f2.fecha_emision >= $${baseTot + paramsTot.length}`; }
+    if (hasta) { paramsTot.push(hasta); rangoTot += ` AND f2.fecha_emision <= $${baseTot + paramsTot.length}`; }
 
     const [mensual, topClientes, historico, kpiRes] = await Promise.all([
 
@@ -295,10 +312,10 @@ router.get('/concepto', async (req, res) => {
         JOIN fac_facturas f ON f.id = d.factura_id
         WHERE d.concepto ILIKE $1
           AND f.estatus != 'cancelada'
-          AND f.fecha_emision >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '23 months'
+          ${hayRango ? rango : `AND f.fecha_emision >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '23 months'`}
         GROUP BY periodo, mes, año
         ORDER BY periodo
-      `, [param]),
+      `, params),
 
       // Top 10 clientes por monto acumulado
       query(`
@@ -311,11 +328,11 @@ router.get('/concepto', async (req, res) => {
         JOIN fac_facturas f ON f.id = d.factura_id
         JOIN fac_clientes c ON c.id = f.cliente_id
         WHERE d.concepto ILIKE $1
-          AND f.estatus != 'cancelada'
+          AND f.estatus != 'cancelada'${rango}
         GROUP BY c.id, c.razon_social, c.rfc
         ORDER BY total DESC
         LIMIT 10
-      `, [param]),
+      `, params),
 
       // Crecimiento histórico anual
       query(`
@@ -326,10 +343,10 @@ router.get('/concepto', async (req, res) => {
         FROM fac_desglose_rh d
         JOIN fac_facturas f ON f.id = d.factura_id
         WHERE d.concepto ILIKE $1
-          AND f.estatus != 'cancelada'
+          AND f.estatus != 'cancelada'${rango}
         GROUP BY año
         ORDER BY año
-      `, [param]),
+      `, params),
 
       // KPI: participación, ocurrencias, clientes
       query(`
@@ -337,12 +354,13 @@ router.get('/concepto', async (req, res) => {
           COALESCE(SUM(d.monto), 0)                                                        AS concepto_total,
           COUNT(DISTINCT d.id)::int                                                         AS ocurrencias,
           COUNT(DISTINCT f.cliente_id)::int                                                 AS clientes,
-          (SELECT COALESCE(SUM(f2.total),0) FROM fac_facturas f2 WHERE f2.estatus != 'cancelada') AS total_facturado
+          (SELECT COALESCE(SUM(f2.total),0) FROM fac_facturas f2
+            WHERE f2.estatus != 'cancelada'${rangoTot}) AS total_facturado
         FROM fac_desglose_rh d
         JOIN fac_facturas f ON f.id = d.factura_id
         WHERE d.concepto ILIKE $1
-          AND f.estatus != 'cancelada'
-      `, [param]),
+          AND f.estatus != 'cancelada'${rango}
+      `, [...params, ...paramsTot]),
     ]);
 
     res.json({
@@ -350,6 +368,7 @@ router.get('/concepto', async (req, res) => {
       top_clientes: topClientes.rows,
       historico   : historico.rows,
       kpi         : kpiRes.rows[0] || {},
+      periodo     : { desde: desde || null, hasta: hasta || null },
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

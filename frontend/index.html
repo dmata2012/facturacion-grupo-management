@@ -6065,6 +6065,13 @@ async function reportes() {
         <select id="rconc-select" style="min-width:220px" onchange="loadRepConcepto()">
           <option value="">-- Seleccionar concepto --</option>
         </select>
+        <label style="font-size:11px;font-weight:700;color:var(--gray-d)">DESDE</label>
+        <input type="date" id="rconc-desde" onchange="loadRepConcepto()">
+        <label style="font-size:11px;font-weight:700;color:var(--gray-d)">HASTA</label>
+        <input type="date" id="rconc-hasta" onchange="loadRepConcepto()">
+        <button class="btn bo bsm" onclick="rconcPreset('mes')" title="Mes en curso">Este mes</button>
+        <button class="btn bo bsm" onclick="rconcPreset('anio')" title="Año en curso">Este año</button>
+        <button class="btn bo bsm" onclick="rconcPreset('limpiar')" title="Quitar el filtro de fechas">✕ Todo</button>
       </div>
       <div id="rconc-body"><p class="empty">Seleccione un concepto para ver su análisis.</p></div>
     </div>
@@ -6519,12 +6526,38 @@ async function initRepConcepto() {
   }
 }
 
+// Presets rápidos del rango de fechas del reporte por concepto
+function rconcPreset(tipo) {
+  const hoy = new Date(), y = hoy.getFullYear();
+  const pad = n => String(n).padStart(2, '0');
+  if (tipo === 'limpiar') {
+    $('rconc-desde').value = '';
+    $('rconc-hasta').value = '';
+  } else if (tipo === 'mes') {
+    const m = pad(hoy.getMonth() + 1);
+    $('rconc-desde').value = `${y}-${m}-01`;
+    $('rconc-hasta').value = new Date(y, hoy.getMonth() + 1, 0).toISOString().slice(0, 10);
+  } else if (tipo === 'anio') {
+    $('rconc-desde').value = `${y}-01-01`;
+    $('rconc-hasta').value = `${y}-12-31`;
+  }
+  loadRepConcepto();
+}
+
 async function loadRepConcepto() {
   const concepto = $('rconc-select')?.value;
   if (!concepto) return;
+  const desde = $('rconc-desde')?.value || '';
+  const hasta = $('rconc-hasta')?.value || '';
+  if (desde && hasta && desde > hasta) {
+    return toast('La fecha "desde" debe ser menor o igual a "hasta".', 'warn');
+  }
   $('rconc-body').innerHTML = '<p class="empty">Cargando análisis…</p>';
   try {
-    const data = await api(`/reportes/concepto?concepto=${encodeURIComponent(concepto)}`);
+    let url = `/reportes/concepto?concepto=${encodeURIComponent(concepto)}`;
+    if (desde) url += `&desde=${desde}`;
+    if (hasta) url += `&hasta=${hasta}`;
+    const data = await api(url);
     const { mensual, top_clientes, historico, kpi } = data;
 
     const ct  = parseFloat(kpi.concepto_total)  || 0;
@@ -6545,14 +6578,24 @@ async function loadRepConcepto() {
 
     const MESES_C = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
+    // Etiqueta del período consultado
+    const perTxt = desde && hasta ? `${fmtDate(desde)} al ${fmtDate(hasta)}`
+                 : desde          ? `desde ${fmtDate(desde)}`
+                 : hasta          ? `hasta ${fmtDate(hasta)}`
+                 : 'Histórico completo';
+
     $('rconc-body').innerHTML = `
+      ${(desde || hasta) ? `<div class="ibox info" style="margin-bottom:12px;font-size:12px">
+        📅 Período filtrado: <strong>${perTxt}</strong> — todos los indicadores y gráficas de abajo
+        corresponden solo a este rango.
+      </div>` : ''}
       <!-- KPIs -->
       <div class="kpi-grid" style="margin-bottom:18px">
         <div class="kpi success">
           <div class="kpi-icon">💰</div>
-          <div class="label">Total acumulado</div>
+          <div class="label">Total ${desde || hasta ? 'del período' : 'acumulado'}</div>
           <div class="value" style="font-size:20px">${fmt(ct)}</div>
-          <div class="sub">Histórico completo</div>
+          <div class="sub">${perTxt}</div>
         </div>
         <div class="kpi primary">
           <div class="kpi-icon">📊</div>
@@ -6581,7 +6624,7 @@ async function loadRepConcepto() {
       <!-- Evolución mensual (ancho completo) -->
       <div style="background:var(--bg-alt);border-radius:10px;padding:16px;margin-bottom:16px">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-          <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)">Evolución mensual — últimos 24 meses</span>
+          <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)">Evolución mensual — ${desde || hasta ? perTxt : 'últimos 24 meses'}</span>
           ${mom !== null ? `<span style="font-size:12px;font-weight:700;padding:2px 8px;border-radius:20px;background:${parseFloat(mom)>=0?'#dcfce7':'#fee2e2'};color:${parseFloat(mom)>=0?'var(--success)':'var(--danger)'}">${parseFloat(mom)>=0?'▲':'▼'} ${Math.abs(mom)}% vs mes anterior</span>` : ''}
         </div>
         <div style="height:200px"><canvas id="chart-conc-mensual"></canvas></div>
