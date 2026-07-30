@@ -260,7 +260,8 @@ router.put('/:id', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), as
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/:id', requireRol('admin', 'tesoreria'), async (req, res) => {
+// Mismos roles que canGastos() en la interfaz, para que quien vea el botón pueda usarlo
+router.delete('/:id', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
   try {
     await query(`DELETE FROM fac_gastos WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });

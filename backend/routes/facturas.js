@@ -318,7 +318,9 @@ router.post('/importar-masivo', requireRol('admin', 'capturista', 'gerente'), as
 });
 
 // ── CANCELAR ──────────────────────────────────
-router.patch('/:id/cancelar', requireRol('admin', 'capturista', 'gerente'), async (req, res) => {
+// Los mismos roles que muestran el botón en la interfaz (canFacturar), para que
+// nadie vea la opción y reciba un 403 al usarla.
+router.patch('/:id/cancelar', requireRol('admin', 'capturista', 'gerente', 'tesoreria'), async (req, res) => {
   try {
     await query(`UPDATE fac_facturas SET estatus='cancelada',actualizado_en=NOW() WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });

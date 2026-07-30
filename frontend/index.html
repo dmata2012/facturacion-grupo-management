@@ -766,6 +766,8 @@ function makeChart(key, ctx, cfg) {
 
 function canWrite() { return ME && ['admin','capturista','tesoreria'].includes(ME.rol); }
 function canFacturar() { return ME && ['admin','capturista','tesoreria','gerente'].includes(ME.rol); }
+// Gastos de Operación: gerencia también captura, edita y elimina
+function canGastos() { return ME && ['admin','capturista','tesoreria','gerente'].includes(ME.rol); }
 function canAdmin() { return ME && ME.rol === 'admin'; }
 function isCapturista()        { return ME && ME.rol === 'capturista'; }
 function isTesoreria()         { return ME && ME.rol === 'tesoreria'; }
@@ -1070,7 +1072,7 @@ async function gastos() {
           <button class="btn bo bsm" onclick="gtPreset('mes')">Este mes</button>
           <button class="btn bo bsm" onclick="gtPreset('anio')">Este año</button>
           <button class="btn bo bsm" onclick="exportarGastosExcel()">⬇ Excel</button>
-          ${canWrite()?`<button class="btn bs bsm" onclick="openGasto()">＋ Nuevo gasto</button>`:''}
+          ${canGastos()?`<button class="btn bs bsm" onclick="openGasto()">＋ Nuevo gasto</button>`:''}
         </div>
       </div>
       <div id="gt-body"><p class="empty">Cargando…</p></div>
@@ -1173,7 +1175,7 @@ function renderGastos(r) {
           Registra los gastos de operación para llevar el control mensual por concepto
           y comparar cómo se comporta cada rubro a lo largo del año.
         </p>
-        ${canWrite()?`<button class="btn bs" onclick="openGasto()" style="font-size:14px;padding:11px 24px">＋ Registrar primer gasto</button>`:''}
+        ${canGastos()?`<button class="btn bs" onclick="openGasto()" style="font-size:14px;padding:11px 24px">＋ Registrar primer gasto</button>`:''}
       </div>`;
     return;
   }
@@ -1218,8 +1220,8 @@ function renderGastos(r) {
         <td style="text-align:right;font-weight:900;color:#b45309;white-space:nowrap">${fmt(g.monto)}${
           g.deducible === false ? ' <span title="No deducible" style="font-size:9px;background:#e2e8f0;color:#64748b;padding:1px 5px;border-radius:8px;font-weight:800">ND</span>' : ''}</td>
         <td style="white-space:nowrap">
-          ${canWrite()?`<button class="btn bg bsm" style="padding:4px 8px" onclick="openGasto(${g.id})" title="Editar">✏️</button>`:''}
-          ${canWrite()?`<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarGasto(${g.id})" title="Eliminar">🗑</button>`:''}
+          ${canGastos()?`<button class="btn bg bsm" style="padding:4px 8px" onclick="openGasto(${g.id})" title="Editar">✏️</button>`:''}
+          ${canGastos()?`<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarGasto(${g.id})" title="Eliminar">🗑</button>`:''}
         </td>
       </tr>`).join('')}</tbody>
       <tfoot><tr style="border-top:2px solid var(--dark);background:var(--bg-alt);font-weight:900">
@@ -1370,7 +1372,7 @@ async function cargarCatalogoGastos() {
     window._gtConceptos = cs.filter(c => c.activo);
     const activos = cs.filter(c => c.activo).length;
     $('gt-catalogo').innerHTML = `
-      ${canWrite()?`
+      ${canGastos()?`
       <div class="card" style="margin-bottom:14px;background:var(--bg-alt)">
         <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:9px">➕ Agregar concepto</div>
         <div style="display:grid;grid-template-columns:1fr 90px auto;gap:8px;align-items:end">
@@ -1404,7 +1406,7 @@ async function cargarCatalogoGastos() {
             ? '<span style="color:#166534;font-weight:700;font-size:11px">● Activo</span>'
             : '<span style="color:var(--muted);font-size:11px">○ Inactivo</span>'}</td>
           <td style="white-space:nowrap;text-align:right">
-            ${canWrite()?`<button class="btn bg bsm" style="padding:4px 8px" onclick="editarConceptoGasto(${c.id})" title="Editar">✏️</button>`:''}
+            ${canGastos()?`<button class="btn bg bsm" style="padding:4px 8px" onclick="editarConceptoGasto(${c.id})" title="Editar">✏️</button>`:''}
             ${canAdmin()?`<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarConceptoGasto(${c.id},'${(c.nombre||'').replace(/'/g,"\\'")}',${c.n_gastos})" title="${c.n_gastos>0?'Desactivar (tiene gastos)':'Eliminar'}">🗑</button>`:''}
           </td>
         </tr>`).join('')}</tbody>
