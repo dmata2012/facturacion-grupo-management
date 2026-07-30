@@ -534,6 +534,7 @@ canvas{max-height:230px}
           <a href="#" onclick="nav('cobranza')"    id="nav-cobranza"><span class="ni">💰</span> Cobranza</a>
           <a href="#" onclick="nav('estadoCuenta')" id="nav-estadoCuenta"><span class="ni">📑</span> Estado de Cuenta</a>
           <a href="#" onclick="nav('clientes')"    id="nav-clientes"><span class="ni">🏢</span> Clientes</a>
+          <a href="#" onclick="nav('gastos')"      id="nav-gastos"><span class="ni">🧾</span> Gastos de Operación</a>
         </div>
       </div>
 
@@ -650,6 +651,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-catbancos"><div class="modal" style="width:min(640px,96vw)" id="modal-catbancos-body"></div></div>
 <div class="overlay" id="modal-chequeras"><div class="modal" style="width:min(780px,96vw)" id="modal-chequeras-body"></div></div>
 <div class="overlay" id="modal-mov-banco"><div class="modal" style="width:min(720px,96vw)" id="modal-mov-banco-body"></div></div>
+<div class="overlay" id="modal-gasto"><div class="modal" style="width:min(680px,96vw)" id="modal-gasto-body"></div></div>
 <div class="overlay" id="modal-benef-bnc"><div class="modal" style="width:min(640px,96vw)" id="modal-benef-bnc-body"></div></div>
 <div class="overlay" id="modal-notif-ch"><div class="modal" style="width:min(720px,96vw)" id="modal-notif-ch-body"></div></div>
 <div class="overlay" id="modal-notif-show"><div class="modal modal-sm" id="modal-notif-show-body"></div></div>
@@ -984,14 +986,537 @@ function nav(page) {
     receptoras:'Empresas Emisoras', nomina:'Nómina', empleados:'Empleados',
     vacaciones:'Vacaciones', checador:'Reloj Checador', cajaChica:'Caja Chica',
     reportes:'Reportes', estadisticas:'Estadísticas', usuarios:'Usuarios',
-    catalogo:'Conceptos de Desglose', bancos:'Bancos'
+    catalogo:'Conceptos de Desglose', bancos:'Bancos', gastos:'Gastos de Operación'
   };
   const mt = $('mt-title');
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
-    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos
+    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos
   };
   if (pages[page]) pages[page]();
+}
+
+// ══ GASTOS DE OPERACIÓN ══════════════════════════════
+const FORMAS_PAGO_GTO = ['transferencia','efectivo','cheque','tarjeta','domiciliado','otro'];
+
+async function gastos() {
+  const hoy = new Date(), y = hoy.getFullYear(), m = String(hoy.getMonth()+1).padStart(2,'0');
+  const finMes = new Date(y, hoy.getMonth()+1, 0).toISOString().slice(0,10);
+  $('content').innerHTML = `
+    <style>
+      .gt-hero{background:linear-gradient(135deg,#7c2d12 0%,#b45309 50%,#d97706 100%);
+        border-radius:16px;padding:22px 26px;color:#fff;margin-bottom:16px;position:relative;overflow:hidden}
+      .gt-hero::before{content:'';position:absolute;top:-90px;right:-60px;width:280px;height:280px;
+        background:radial-gradient(circle,rgba(255,255,255,.13) 0%,transparent 70%);pointer-events:none}
+      .gt-hero::after{content:'🧾';position:absolute;right:24px;bottom:-22px;font-size:110px;opacity:.08;line-height:1}
+      .gt-hero-t{display:flex;align-items:center;gap:12px}
+      .gt-hero-ic{width:46px;height:46px;border-radius:13px;background:rgba(255,255,255,.16);
+        display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;
+        border:1.5px solid rgba(255,255,255,.25)}
+      .gt-hero h2{margin:0;font-size:23px;font-weight:900;letter-spacing:-.3px}
+      .gt-hero .sub{font-size:12.5px;opacity:.85;margin-top:1px}
+      .gt-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:18px;position:relative;z-index:1}
+      .gt-kpi{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);border-radius:11px;padding:10px 13px}
+      .gt-kpi .l{font-size:9.5px;text-transform:uppercase;letter-spacing:1.1px;opacity:.8;font-weight:700}
+      .gt-kpi .v{font-size:20px;font-weight:900;margin-top:2px;line-height:1.1}
+      .gt-kpi .s{font-size:10px;opacity:.75;margin-top:1px}
+      .gt-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;background:var(--bg-alt);
+        padding:5px;border-radius:12px;border:1px solid var(--border)}
+      .gt-tab{padding:9px 16px;border-radius:9px;cursor:pointer;font-size:12.5px;font-weight:800;
+        color:#64748b;transition:all .18s;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+      .gt-tab:hover{background:rgba(217,119,6,.09);color:#b45309}
+      .gt-tab.active{background:#fff;color:#7c2d12;box-shadow:0 2px 8px rgba(124,45,18,.14)}
+      .gt-toolbar{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+      .gt-search{flex:1;min-width:200px;display:flex;align-items:center;gap:9px;background:#fff;
+        border:1.5px solid var(--border);border-radius:11px;padding:9px 14px;transition:all .18s}
+      .gt-search:focus-within{border-color:#d97706;box-shadow:0 0 0 3px rgba(217,119,6,.13)}
+      .gt-search input{flex:1;border:none;outline:none;font-size:13px;background:none;color:var(--dark)}
+      .gt-filtro{border:1.5px solid var(--border);border-radius:11px;padding:9px 12px;
+        font-size:12.5px;font-weight:700;background:#fff;cursor:pointer;color:#475569}
+      .gt-barra{height:6px;background:#f1f5f9;border-radius:99px;overflow:hidden;margin-top:3px}
+      .gt-barra i{display:block;height:100%;background:linear-gradient(90deg,#f59e0b,#d97706);border-radius:99px}
+    </style>
+
+    <div class="gt-hero">
+      <div class="gt-hero-t">
+        <div class="gt-hero-ic">🧾</div>
+        <div>
+          <h2>Gastos de Operación</h2>
+          <div class="sub">Captura de gastos · Catálogo de conceptos · Resumen anual</div>
+        </div>
+      </div>
+      <div class="gt-kpis" id="gt-kpis"></div>
+    </div>
+
+    <div class="gt-tabs">
+      <div class="gt-tab active" onclick="showTab(this,'gt-tab-lista')">🧾 Gastos</div>
+      <div class="gt-tab" onclick="showTab(this,'gt-tab-resumen');cargarResumenGastos()">📊 Resumen anual</div>
+      <div class="gt-tab" onclick="showTab(this,'gt-tab-catalogo');cargarCatalogoGastos()">📂 Catálogo</div>
+    </div>
+
+    <!-- LISTA DE GASTOS -->
+    <div class="tab-panel active" id="gt-tab-lista">
+      <div class="gt-toolbar">
+        <div class="gt-search">
+          <span style="color:#94a3b8;font-size:14px">🔍</span>
+          <input id="gt-buscar" placeholder="Buscar por concepto, proveedor, descripción o referencia…" oninput="filtrarGastos()">
+        </div>
+        <select id="gt-concepto" onchange="cargarGastos()" class="gt-filtro" style="max-width:230px">
+          <option value="">Todos los conceptos</option>
+        </select>
+        <input type="date" id="gt-desde" value="${y}-${m}-01" onchange="cargarGastos()" class="gt-filtro">
+        <input type="date" id="gt-hasta" value="${finMes}" onchange="cargarGastos()" class="gt-filtro">
+        <div style="display:flex;gap:6px;margin-left:auto">
+          <button class="btn bo bsm" onclick="gtPreset('mes')">Este mes</button>
+          <button class="btn bo bsm" onclick="gtPreset('anio')">Este año</button>
+          <button class="btn bo bsm" onclick="exportarGastosExcel()">⬇ Excel</button>
+          ${canWrite()?`<button class="btn bs bsm" onclick="openGasto()">＋ Nuevo gasto</button>`:''}
+        </div>
+      </div>
+      <div id="gt-body"><p class="empty">Cargando…</p></div>
+    </div>
+
+    <!-- RESUMEN ANUAL -->
+    <div class="tab-panel" id="gt-tab-resumen">
+      <div class="gt-toolbar">
+        <label style="font-size:11px;font-weight:700;color:var(--gray-d)">AÑO</label>
+        <select id="gt-anio" onchange="cargarResumenGastos()" class="gt-filtro">
+          ${[y+1,y,y-1,y-2].map(a=>`<option value="${a}" ${a===y?'selected':''}>${a}</option>`).join('')}
+        </select>
+        <button class="btn bo bsm" onclick="exportarResumenGastosExcel()" style="margin-left:auto">⬇ Excel</button>
+      </div>
+      <div id="gt-resumen"><p class="empty">Cargando…</p></div>
+    </div>
+
+    <!-- CATÁLOGO -->
+    <div class="tab-panel" id="gt-tab-catalogo">
+      <div id="gt-catalogo"><p class="empty">Cargando…</p></div>
+    </div>`;
+
+  // Llenar el selector de conceptos y cargar la lista
+  try {
+    const cs = await api('/gastos/conceptos');
+    window._gtConceptos = cs;
+    const sel = $('gt-concepto');
+    if (sel) sel.innerHTML = '<option value="">Todos los conceptos</option>' +
+      cs.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+  } catch(e) { window._gtConceptos = []; }
+  cargarGastos();
+}
+
+function gtPreset(tipo) {
+  const hoy = new Date(), y = hoy.getFullYear(), pad = n => String(n).padStart(2,'0');
+  if (tipo === 'mes') {
+    $('gt-desde').value = `${y}-${pad(hoy.getMonth()+1)}-01`;
+    $('gt-hasta').value = new Date(y, hoy.getMonth()+1, 0).toISOString().slice(0,10);
+  } else {
+    $('gt-desde').value = `${y}-01-01`;
+    $('gt-hasta').value = `${y}-12-31`;
+  }
+  cargarGastos();
+}
+
+let _gtBuscarTO = null;
+function filtrarGastos() { clearTimeout(_gtBuscarTO); _gtBuscarTO = setTimeout(cargarGastos, 250); }
+
+async function cargarGastos() {
+  const p = [];
+  const d = $('gt-desde')?.value, h = $('gt-hasta')?.value;
+  const c = $('gt-concepto')?.value, b = ($('gt-buscar')?.value || '').trim();
+  if (d) p.push(`desde=${d}`);
+  if (h) p.push(`hasta=${h}`);
+  if (c) p.push(`concepto_id=${c}`);
+  if (b) p.push(`buscar=${encodeURIComponent(b)}`);
+  $('gt-body').innerHTML = '<p class="empty">Cargando…</p>';
+  try {
+    const r = await api(`/gastos${p.length?'?'+p.join('&'):''}`);
+    window._gtData = r;
+    renderGastos(r);
+  } catch(e) { $('gt-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function renderGastos(r) {
+  const t = r.totales;
+  const kp = $('gt-kpis');
+  if (kp) {
+    const prom = t.n_gastos > 0 ? parseFloat(t.total) / t.n_gastos : 0;
+    kp.innerHTML = `
+      <div class="gt-kpi">
+        <div class="l">Total del período</div>
+        <div class="v">${fmt(t.total)}</div>
+        <div class="s">${t.n_gastos} gasto${t.n_gastos!=1?'s':''} · ${t.conceptos} concepto${t.conceptos!=1?'s':''}</div>
+      </div>
+      <div class="gt-kpi">
+        <div class="l">Deducible</div>
+        <div class="v">${fmt(t.deducible)}</div>
+        <div class="s">${parseFloat(t.total)>0 ? Math.round(parseFloat(t.deducible)/parseFloat(t.total)*100) : 0}% del total</div>
+      </div>
+      <div class="gt-kpi">
+        <div class="l">Gasto promedio</div>
+        <div class="v">${fmt(prom)}</div>
+        <div class="s">Por registro</div>
+      </div>
+      <div class="gt-kpi">
+        <div class="l">Mayor concepto</div>
+        <div class="v" style="font-size:15px">${r.por_concepto[0] ? fmt(r.por_concepto[0].total) : '—'}</div>
+        <div class="s">${r.por_concepto[0] ? r.por_concepto[0].concepto.slice(0,26) : 'Sin datos'}</div>
+      </div>`;
+  }
+
+  if (!r.gastos.length) {
+    $('gt-body').innerHTML = `
+      <div style="background:linear-gradient(160deg,#fffbeb,#fef3c7);border:2px dashed #fbbf24;
+                  border-radius:18px;padding:44px 30px;text-align:center">
+        <div style="font-size:60px;margin-bottom:12px">🧾</div>
+        <h3 style="margin:0 0 6px;font-size:19px;font-weight:900;color:#92400e">Sin gastos en este período</h3>
+        <p style="font-size:13px;color:#78350f;max-width:440px;margin:0 auto 20px;line-height:1.55">
+          Registra los gastos de operación para llevar el control mensual por concepto
+          y comparar cómo se comporta cada rubro a lo largo del año.
+        </p>
+        ${canWrite()?`<button class="btn bs" onclick="openGasto()" style="font-size:14px;padding:11px 24px">＋ Registrar primer gasto</button>`:''}
+      </div>`;
+    return;
+  }
+
+  // Desglose por concepto con barra de proporción
+  const maxC = Math.max(...r.por_concepto.map(x => parseFloat(x.total)));
+  const desglose = `
+    <div class="card" style="margin-bottom:14px">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:10px">
+        Desglose por concepto (${r.por_concepto.length})
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
+        ${r.por_concepto.slice(0,12).map(x => {
+          const pct = maxC > 0 ? (parseFloat(x.total)/maxC*100) : 0;
+          const pctTot = parseFloat(r.totales.total) > 0 ? (parseFloat(x.total)/parseFloat(r.totales.total)*100) : 0;
+          return `<div style="cursor:pointer" onclick="$('gt-concepto').value='${x.id}';cargarGastos()"
+                       title="Ver solo este concepto">
+            <div style="display:flex;justify-content:space-between;gap:8px;font-size:11.5px">
+              <span style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.concepto}</span>
+              <span style="font-weight:900;white-space:nowrap;color:#b45309">${fmt(x.total)}</span>
+            </div>
+            <div class="gt-barra"><i style="width:${pct}%"></i></div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">${x.n} registro${x.n!=1?'s':''} · ${pctTot.toFixed(1)}% del total</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+
+  $('gt-body').innerHTML = desglose + `
+    <div class="tscroll"><table>
+      <thead><tr>
+        <th>Fecha</th><th>Concepto</th><th>Descripción</th><th>Proveedor</th>
+        <th>Forma de pago</th><th>Referencia</th><th style="text-align:right">Monto</th><th></th>
+      </tr></thead>
+      <tbody>${r.gastos.map(g => `<tr${g.deducible === false ? ' style="background:#fafafa"' : ''}>
+        <td style="white-space:nowrap">${fmtDate(g.fecha)}</td>
+        <td style="font-weight:700;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${g.concepto}">${g.concepto}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(g.descripcion||'').replace(/"/g,'&quot;')}">${g.descripcion||'—'}</td>
+        <td style="font-size:11.5px">${g.proveedor||'—'}</td>
+        <td style="font-size:11px;color:var(--muted);text-transform:capitalize">${g.forma_pago||'—'}</td>
+        <td style="font-family:monospace;font-size:11px;color:var(--muted)">${g.referencia||'—'}</td>
+        <td style="text-align:right;font-weight:900;color:#b45309;white-space:nowrap">${fmt(g.monto)}${
+          g.deducible === false ? ' <span title="No deducible" style="font-size:9px;background:#e2e8f0;color:#64748b;padding:1px 5px;border-radius:8px;font-weight:800">ND</span>' : ''}</td>
+        <td style="white-space:nowrap">
+          ${canWrite()?`<button class="btn bg bsm" style="padding:4px 8px" onclick="openGasto(${g.id})" title="Editar">✏️</button>`:''}
+          ${canWrite()?`<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarGasto(${g.id})" title="Eliminar">🗑</button>`:''}
+        </td>
+      </tr>`).join('')}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--dark);background:var(--bg-alt);font-weight:900">
+        <td colspan="6" style="padding:10px;text-align:right">TOTAL DEL PERÍODO:</td>
+        <td style="text-align:right;padding:10px;color:#b45309">${fmt(t.total)}</td>
+        <td></td>
+      </tr></tfoot>
+    </table></div>`;
+}
+
+async function eliminarGasto(id) {
+  if (!await confirm2('¿Eliminar este gasto? La acción no se puede deshacer.')) return;
+  try { await api(`/gastos/${id}`, { method:'DELETE' }); toast('Gasto eliminado.'); cargarGastos(); }
+  catch(e) { toast(e.message, 'err'); }
+}
+
+function exportarGastosExcel() {
+  const r = window._gtData;
+  if (!r || !r.gastos.length) return toast('No hay gastos para exportar.', 'warn');
+  if (typeof XLSX === 'undefined') return toast('Librería XLSX no disponible.', 'err');
+  const wb = XLSX.utils.book_new();
+  const aoa = [['GASTOS DE OPERACIÓN — GRUPO MANAGEMENT'],
+               [`Período: ${fmtDate($('gt-desde').value)} al ${fmtDate($('gt-hasta').value)}`],
+               [`Generado: ${new Date().toLocaleString('es-MX')}`], [],
+               ['Fecha','Concepto','Descripción','Proveedor','Forma de pago','Referencia','RFC factura','Deducible','Monto','Capturó']];
+  r.gastos.forEach(g => aoa.push([
+    g.fecha, g.concepto, g.descripcion||'', g.proveedor||'', g.forma_pago||'',
+    g.referencia||'', g.factura_rfc||'', g.deducible === false ? 'No':'Sí',
+    parseFloat(g.monto), g.capturado_por||''
+  ]));
+  aoa.push([]);
+  aoa.push(['','','','','','','','TOTAL:', parseFloat(r.totales.total)]);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:12},{wch:38},{wch:34},{wch:24},{wch:14},{wch:16},{wch:14},{wch:10},{wch:14},{wch:18}];
+  XLSX.utils.book_append_sheet(wb, ws, 'Gastos');
+  // Hoja de desglose por concepto
+  const aoaC = [['Concepto','Registros','Total']];
+  r.por_concepto.forEach(c => aoaC.push([c.concepto, c.n, parseFloat(c.total)]));
+  const wsC = XLSX.utils.aoa_to_sheet(aoaC);
+  wsC['!cols'] = [{wch:44},{wch:11},{wch:16}];
+  XLSX.utils.book_append_sheet(wb, wsC, 'Por concepto');
+  XLSX.writeFile(wb, `Gastos_operacion_${$('gt-desde').value}_a_${$('gt-hasta').value}.xlsx`);
+}
+
+// ── Modal de captura de gasto ──
+async function openGasto(id) {
+  const conceptos = window._gtConceptos && window._gtConceptos.length
+    ? window._gtConceptos : await api('/gastos/conceptos');
+  window._gtConceptos = conceptos;
+  let g = { concepto_id:'', fecha:new Date().toISOString().slice(0,10), monto:'',
+            descripcion:'', proveedor:'', forma_pago:'transferencia', referencia:'',
+            factura_rfc:'', deducible:true, notas:'' };
+  if (id) {
+    const enLista = (window._gtData?.gastos || []).find(x => x.id === id);
+    if (enLista) g = { ...g, ...enLista };
+  }
+  const sv = v => (v == null ? '' : String(v)).replace(/"/g,'&quot;');
+
+  $('modal-gasto-body').innerHTML = `
+    <div style="margin:-28px -28px 20px;padding:20px 26px;background:linear-gradient(135deg,#7c2d12,#d97706);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">${id?'Editar':'Nuevo'} gasto de operación</div>
+      <div style="font-size:20px;font-weight:900;margin-top:3px">🧾 Captura de gasto</div>
+    </div>
+    <div class="fg" style="gap:11px">
+      <div class="fi full"><label>Concepto <span style="color:var(--red)">*</span></label>
+        <select id="gf-concepto">
+          <option value="">— Seleccionar concepto —</option>
+          ${conceptos.map(c => `<option value="${c.id}" ${g.concepto_id==c.id?'selected':''}>${c.nombre}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fi"><label>Fecha <span style="color:var(--red)">*</span></label>
+        <input type="date" id="gf-fecha" value="${sv(g.fecha).slice(0,10)}">
+      </div>
+      <div class="fi"><label>Monto <span style="color:var(--red)">*</span></label>
+        <div style="position:relative">
+          <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#b45309;font-weight:900;font-size:17px;pointer-events:none">$</span>
+          <input type="number" step="0.01" id="gf-monto" value="${g.monto||''}" placeholder="0.00"
+                 style="padding-left:28px;font-size:18px;font-weight:900;text-align:right;color:#b45309">
+        </div>
+      </div>
+      <div class="fi full"><label>Descripción</label>
+        <input id="gf-descripcion" value="${sv(g.descripcion)}" maxlength="300"
+               placeholder="Ej: Pago de renta de julio · Gasolina unidad 3">
+      </div>
+      <div class="fi"><label>Proveedor / Beneficiario</label>
+        <input id="gf-proveedor" value="${sv(g.proveedor)}" placeholder="A quién se le pagó">
+      </div>
+      <div class="fi"><label>Forma de pago</label>
+        <select id="gf-forma">
+          ${FORMAS_PAGO_GTO.map(f => `<option value="${f}" ${g.forma_pago===f?'selected':''}>${f.charAt(0).toUpperCase()+f.slice(1)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fi"><label>Referencia <span style="color:var(--muted);font-weight:400;font-size:10px">(folio, cheque, SPEI)</span></label>
+        <input id="gf-referencia" value="${sv(g.referencia)}" style="font-family:monospace">
+      </div>
+      <div class="fi"><label>RFC de la factura <span style="color:var(--muted);font-weight:400;font-size:10px">(opcional)</span></label>
+        <input id="gf-rfc" value="${sv(g.factura_rfc)}" maxlength="13" style="text-transform:uppercase;font-family:monospace">
+      </div>
+      <div class="fi full">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--bg-alt);
+                      border:1.5px solid var(--border);border-radius:10px;padding:10px 13px">
+          <input type="checkbox" id="gf-deducible" ${g.deducible !== false ? 'checked':''}>
+          <span><strong>Gasto deducible</strong>
+            <span style="font-size:11px;color:var(--muted)"> — cuenta para el total deducible del período</span></span>
+        </label>
+      </div>
+      <div class="fi full"><label>Notas <span style="color:var(--muted);font-weight:400;font-size:10px">(opcional)</span></label>
+        <textarea id="gf-notas" rows="2" maxlength="400">${g.notas||''}</textarea>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gasto')">Cancelar</button>
+      <button class="btn bs" onclick="guardarGasto(${id||'null'})">💾 ${id?'Guardar cambios':'Registrar gasto'}</button>
+    </div>`;
+  openModal('modal-gasto');
+}
+
+async function guardarGasto(id) {
+  const body = {
+    concepto_id: $('gf-concepto').value,
+    fecha      : $('gf-fecha').value,
+    monto      : parseFloat($('gf-monto').value) || 0,
+    descripcion: $('gf-descripcion').value.trim(),
+    proveedor  : $('gf-proveedor').value.trim(),
+    forma_pago : $('gf-forma').value,
+    referencia : $('gf-referencia').value.trim(),
+    factura_rfc: $('gf-rfc').value.trim().toUpperCase(),
+    deducible  : $('gf-deducible').checked,
+    notas      : $('gf-notas').value.trim()
+  };
+  if (!body.concepto_id) return toast('Selecciona el concepto del gasto.', 'warn');
+  if (!body.fecha)       return toast('Captura la fecha.', 'warn');
+  if (!(body.monto > 0)) return toast('El monto debe ser mayor a 0.', 'warn');
+  try {
+    if (id) await api(`/gastos/${id}`, { method:'PUT',  body: JSON.stringify(body) });
+    else    await api('/gastos',       { method:'POST', body: JSON.stringify(body) });
+    toast(id ? 'Gasto actualizado.' : 'Gasto registrado.');
+    closeModal('modal-gasto');
+    cargarGastos();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+// ── Catálogo de conceptos ──
+async function cargarCatalogoGastos() {
+  $('gt-catalogo').innerHTML = '<p class="empty">Cargando…</p>';
+  try {
+    const cs = await api('/gastos/conceptos?todos=true');
+    window._gtConceptos = cs.filter(c => c.activo);
+    const activos = cs.filter(c => c.activo).length;
+    $('gt-catalogo').innerHTML = `
+      ${canWrite()?`
+      <div class="card" style="margin-bottom:14px;background:var(--bg-alt)">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:9px">➕ Agregar concepto</div>
+        <div style="display:grid;grid-template-columns:1fr 90px auto;gap:8px;align-items:end">
+          <div class="fi" style="margin:0"><label style="font-size:10px">Nombre del concepto</label>
+            <input id="gc-nombre" placeholder="Ej: MANTENIMIENTO DE AIRE ACONDICIONADO"
+                   onkeydown="if(event.key==='Enter')crearConceptoGasto()">
+          </div>
+          <div class="fi" style="margin:0"><label style="font-size:10px">Orden</label>
+            <input type="number" id="gc-orden" value="99" style="text-align:center">
+          </div>
+          <button class="btn bs bsm" onclick="crearConceptoGasto()" style="height:36px">+ Agregar</button>
+        </div>
+      </div>`:''}
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">
+        Conceptos registrados — ${activos} activo${activos!=1?'s':''}${cs.length-activos ? ` · ${cs.length-activos} inactivo${cs.length-activos!=1?'s':''}` : ''}
+      </div>
+      <div class="tscroll" style="max-height:60vh;overflow:auto"><table>
+        <thead><tr>
+          <th style="width:60px">Orden</th><th>Concepto</th>
+          <th style="text-align:center">Registros</th><th style="text-align:right">Total histórico</th>
+          <th style="text-align:center">Estado</th><th></th>
+        </tr></thead>
+        <tbody>${cs.map(c => `<tr${c.activo?'':' style="opacity:.5"'}>
+          <td style="text-align:center;color:var(--muted)">${c.orden}</td>
+          <td style="font-weight:700">${c.nombre}</td>
+          <td style="text-align:center">${c.n_gastos > 0
+            ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:800">${c.n_gastos}</span>`
+            : '<span style="color:var(--muted)">—</span>'}</td>
+          <td style="text-align:right;font-weight:800;color:${parseFloat(c.total_historico)>0?'#b45309':'var(--muted)'}">${fmt(c.total_historico)}</td>
+          <td style="text-align:center">${c.activo
+            ? '<span style="color:#166534;font-weight:700;font-size:11px">● Activo</span>'
+            : '<span style="color:var(--muted);font-size:11px">○ Inactivo</span>'}</td>
+          <td style="white-space:nowrap;text-align:right">
+            ${canWrite()?`<button class="btn bg bsm" style="padding:4px 8px" onclick="editarConceptoGasto(${c.id})" title="Editar">✏️</button>`:''}
+            ${canAdmin()?`<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarConceptoGasto(${c.id},'${(c.nombre||'').replace(/'/g,"\\'")}',${c.n_gastos})" title="${c.n_gastos>0?'Desactivar (tiene gastos)':'Eliminar'}">🗑</button>`:''}
+          </td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+  } catch(e) { $('gt-catalogo').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+async function crearConceptoGasto() {
+  const nombre = ($('gc-nombre')?.value || '').trim();
+  const orden  = parseInt($('gc-orden')?.value) || 99;
+  if (!nombre) return toast('Escribe el nombre del concepto.', 'warn');
+  try {
+    await api('/gastos/conceptos', { method:'POST', body: JSON.stringify({ nombre, orden }) });
+    toast(`Concepto "${nombre}" agregado.`);
+    cargarCatalogoGastos();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function editarConceptoGasto(id) {
+  const c = (window._gtConceptos || []).find(x => x.id === id)
+         || (await api('/gastos/conceptos?todos=true')).find(x => x.id === id);
+  if (!c) return;
+  const nombre = window.prompt('Nombre del concepto:', c.nombre);
+  if (nombre == null || !nombre.trim()) return;
+  try {
+    await api(`/gastos/conceptos/${id}`, {
+      method:'PUT', body: JSON.stringify({ nombre, orden: c.orden, activo: c.activo })
+    });
+    toast('Concepto actualizado.');
+    cargarCatalogoGastos();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarConceptoGasto(id, nombre, nGastos) {
+  const msg = nGastos > 0
+    ? `"${nombre}" tiene ${nGastos} gasto(s) registrado(s).\nNo se puede eliminar, pero se puede desactivar para que deje de aparecer al capturar. ¿Continuar?`
+    : `¿Eliminar el concepto "${nombre}"?`;
+  if (!await confirm2(msg)) return;
+  try {
+    const r = await api(`/gastos/conceptos/${id}`, { method:'DELETE' });
+    toast(r.desactivado ? 'Concepto desactivado.' : 'Concepto eliminado.');
+    cargarCatalogoGastos();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+// ── Resumen anual: matriz concepto × mes ──
+async function cargarResumenGastos() {
+  const anio = $('gt-anio')?.value || new Date().getFullYear();
+  $('gt-resumen').innerHTML = '<p class="empty">Cargando…</p>';
+  try {
+    const d = await api(`/gastos/resumen-mensual?anio=${anio}`);
+    window._gtResumen = d;
+    renderResumenGastos(d);
+  } catch(e) { $('gt-resumen').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function renderResumenGastos(d) {
+  const M = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  if (!d.filas.length) {
+    $('gt-resumen').innerHTML = `<p class="empty">Sin gastos registrados en ${d.anio}.</p>`;
+    return;
+  }
+  const maxFila = Math.max(...d.filas.map(f => f.total));
+  $('gt-resumen').innerHTML = `
+    <div class="card" style="background:linear-gradient(135deg,#7c2d12,#d97706);color:#fff;margin-bottom:14px;
+                             display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:1.4px;opacity:.85">Total del año ${d.anio}</div>
+        <div style="font-size:28px;font-weight:900;line-height:1.1">${fmt(d.total_anio)}</div>
+      </div>
+      <div style="text-align:right;font-size:12px;opacity:.9">
+        <div>${d.filas.length} concepto${d.filas.length!=1?'s':''} con movimiento</div>
+        <div>Promedio mensual ${fmt(d.total_anio/12)}</div>
+      </div>
+    </div>
+    <div class="tscroll" style="max-height:65vh;overflow:auto"><table style="font-size:11.5px">
+      <thead><tr>
+        <th style="text-align:left;position:sticky;left:0;background:#f8fafc;z-index:2;min-width:200px">Concepto</th>
+        ${M.map(m => `<th style="text-align:right;min-width:74px">${m}</th>`).join('')}
+        <th style="text-align:right;background:#fef3c7;min-width:90px">Total</th>
+      </tr></thead>
+      <tbody>${d.filas.map(f => `<tr>
+        <td style="position:sticky;left:0;background:#fff;z-index:1;border-right:1.5px solid var(--border);font-weight:700">
+          ${f.concepto}
+          <div class="gt-barra" style="height:4px"><i style="width:${maxFila>0?(f.total/maxFila*100):0}%"></i></div>
+        </td>
+        ${f.meses.map(v => `<td style="text-align:right;${v>0?'':'color:#cbd5e1'}">${v>0?fmt(v):'—'}</td>`).join('')}
+        <td style="text-align:right;font-weight:900;color:#b45309;background:#fffbeb">${fmt(f.total)}</td>
+      </tr>`).join('')}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--dark);background:var(--bg-alt);font-weight:900">
+        <td style="position:sticky;left:0;background:var(--bg-alt);padding:9px">TOTAL</td>
+        ${d.total_meses.map(v => `<td style="text-align:right;padding:9px">${v>0?fmt(v):'—'}</td>`).join('')}
+        <td style="text-align:right;padding:9px;color:#b45309;background:#fef3c7">${fmt(d.total_anio)}</td>
+      </tr></tfoot>
+    </table></div>`;
+}
+
+function exportarResumenGastosExcel() {
+  const d = window._gtResumen;
+  if (!d || !d.filas.length) return toast('No hay datos para exportar.', 'warn');
+  if (typeof XLSX === 'undefined') return toast('Librería XLSX no disponible.', 'err');
+  const M = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const aoa = [[`GASTOS DE OPERACIÓN ${d.anio} — GRUPO MANAGEMENT`],
+               [`Generado: ${new Date().toLocaleString('es-MX')}`], [],
+               ['Concepto', ...M, 'Total']];
+  d.filas.forEach(f => aoa.push([f.concepto, ...f.meses, f.total]));
+  aoa.push(['TOTAL', ...d.total_meses, d.total_anio]);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:44}, ...M.map(()=>({wch:13})), {wch:15}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, `Gastos ${d.anio}`);
+  XLSX.writeFile(wb, `Gastos_operacion_${d.anio}.xlsx`);
 }
 
 // ══ BANCOS — Gestión completa (cuentas · cheques · reporte · conciliación) ══
@@ -4408,10 +4933,10 @@ async function detalleFactura(id) {
 
 function showTab(el, panelId) {
   // Soporta tanto la barra clásica (.tabs > .tab) como la moderna (.bn-tabs > .bn-tab)
-  const tabsRow = el.closest('.tabs, .bn-tabs');
+  const tabsRow = el.closest('.tabs, .bn-tabs, .gt-tabs');
   const container = tabsRow ? tabsRow.parentElement : el.parentElement.parentElement;
   // Desactivar solo los hermanos de la misma barra (evita tocar tabs anidados)
-  if (tabsRow) tabsRow.querySelectorAll(':scope > .tab, :scope > .bn-tab').forEach(t => t.classList.remove('active'));
+  if (tabsRow) tabsRow.querySelectorAll(':scope > .tab, :scope > .bn-tab, :scope > .gt-tab').forEach(t => t.classList.remove('active'));
   else container.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
   container.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   el.classList.add('active');
