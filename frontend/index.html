@@ -4046,8 +4046,11 @@ async function validarSAT(boton) {
       // Si el SAT no lo encontró, mostrar con qué datos se consultó
       if (data.diagnostico) {
         const d = data.diagnostico.enviado;
-        tip += `\n\nSe consultó con:\n  RFC emisor:   ${d.re}\n  RFC receptor: ${d.rr}`
-             + `\n  Total:        ${d.tt}\n  UUID:         ${d.id}\n\n${data.diagnostico.nota}`;
+        tip += `\n\nDatos de la factura:\n  RFC Emisora: ${d.rfc_emisora}\n  RFC Cliente: ${d.rfc_cliente}`
+             + `\n  Total:       ${d.total}\n  UUID:        ${d.uuid} (${d.uuid_largo} caracteres)`
+             + `\n\n${data.diagnostico.nota}`;
+        // Deja el detalle completo en consola para poder copiarlo
+        console.warn('[SAT] No encontrado — intentos realizados:', data.diagnostico.probados);
       }
       celda.title = tip;
     }

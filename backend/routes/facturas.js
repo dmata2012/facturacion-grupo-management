@@ -378,9 +378,8 @@ function _tagSAT(xml, tag) {
 }
 
 async function consultarSAT({ re, rr, tt, id }) {
-  // El SAT exige el total con punto decimal y sin separador de miles
-  const total = parseFloat(tt).toFixed(2);
-  const expresion = `?re=${re}&rr=${rr}&tt=${total}&id=${id}`;
+  // tt ya viene formateado por el llamador (el SAT es estricto con este campo)
+  const expresion = `?re=${re}&rr=${rr}&tt=${tt}&id=${id}`;
   const envelope =
     `<?xml version="1.0" encoding="UTF-8"?>` +
     `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">` +
@@ -438,22 +437,41 @@ router.post('/:id/validar-sat', async (req, res) => {
     // empresas del grupo y "Cliente" a terceros, pero el parser de XML asigna el RFC
     // del emisor al cliente. Para no depender de esa suposición se prueba una
     // combinación y, si el SAT no encuentra el comprobante, se intenta la inversa.
-    const rfcCliente = f.rfc_emisor.trim();    // columna Cliente
-    const rfcEmisora = f.rfc_receptor.trim();  // columna Emisora
+    const rfcCliente = f.rfc_emisor.trim().toUpperCase();    // columna Cliente
+    const rfcEmisora = f.rfc_receptor.trim().toUpperCase();  // columna Emisora
+    const uuid = f.uuid_cfdi.trim().toUpperCase();
 
-    let sat = await consultarSAT({ re: rfcEmisora, rr: rfcCliente, tt: f.total, id: f.uuid_cfdi.trim() });
-    let orden = 'emisora→cliente';
+    // El SAT es estricto con el formato del total; se prueban las variantes válidas
+    const n = parseFloat(f.total);
+    const formatosTT = [...new Set([
+      n.toFixed(2),          // 585664.81  — lo más común
+      String(n),             // 585664.81 sin ceros de relleno
+      n.toFixed(6),          // 585664.810000 — algunos CFDI lo timbran así
+      n.toFixed(0)           // 585665 — por si el CFDI no llevó decimales
+    ])];
 
-    if (/no encontrado/i.test(sat.estado || '')) {
-      const alterno = await consultarSAT({ re: rfcCliente, rr: rfcEmisora, tt: f.total, id: f.uuid_cfdi.trim() });
-      if (!/no encontrado/i.test(alterno.estado || '')) {
-        sat = alterno;
-        orden = 'cliente→emisora';
+    // Se combinan ambos órdenes de RFC con cada formato de total
+    const intentos = [];
+    for (const tt of formatosTT) {
+      intentos.push({ etiqueta: `emisora→cliente tt=${tt}`, re: rfcEmisora, rr: rfcCliente, tt });
+      intentos.push({ etiqueta: `cliente→emisora tt=${tt}`, re: rfcCliente, rr: rfcEmisora, tt });
+    }
+
+    let sat = null, usado = null;
+    const probados = [];
+    for (const it of intentos) {
+      const r = await consultarSAT({ re: it.re, rr: it.rr, tt: it.tt, id: uuid });
+      probados.push(`${it.etiqueta} → ${r.estado || 's/estado'}`);
+      if (!sat) { sat = r; usado = it; }               // conserva el primero como respuesta base
+      if (r.estado && !/no encontrado/i.test(r.estado)) {  // encontrado: se detiene
+        sat = r; usado = it;
+        break;
       }
     }
-    console.log(`[SAT] factura ${req.params.id}: ${sat.estado || 's/estado'} (${orden})`);
+    console.log(`[SAT] factura ${req.params.id}: ${sat.estado || 's/estado'} (${usado.etiqueta}) · intentos: ${probados.length}`);
 
     const estatus = sat.estado || 'Sin respuesta';
+    const orden = usado.etiqueta;
     const detalle = [sat.codigo_estatus, sat.estatus_cancelacion, sat.validacion_efos]
       .filter(Boolean).join(' · ');
 
@@ -466,12 +484,16 @@ router.post('/:id/validar-sat', async (req, res) => {
     // para poder cotejarlos contra el CFDI y detectar qué campo no coincide.
     const diagnostico = /no encontrado/i.test(estatus) ? {
       enviado: {
-        re : orden === 'emisora→cliente' ? rfcEmisora : rfcCliente,
-        rr : orden === 'emisora→cliente' ? rfcCliente : rfcEmisora,
-        tt : parseFloat(f.total).toFixed(2),
-        id : f.uuid_cfdi.trim()
+        rfc_emisora: rfcEmisora,
+        rfc_cliente: rfcCliente,
+        total      : parseFloat(f.total).toFixed(2),
+        uuid       : uuid,
+        uuid_largo : uuid.length   // debe ser 36 con guiones
       },
-      nota: 'Se probaron ambos órdenes de RFC. Verifica que UUID y total coincidan exactamente con el CFDI.'
+      probados,
+      nota: uuid.length !== 36
+        ? `El UUID tiene ${uuid.length} caracteres y debería tener 36 (formato 8-4-4-4-12). Revísalo en la factura.`
+        : 'Se probaron ambos órdenes de RFC y 4 formatos de total sin éxito. Compara los RFC y el total contra el CFDI: basta un centavo de diferencia para que el SAT no lo encuentre.'
     } : null;
 
     res.json({ estatus_sat: estatus, detalle, orden, diagnostico, ...sat });
