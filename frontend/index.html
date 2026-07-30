@@ -4400,9 +4400,9 @@ async function loadFacturas() {
           ${canFacturar() && !f.desglose_validado ? `<button class="btn bo bsm" onclick="editFactura(${f.id})" title="Editar factura">✏️</button>` : ''}
           ${(f.cliente_aplica_desglose !== false) ? `<button class="btn bg bsm" onclick="openRH(${f.id})" title="Ver/editar desglose">Desg</button>` : ''}
           <button class="btn bsuc bsm" onclick="openPago(${f.id})" title="Registrar pago">💲</button>
-          ${canFacturar()&&f.estatus!=='cancelada'&&!f.desglose_validado?`<button class="btn bd bsm" onclick="cancelarFactura(${f.id})" title="Cancelar factura">✕</button>`:''}
+          ${canFacturar()&&f.estatus!=='cancelada'?`<button class="btn bd bsm" onclick="cancelarFactura(${f.id},${!!f.desglose_validado})" title="${f.desglose_validado?'Cancelar factura (está cuadrada — pedirá confirmación)':'Cancelar factura'}">✕</button>`:''}
           ${canAdmin()&&!f.desglose_validado?`<button class="btn bd bsm" onclick="eliminarFactura(${f.id})" title="Eliminar factura" style="background:#fff0f0;border-color:#ffd7d7">🗑️</button>`:''}
-          ${f.desglose_validado?`<span title="Factura bloqueada — desglose cuadrado" style="color:var(--muted);font-size:11px;font-style:italic">🔒 bloqueada</span>`:''}
+          ${f.desglose_validado?`<span title="Desglose cuadrado: no se puede editar ni eliminar. Cancelar sí está permitido, con confirmación." style="color:var(--muted);font-size:11px;font-style:italic">🔒 sin edición</span>`:''}
         </td>
       </tr>`).join('')}</tbody>
     </table></div>
@@ -4858,8 +4858,17 @@ async function saveFactura(id) {
   } catch(e) { toast(e.message, 'err'); }
 }
 
-async function cancelarFactura(id) {
-  if (!await confirm2('¿Cancelar esta factura?')) return;
+async function cancelarFactura(id, cuadrada = false) {
+  // Las facturas con desglose cuadrado ya están conciliadas: se pide una
+  // confirmación reforzada para evitar cancelarlas por accidente.
+  const msg = cuadrada
+    ? '⚠ ATENCIÓN: esta factura tiene el desglose CUADRADO (ya conciliada).\n\n'
+      + 'Cancelarla afecta los reportes de desglose y cobranza donde ya está considerada.\n\n'
+      + '¿Confirmas que deseas cancelarla?'
+    : '¿Cancelar esta factura?';
+  if (!await confirm2(msg)) return;
+  // Segunda confirmación solo para las cuadradas
+  if (cuadrada && !await confirm2('Confirma una vez más: la factura se marcará como CANCELADA.')) return;
   try {
     await api(`/facturas/${id}/cancelar`, { method:'PATCH' });
     toast('Factura cancelada.');
