@@ -4041,8 +4041,15 @@ async function validarSAT(boton) {
       celda.title = 'El SAT no devolvió un estado.';
     } else {
       _pintaEstatusSAT(celda, estatus, _tipoEstatusSAT(estatus));
-      celda.title = `Consultado el ${new Date().toLocaleString('es-MX')}`
-                  + (data.detalle ? `\n${data.detalle}` : '');
+      let tip = `Consultado el ${new Date().toLocaleString('es-MX')}`;
+      if (data.detalle) tip += `\n${data.detalle}`;
+      // Si el SAT no lo encontró, mostrar con qué datos se consultó
+      if (data.diagnostico) {
+        const d = data.diagnostico.enviado;
+        tip += `\n\nSe consultó con:\n  RFC emisor:   ${d.re}\n  RFC receptor: ${d.rr}`
+             + `\n  Total:        ${d.tt}\n  UUID:         ${d.id}\n\n${data.diagnostico.nota}`;
+      }
+      celda.title = tip;
     }
   } catch (err) {
     const msg = err.message || 'No se pudo consultar el SAT.';

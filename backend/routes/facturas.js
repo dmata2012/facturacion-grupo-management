@@ -434,9 +434,24 @@ router.post('/:id/validar-sat', async (req, res) => {
     if (faltan.length)
       return res.status(400).json({ error: `Falta capturar: ${faltan.join(', ')}.` });
 
-    const sat = await consultarSAT({
-      re: f.rfc_emisor.trim(), rr: f.rfc_receptor.trim(), tt: f.total, id: f.uuid_cfdi.trim()
-    });
+    // La nomenclatura del sistema es ambigua: la columna "Emisora" corresponde a las
+    // empresas del grupo y "Cliente" a terceros, pero el parser de XML asigna el RFC
+    // del emisor al cliente. Para no depender de esa suposición se prueba una
+    // combinación y, si el SAT no encuentra el comprobante, se intenta la inversa.
+    const rfcCliente = f.rfc_emisor.trim();    // columna Cliente
+    const rfcEmisora = f.rfc_receptor.trim();  // columna Emisora
+
+    let sat = await consultarSAT({ re: rfcEmisora, rr: rfcCliente, tt: f.total, id: f.uuid_cfdi.trim() });
+    let orden = 'emisora→cliente';
+
+    if (/no encontrado/i.test(sat.estado || '')) {
+      const alterno = await consultarSAT({ re: rfcCliente, rr: rfcEmisora, tt: f.total, id: f.uuid_cfdi.trim() });
+      if (!/no encontrado/i.test(alterno.estado || '')) {
+        sat = alterno;
+        orden = 'cliente→emisora';
+      }
+    }
+    console.log(`[SAT] factura ${req.params.id}: ${sat.estado || 's/estado'} (${orden})`);
 
     const estatus = sat.estado || 'Sin respuesta';
     const detalle = [sat.codigo_estatus, sat.estatus_cancelacion, sat.validacion_efos]
@@ -447,7 +462,19 @@ router.post('/:id/validar-sat', async (req, res) => {
       [estatus, detalle || null, req.params.id]
     );
 
-    res.json({ estatus_sat: estatus, detalle, ...sat });
+    // Cuando el SAT no encuentra el comprobante se devuelven los datos usados,
+    // para poder cotejarlos contra el CFDI y detectar qué campo no coincide.
+    const diagnostico = /no encontrado/i.test(estatus) ? {
+      enviado: {
+        re : orden === 'emisora→cliente' ? rfcEmisora : rfcCliente,
+        rr : orden === 'emisora→cliente' ? rfcCliente : rfcEmisora,
+        tt : parseFloat(f.total).toFixed(2),
+        id : f.uuid_cfdi.trim()
+      },
+      nota: 'Se probaron ambos órdenes de RFC. Verifica que UUID y total coincidan exactamente con el CFDI.'
+    } : null;
+
+    res.json({ estatus_sat: estatus, detalle, orden, diagnostico, ...sat });
   } catch (e) {
     const msg = e.name === 'AbortError'
       ? 'El SAT no respondió a tiempo. Intenta de nuevo en un momento.'
