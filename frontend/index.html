@@ -3861,16 +3861,14 @@ async function loadFacturas() {
           : (f.desglose_validado
               ? '<span title="Desglose cuadrado — factura bloqueada" style="display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:20px;padding:3px 10px;color:#166534;font-size:12px;font-weight:800">✔ CUADRADA</span>'
               : badgeEstatus(f.estatus))}</td>
-        <td id="sat-cell-${f.id}" style="white-space:nowrap;font-size:11.5px;color:var(--muted)">—</td>
+        <td id="sat-cell-${f.id}" style="white-space:nowrap;font-size:11.5px;color:var(--muted)"
+            title="${f.sat_validado_en ? 'Consultado el ' + new Date(f.sat_validado_en).toLocaleString('es-MX') : ''}">${
+          f.estatus_sat ? _chipEstatusSAT(f.estatus_sat) : '—'
+        }</td>
         <td style="white-space:nowrap">
           ${f.uuid_cfdi
             ? `<button class="btn bo bsm" id="sat-btn-${f.id}" title="Consultar estatus en el SAT"
-                 data-fid="${f.id}"
-                 data-re="${(f.rfc||'').trim()}"
-                 data-rr="${(f.emisora_rfc||'').trim()}"
-                 data-tt="${f.total||''}"
-                 data-uuid="${(f.uuid_cfdi||'').trim()}"
-                 onclick="validarSAT(this)">🔍 Validar</button>`
+                 data-fid="${f.id}" onclick="validarSAT(this)">🔍 Validar</button>`
             : `<span title="La factura no tiene UUID capturado" style="color:var(--muted);font-size:10.5px;font-style:italic">sin UUID</span>`}
           ${canFacturar() && !f.desglose_validado ? `<button class="btn bo bsm" onclick="editFactura(${f.id})" title="Editar factura">✏️</button>` : ''}
           ${(f.cliente_aplica_desglose !== false) ? `<button class="btn bg bsm" onclick="openRH(${f.id})" title="Ver/editar desglose">Desg</button>` : ''}
@@ -3984,12 +3982,21 @@ function resumenPeriodoFac(t) {
 }
 
 // ── VALIDACIÓN DE ESTATUS ANTE EL SAT ─────────────────────────
-// Endpoint de la Cloud Function que consulta el servicio del SAT.
-// Cambia esta URL por la de tu función desplegada.
-const SAT_VALIDA_URL = 'https://us-central1-TU-PROYECTO.cloudfunctions.net/validarCFDI';
+// La consulta al SAT la hace el backend (POST /facturas/:id/validar-sat).
+// Se resuelve del lado del servidor porque el SAT no permite llamadas desde el
+// navegador por CORS, y así el token de sesión viaja con la petición.
 
-// Pinta el resultado en la celda con el color que corresponde
-function _pintaEstatusSAT(celda, texto, tipo) {
+// Devuelve el tipo de chip según el texto del estatus
+function _tipoEstatusSAT(estatus) {
+  const e = (estatus || '').toLowerCase();
+  if (e.includes('vigente'))    return 'ok';
+  if (e.includes('cancelad'))   return 'canc';
+  if (e.includes('no encontr')) return 'warn';
+  return 'warn';
+}
+
+// Genera el chip de estatus SAT; si no se indica tipo, se deduce del texto
+function _chipEstatusSAT(texto, tipo) {
   const estilos = {
     ok:    { bg:'#dcfce7', fg:'#166534', br:'#86efac', ic:'✔' },
     canc:  { bg:'#fee2e2', fg:'#991b1b', br:'#fca5a5', ic:'✖' },
@@ -3997,10 +4004,15 @@ function _pintaEstatusSAT(celda, texto, tipo) {
     err:   { bg:'#f3f4f6', fg:'#6b7280', br:'#d1d5db', ic:'⚠' },
     load:  { bg:'#eff6ff', fg:'#1e40af', br:'#bfdbfe', ic:'⏳' }
   };
-  const s = estilos[tipo] || estilos.err;
-  celda.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;background:${s.bg};
+  const s = estilos[tipo || _tipoEstatusSAT(texto)] || estilos.err;
+  return `<span style="display:inline-flex;align-items:center;gap:4px;background:${s.bg};
     border:1px solid ${s.br};border-radius:20px;padding:2px 9px;color:${s.fg};
     font-size:10.5px;font-weight:800;white-space:nowrap">${s.ic} ${texto}</span>`;
+}
+
+// Pinta el resultado en la celda
+function _pintaEstatusSAT(celda, texto, tipo) {
+  celda.innerHTML = _chipEstatusSAT(texto, tipo);
 }
 
 // Consulta el estatus de UNA factura. Los datos se leen del propio botón,
@@ -4009,68 +4021,41 @@ function _pintaEstatusSAT(celda, texto, tipo) {
 // del CFDI y la columna "Emisora" al RECEPTOR, tal como los asigna el parser de XML.
 async function validarSAT(boton) {
   if (!boton || !boton.dataset) return;
-  const { fid: facturaId, re: rfcEmisor, rr: rfcReceptor, tt: total, uuid } = boton.dataset;
+  const facturaId = boton.dataset.fid;
   const celda = document.getElementById(`sat-cell-${facturaId}`);
   if (!celda) return;
 
-  // Validaciones previas: sin estos datos el SAT no puede responder
-  const faltan = [];
-  if (!uuid)        faltan.push('UUID');
-  if (!rfcEmisor)   faltan.push('RFC del cliente (emisor)');
-  if (!rfcReceptor) faltan.push('RFC de la emisora (receptor)');
-  if (!total)       faltan.push('total');
-  if (faltan.length) {
-    _pintaEstatusSAT(celda, 'Datos incompletos', 'warn');
-    celda.title = `Falta capturar: ${faltan.join(', ')}`;
-    return;
-  }
-
   // Estado de carga y bloqueo del botón para evitar dobles clics
-  const textoPrevio = boton ? boton.innerHTML : '';
-  if (boton) { boton.disabled = true; boton.style.opacity = '.55'; boton.style.cursor = 'wait'; boton.innerHTML = '⏳'; }
+  const textoPrevio = boton.innerHTML;
+  boton.disabled = true; boton.style.opacity = '.55'; boton.style.cursor = 'wait'; boton.innerHTML = '⏳';
   _pintaEstatusSAT(celda, 'Consultando…', 'load');
   celda.title = '';
 
   try {
-    const resp = await fetch(SAT_VALIDA_URL, {
-      method : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body   : JSON.stringify({
-        re: rfcEmisor,                    // RFC del emisor
-        rr: rfcReceptor,                  // RFC del receptor
-        tt: parseFloat(total).toFixed(2), // Total con 2 decimales, como lo pide el SAT
-        id: uuid                          // UUID del comprobante
-      })
-    });
-
-    if (!resp.ok) throw new Error(`El servicio respondió ${resp.status}`);
-
-    const data = await resp.json();
+    // El backend toma los datos de la factura desde la base y consulta al SAT
+    const data = await api(`/facturas/${facturaId}/validar-sat`, { method: 'POST' });
     const estatus = (data.estatus_sat || '').trim();
 
     if (!estatus) {
       _pintaEstatusSAT(celda, 'Sin respuesta', 'warn');
-      celda.title = 'La función no devolvió el campo estatus_sat.';
+      celda.title = 'El SAT no devolvió un estado.';
     } else {
-      const e = estatus.toLowerCase();
-      const tipo = e.includes('vigente')   ? 'ok'
-                 : e.includes('cancelad')  ? 'canc'
-                 : e.includes('no encontr')? 'warn'
-                 : 'warn';
-      _pintaEstatusSAT(celda, estatus, tipo);
-      celda.title = `Consultado el ${new Date().toLocaleString('es-MX')}`;
+      _pintaEstatusSAT(celda, estatus, _tipoEstatusSAT(estatus));
+      celda.title = `Consultado el ${new Date().toLocaleString('es-MX')}`
+                  + (data.detalle ? `\n${data.detalle}` : '');
     }
   } catch (err) {
-    _pintaEstatusSAT(celda, 'Error de conexión', 'err');
-    celda.title = err.message || 'No se pudo contactar el servicio de validación.';
+    const msg = err.message || 'No se pudo consultar el SAT.';
+    // Si faltan datos de la factura, el backend responde con el detalle
+    const esDatos = /falta capturar/i.test(msg);
+    _pintaEstatusSAT(celda, esDatos ? 'Datos incompletos' : 'Error de conexión', esDatos ? 'warn' : 'err');
+    celda.title = msg;
   } finally {
     // El botón se rehabilita pase lo que pase, para poder reintentar
-    if (boton) {
-      boton.disabled = false;
-      boton.style.opacity = '';
-      boton.style.cursor = '';
-      boton.innerHTML = textoPrevio || '🔍 Validar';
-    }
+    boton.disabled = false;
+    boton.style.opacity = '';
+    boton.style.cursor = '';
+    boton.innerHTML = textoPrevio || '🔍 Validar';
   }
 }
 

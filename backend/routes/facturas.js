@@ -357,5 +357,104 @@ async function recalcularEstatus(facturaId) {
   await query(`UPDATE fac_facturas SET estatus=$1,actualizado_en=NOW() WHERE id=$2`, [nuevo, facturaId]);
 }
 
+// ── VALIDACIÓN DE ESTATUS ANTE EL SAT ─────────────────────────
+// Consulta el servicio público del SAT (SOAP) que verifica si un CFDI está
+// vigente o cancelado. Se hace desde el servidor y no desde el navegador para
+// evitar CORS: el SAT no expone cabeceras que permitan llamarlo desde el front.
+(async () => {
+  try {
+    await query(`ALTER TABLE fac_facturas ADD COLUMN IF NOT EXISTS estatus_sat TEXT`);
+    await query(`ALTER TABLE fac_facturas ADD COLUMN IF NOT EXISTS sat_validado_en TIMESTAMP`);
+    await query(`ALTER TABLE fac_facturas ADD COLUMN IF NOT EXISTS sat_detalle TEXT`);
+  } catch (e) { console.warn('Migración estatus_sat:', e.message); }
+})();
+
+const SAT_WSDL = 'https://consultaqr.facturaelectronica.sat.gob.mx/ConsultaCFDIService.svc';
+
+// Extrae el valor de una etiqueta del XML de respuesta, sin dependencias externas
+function _tagSAT(xml, tag) {
+  const m = xml.match(new RegExp(`<a:${tag}[^>]*>([\\s\\S]*?)</a:${tag}>`, 'i'));
+  return m ? m[1].trim() : '';
+}
+
+async function consultarSAT({ re, rr, tt, id }) {
+  // El SAT exige el total con punto decimal y sin separador de miles
+  const total = parseFloat(tt).toFixed(2);
+  const expresion = `?re=${re}&rr=${rr}&tt=${total}&id=${id}`;
+  const envelope =
+    `<?xml version="1.0" encoding="UTF-8"?>` +
+    `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">` +
+    `<s:Header/><s:Body><tem:Consulta><tem:expresionImpresa><![CDATA[${expresion}]]></tem:expresionImpresa>` +
+    `</tem:Consulta></s:Body></s:Envelope>`;
+
+  // El servicio del SAT llega a tardar; se corta a los 20 s para no colgar la petición
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const resp = await fetch(SAT_WSDL, {
+      method : 'POST',
+      headers: {
+        'Content-Type': 'text/xml; charset=utf-8',
+        'SOAPAction'  : 'http://tempuri.org/IConsultaCFDIService/Consulta'
+      },
+      body  : envelope,
+      signal: ctrl.signal
+    });
+    const xml = await resp.text();
+    if (!resp.ok) throw new Error(`El SAT respondió ${resp.status}`);
+    return {
+      estado             : _tagSAT(xml, 'Estado'),              // Vigente | Cancelado | No Encontrado
+      codigo_estatus     : _tagSAT(xml, 'CodigoEstatus'),
+      es_cancelable      : _tagSAT(xml, 'EsCancelable'),
+      estatus_cancelacion: _tagSAT(xml, 'EstatusCancelacion'),
+      validacion_efos    : _tagSAT(xml, 'ValidacionEFOS')
+    };
+  } finally { clearTimeout(timer); }
+}
+
+// POST /api/facturas/:id/validar-sat
+router.post('/:id/validar-sat', async (req, res) => {
+  try {
+    // Los datos se toman de la base, no del cliente, para que no se puedan alterar
+    const r = await query(`
+      SELECT f.uuid_cfdi, f.total, c.rfc AS rfc_emisor, er.rfc AS rfc_receptor
+      FROM fac_facturas f
+      LEFT JOIN fac_clientes c             ON c.id  = f.cliente_id
+      LEFT JOIN fac_empresas_receptoras er ON er.id = f.empresa_receptora_id
+      WHERE f.id = $1
+    `, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Factura no encontrada.' });
+
+    const f = r.rows[0];
+    const faltan = [];
+    if (!f.uuid_cfdi)    faltan.push('UUID');
+    if (!f.rfc_emisor)   faltan.push('RFC del cliente (emisor)');
+    if (!f.rfc_receptor) faltan.push('RFC de la emisora (receptor)');
+    if (!f.total)        faltan.push('total');
+    if (faltan.length)
+      return res.status(400).json({ error: `Falta capturar: ${faltan.join(', ')}.` });
+
+    const sat = await consultarSAT({
+      re: f.rfc_emisor.trim(), rr: f.rfc_receptor.trim(), tt: f.total, id: f.uuid_cfdi.trim()
+    });
+
+    const estatus = sat.estado || 'Sin respuesta';
+    const detalle = [sat.codigo_estatus, sat.estatus_cancelacion, sat.validacion_efos]
+      .filter(Boolean).join(' · ');
+
+    await query(
+      `UPDATE fac_facturas SET estatus_sat=$1, sat_detalle=$2, sat_validado_en=NOW() WHERE id=$3`,
+      [estatus, detalle || null, req.params.id]
+    );
+
+    res.json({ estatus_sat: estatus, detalle, ...sat });
+  } catch (e) {
+    const msg = e.name === 'AbortError'
+      ? 'El SAT no respondió a tiempo. Intenta de nuevo en un momento.'
+      : e.message;
+    res.status(502).json({ error: msg });
+  }
+});
+
 module.exports = router;
 module.exports.recalcularEstatus = recalcularEstatus;
