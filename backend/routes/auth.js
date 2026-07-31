@@ -38,10 +38,15 @@ router.post('/login', async (req, res) => {
     if (!ok) return res.status(401).json({ error: 'Credenciales inválidas.' });
 
     const rol = normalizarRol(user.rol);
+    // El rol 'checador' corre en una tablet dedicada como kiosco: si la sesión
+    // caduca, el reloj deja de funcionar hasta que alguien vaya a reingresar.
+    // Sus permisos se limitan a marcar entrada/salida, así que un token largo
+    // no amplía el riesgo de forma relevante.
+    const duracion = rol === 'checador' ? '365d' : '12h';
     const token = jwt.sign(
       { id: user.id, nombre: user.nombre, email: user.email, rol },
       SECRET(),
-      { expiresIn: '12h' }
+      { expiresIn: duracion }
     );
 
     res.json({ token, usuario: { id: user.id, nombre: user.nombre, email: user.email, rol } });

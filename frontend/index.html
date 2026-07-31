@@ -698,7 +698,14 @@ function api(url, opts = {}) {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}`, ...opts.headers },
     ...opts
   }).then(async r => {
-    if (r.status === 401) { logout(); throw new Error('Sesión expirada.'); }
+    if (r.status === 401) {
+      // El kiosco del checador no debe cerrar sesión: si lo hiciera, la tablet
+      // quedaría en el login y el reloj dejaría de operar hasta que alguien la
+      // atienda. Se deja que el llamador maneje el error y la sesión se conserva.
+      if (ME && ME.rol === 'checador') throw new Error('Sin conexión con el servidor. Reintentando…');
+      logout();
+      throw new Error('Sesión expirada.');
+    }
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || 'Error en la solicitud.');
     return data;
@@ -7999,6 +8006,20 @@ async function onFotoCHFile(input) {
 }
 
 // ══════════════ CHECADOR TABLET (modo oscuro, dedicado) ══════════════
+// Salida de mantenimiento del kiosco: en modo tablet el menú lateral está oculto,
+// así que este es el único camino para cerrar sesión si hiciera falta reingresar.
+// Va detrás de un doble clic en el logo para que no se active por accidente.
+async function _kioscoMantenimiento() {
+  const ok = await confirm2(
+    'Opciones de mantenimiento del reloj checador\n\n'
+    + '¿Cerrar la sesión de esta tablet?\n\n'
+    + 'Solo hazlo si vas a reconfigurar el dispositivo: mientras la sesión esté '
+    + 'cerrada, el personal NO podrá registrar entradas ni salidas.'
+  );
+  if (!ok) return;
+  logout();
+}
+
 async function renderChecadorTablet() {
   document.body.classList.add('tablet-mode');
   $('content').innerHTML = `
@@ -8144,7 +8165,8 @@ async function renderChecadorTablet() {
     <div class="tab-page">
       <!-- TOP BAR: logo pequeño + clima + status pill -->
       <div class="tab-topbar">
-        <div class="tab-logo">
+        <div class="tab-logo" ondblclick="_kioscoMantenimiento()"
+             title="Doble clic: opciones de mantenimiento">
           <img src="logo.png" alt="GM" onerror="this.style.display='none';this.nextElementSibling.style.marginLeft='0'">
           <span>GRUPO MANAGEMENT</span>
         </div>
