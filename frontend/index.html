@@ -159,6 +159,8 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--
 .nav-group-items{overflow:hidden;max-height:0;transition:max-height .25s ease}
 .nav-group.open .nav-group-items{max-height:600px}
 .nav-group-items a{padding-left:34px}
+.nav-badge{background:#f59e0b;color:#7c2d12;font-size:9.5px;font-weight:900;border-radius:99px;
+  padding:1px 6px;margin-left:6px;vertical-align:middle;box-shadow:0 0 8px rgba(245,158,11,.5)}
 .nav-group.has-active .nav-group-toggle{color:rgba(255,255,255,.75)}
 .nav-group.has-active .nav-group-toggle .nav-group-icon{opacity:1}
 nav a{
@@ -526,7 +528,7 @@ canvas{max-height:230px}
 
       <div class="nav-group" data-group="operacion">
         <button class="nav-group-toggle" onclick="toggleNavGroup('operacion')">
-          <span class="nav-group-label"><span class="nav-group-icon">🧾</span> Operación</span>
+          <span class="nav-group-label"><span class="nav-group-icon">📥</span> Ingresos (CxC)</span>
           <span class="chev">▶</span>
         </button>
         <div class="nav-group-items">
@@ -534,7 +536,20 @@ canvas{max-height:230px}
           <a href="#" onclick="nav('cobranza')"    id="nav-cobranza"><span class="ni">💰</span> Cobranza</a>
           <a href="#" onclick="nav('estadoCuenta')" id="nav-estadoCuenta"><span class="ni">📑</span> Estado de Cuenta</a>
           <a href="#" onclick="nav('clientes')"    id="nav-clientes"><span class="ni">🏢</span> Clientes</a>
-          <a href="#" onclick="nav('gastos')"      id="nav-gastos"><span class="ni">🧾</span> Gastos de Operación</a>
+        </div>
+      </div>
+
+      <div class="nav-group" data-group="egresos">
+        <button class="nav-group-toggle" onclick="toggleNavGroup('egresos')">
+          <span class="nav-group-label"><span class="nav-group-icon">📤</span> Gastos (CxP)</span>
+          <span class="chev">▶</span>
+        </button>
+        <div class="nav-group-items">
+          <a href="#" onclick="nav('gastos')" id="nav-gastos"><span class="ni">🧾</span> Cuentas por Pagar</a>
+          <a href="#" data-page="gastos" onclick="navGastos('pendientes')"><span class="ni">⏳</span> Bandeja de Proveedores
+            <span class="nav-badge" id="nav-gt-pend" style="display:none">0</span></a>
+          <a href="#" data-page="gastos" onclick="navGastos('importar')"><span class="ni">📥</span> Importar XML</a>
+          <a href="#" data-page="gastos" onclick="navGastos('nuevo')"><span class="ni">✍️</span> Captura Manual</a>
         </div>
       </div>
 
@@ -573,7 +588,7 @@ canvas{max-height:230px}
 
       <div class="nav-group" data-group="analisis">
         <button class="nav-group-toggle" onclick="toggleNavGroup('analisis')">
-          <span class="nav-group-label"><span class="nav-group-icon">📊</span> Análisis</span>
+          <span class="nav-group-label"><span class="nav-group-icon">📊</span> Reportes Financieros</span>
           <span class="chev">▶</span>
         </button>
         <div class="nav-group-items">
@@ -921,7 +936,8 @@ function initApp() {
                      : isChecador()   ? 'checador'
                      : 'cajaChica';
     document.querySelectorAll('nav a').forEach(a => {
-      const pg = a.id?.replace('nav-','');
+      // Los accesos directos del menú no llevan id propio; declaran su página con data-page
+      const pg = a.dataset.page || a.id?.replace('nav-','');
       if (pg && pg !== 'dashboard' && !permitidas.includes(pg)) a.style.display = 'none';
     });
     // Ocultar grupos que quedaron sin items visibles
@@ -1005,8 +1021,26 @@ function nav(page) {
   if (pages[page]) pages[page]();
 }
 
-// ══ GASTOS DE OPERACIÓN ══════════════════════════════
+// ══ GASTOS (CxP) / OPERACIÓN ═════════════════════════
 const FORMAS_PAGO_GTO = ['transferencia','efectivo','cheque','tarjeta','domiciliado','otro'];
+
+// Entrar a Gastos abriendo directamente una pestaña concreta desde el menú
+function navGastos(destino) {
+  if ($('gt-body')) return gtIrA(destino);
+  nav('gastos');
+  // gastos() es asíncrona: se espera a que la pantalla exista antes de abrir la pestaña
+  let intentos = 0;
+  const t = setInterval(() => {
+    if ($('gt-body') || ++intentos > 40) { clearInterval(t); gtIrA(destino); }
+  }, 50);
+}
+function gtIrA(destino) {
+  if (!$('gt-body')) return;   // nav() negó el acceso o la pantalla no cargó
+  if (destino === 'nuevo') { if (canGastos()) openGasto(); return; }
+  const idx = { lista:0, pendientes:1, importar:2, proveedores:3 }[destino];
+  const tab = document.querySelectorAll('.gt-tabs .gt-tab')[idx];
+  if (tab) tab.click();
+}
 
 async function gastos() {
   const hoy = new Date(), y = hoy.getFullYear(), m = String(hoy.getMonth()+1).padStart(2,'0');
@@ -1044,21 +1078,76 @@ async function gastos() {
         font-size:12.5px;font-weight:700;background:#fff;cursor:pointer;color:#475569}
       .gt-barra{height:6px;background:#f1f5f9;border-radius:99px;overflow:hidden;margin-top:3px}
       .gt-barra i{display:block;height:100%;background:linear-gradient(90deg,#f59e0b,#d97706);border-radius:99px}
+
+      /* ── Tarjetas del dashboard de egresos (colores semánticos) ── */
+      .gt-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px;margin-bottom:16px}
+      .gt-card{border-radius:16px;padding:17px 19px;position:relative;overflow:hidden;
+        border:1.5px solid;background:#fff;transition:transform .18s,box-shadow .18s}
+      .gt-card:hover{transform:translateY(-2px)}
+      .gt-card .ic{position:absolute;right:14px;top:12px;font-size:30px;opacity:.16}
+      .gt-card .l{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:1.1px}
+      .gt-card .v{font-size:26px;font-weight:900;line-height:1.15;margin-top:5px;letter-spacing:-.5px}
+      .gt-card .s{font-size:11px;margin-top:3px;opacity:.85;font-weight:600}
+      .gt-card.total  {border-color:#fed7aa;background:linear-gradient(150deg,#fffbeb,#fff7ed)}
+      .gt-card.total   .l,.gt-card.total .v{color:#b45309}
+      .gt-card.viva   {border-color:#a7f3d0;background:linear-gradient(150deg,#ecfdf5,#f0fdfa)}
+      .gt-card.viva    .l,.gt-card.viva .v{color:#047857}
+      .gt-card.cancel {border-color:#fecaca;background:linear-gradient(150deg,#fef2f2,#fff1f2)}
+      .gt-card.cancel  .l,.gt-card.cancel .v{color:#be123c}
+      .gt-card.pend   {border-color:#fcd34d;background:linear-gradient(150deg,#fffbeb,#fef3c7);cursor:pointer}
+      .gt-card.pend    .l,.gt-card.pend .v{color:#b45309}
+      .gt-card.pend.hay{box-shadow:0 0 0 3px rgba(245,158,11,.18);animation:gtPulso 2.4s ease-in-out infinite}
+      @keyframes gtPulso{0%,100%{box-shadow:0 0 0 3px rgba(245,158,11,.18)}50%{box-shadow:0 0 0 7px rgba(245,158,11,.06)}}
+
+      /* ── Etiquetas de estatus SAT y origen ── */
+      .gt-pill{display:inline-flex;align-items:center;gap:4px;font-size:9.5px;font-weight:900;
+        padding:2px 8px;border-radius:99px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
+      .gt-pill.vig {background:#d1fae5;color:#047857}
+      .gt-pill.can {background:#ffe4e6;color:#be123c}
+      .gt-pill.nd  {background:#e2e8f0;color:#64748b}
+      .gt-pill.xml {background:#dbeafe;color:#1d4ed8}
+      .gt-pill.man {background:#f3e8ff;color:#7e22ce}
+      .gt-pill.sin {background:#fef3c7;color:#b45309}
+
+      /* ── Bandeja de pendientes ── */
+      .gt-pend-row{background:#fff;border:1.5px solid #fde68a;border-radius:14px;padding:13px 15px;
+        margin-bottom:10px;transition:all .2s}
+      .gt-pend-row:hover{border-color:#f59e0b;box-shadow:0 4px 14px rgba(245,158,11,.13)}
+      .gt-pend-row.listo{border-color:#6ee7b7;background:#f0fdf4}
+      .gt-pend-top{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start}
+      .gt-pend-sel{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center;margin-top:11px}
+      @media(max-width:760px){.gt-pend-sel{grid-template-columns:1fr}}
+      .gt-mini{border:1.5px solid var(--border);border-radius:10px;padding:8px 11px;font-size:12.5px;
+        font-weight:700;background:#fff;color:#475569;width:100%}
+      .gt-mini:focus{outline:none;border-color:#d97706;box-shadow:0 0 0 3px rgba(217,119,6,.13)}
+      .gt-spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.35);
+        border-top-color:#fff;border-radius:50%;animation:gtGiro .6s linear infinite;vertical-align:-1px}
+      @keyframes gtGiro{to{transform:rotate(360deg)}}
+
+      /* ── Zona de arrastre de XML ── */
+      .gt-drop{border:2.5px dashed #fbbf24;border-radius:18px;padding:38px 24px;text-align:center;
+        background:linear-gradient(160deg,#fffbeb,#fff7ed);cursor:pointer;transition:all .2s}
+      .gt-drop:hover,.gt-drop.over{border-color:#d97706;background:linear-gradient(160deg,#fef3c7,#fed7aa);transform:scale(1.006)}
+      .gt-drop.over{box-shadow:0 0 0 5px rgba(217,119,6,.13)}
     </style>
 
     <div class="gt-hero">
       <div class="gt-hero-t">
         <div class="gt-hero-ic">🧾</div>
         <div>
-          <h2>Gastos de Operación</h2>
-          <div class="sub">Captura de gastos · Catálogo de conceptos · Resumen anual</div>
+          <h2>Gastos (CxP) / Operación</h2>
+          <div class="sub">CFDI de proveedores · Captura manual · Catálogo de cuentas de gasto</div>
         </div>
       </div>
       <div class="gt-kpis" id="gt-kpis"></div>
     </div>
+    <div class="gt-cards" id="gt-cards"></div>
 
     <div class="gt-tabs">
-      <div class="gt-tab active" onclick="showTab(this,'gt-tab-lista')">🧾 Gastos</div>
+      <div class="gt-tab active" onclick="showTab(this,'gt-tab-lista')">🧾 Cuentas por Pagar</div>
+      <div class="gt-tab" onclick="showTab(this,'gt-tab-pendientes');cargarPendientes()">⏳ Bandeja de pendientes <span id="gt-tab-badge"></span></div>
+      <div class="gt-tab" onclick="showTab(this,'gt-tab-importar')">📥 Importar XML</div>
+      <div class="gt-tab" onclick="showTab(this,'gt-tab-prov');cargarMapeoProveedores()">🤝 Proveedores</div>
       <div class="gt-tab" onclick="showTab(this,'gt-tab-resumen');cargarResumenGastos()">📊 Resumen anual</div>
       <div class="gt-tab" onclick="showTab(this,'gt-tab-catalogo');cargarCatalogoGastos()">📂 Catálogo</div>
     </div>
@@ -1068,10 +1157,18 @@ async function gastos() {
       <div class="gt-toolbar">
         <div class="gt-search">
           <span style="color:#94a3b8;font-size:14px">🔍</span>
-          <input id="gt-buscar" placeholder="Buscar por concepto, proveedor, descripción o referencia…" oninput="filtrarGastos()">
+          <input id="gt-buscar" placeholder="Buscar por concepto, proveedor, RFC, UUID, descripción o referencia…" oninput="filtrarGastos()">
         </div>
+        <select id="gt-categoria" onchange="gtFiltrarPorCategoria()" class="gt-filtro" style="max-width:210px">
+          <option value="">Todas las categorías</option>
+        </select>
         <select id="gt-concepto" onchange="cargarGastos()" class="gt-filtro" style="max-width:230px">
           <option value="">Todos los conceptos</option>
+        </select>
+        <select id="gt-origen" onchange="cargarGastos()" class="gt-filtro">
+          <option value="">Todo origen</option>
+          <option value="XML">📥 Desde XML</option>
+          <option value="MANUAL">✍️ Manual</option>
         </select>
         <input type="date" id="gt-desde" value="${y}-${m}-01" onchange="cargarGastos()" class="gt-filtro">
         <input type="date" id="gt-hasta" value="${finMes}" onchange="cargarGastos()" class="gt-filtro">
@@ -1079,10 +1176,52 @@ async function gastos() {
           <button class="btn bo bsm" onclick="gtPreset('mes')">Este mes</button>
           <button class="btn bo bsm" onclick="gtPreset('anio')">Este año</button>
           <button class="btn bo bsm" onclick="exportarGastosExcel()">⬇ Excel</button>
+          ${canGastos()?`<button class="btn bo bsm" onclick="gtIrA('importar')">📥 Importar XML</button>`:''}
           ${canGastos()?`<button class="btn bs bsm" onclick="openGasto()">＋ Nuevo gasto</button>`:''}
         </div>
       </div>
       <div id="gt-body"><p class="empty">Cargando…</p></div>
+    </div>
+
+    <!-- BANDEJA DE PENDIENTES DE CLASIFICAR -->
+    <div class="tab-panel" id="gt-tab-pendientes">
+      <div id="gt-pendientes"><p class="empty">Cargando…</p></div>
+    </div>
+
+    <!-- IMPORTACIÓN DE CFDI DE PROVEEDOR -->
+    <div class="tab-panel" id="gt-tab-importar">
+      <div class="card" style="margin-bottom:14px;border-left:4px solid #d97706">
+        <div style="font-size:13px;line-height:1.6;color:var(--dark)">
+          <strong>Importación masiva de CFDI de proveedor.</strong> Arrastra aquí los XML que te emitieron
+          (o elige una carpeta completa). El sistema lee folio fiscal, importes, impuestos y RFC del emisor.
+          <div style="margin-top:8px;font-size:12px;color:var(--muted)">
+            🛡️ <strong>Cero duplicados:</strong> si un folio fiscal ya está registrado, ese archivo se descarta y se te reporta aparte —
+            nunca se registra dos veces el mismo gasto.<br>
+            🤖 <strong>Auto-clasificación:</strong> si ya le asignaste concepto antes a ese RFC, el gasto entra clasificado;
+            si es un proveedor nuevo, cae en la <em>Bandeja de pendientes</em>.
+          </div>
+        </div>
+      </div>
+      <div class="gt-drop" id="gt-drop"
+           onclick="$('gt-inp-xml').click()"
+           ondragover="event.preventDefault();this.classList.add('over')"
+           ondragleave="this.classList.remove('over')"
+           ondrop="gtSoltarXML(event,this)">
+        <div style="font-size:52px;line-height:1">📂</div>
+        <div style="font-weight:900;font-size:16px;color:#92400e;margin-top:8px">Arrastra tus XML aquí</div>
+        <div style="font-size:12.5px;color:#b45309;margin-top:4px">o haz clic para seleccionar archivos</div>
+        <input type="file" id="gt-inp-xml" accept=".xml" multiple style="display:none" onchange="gtLeerXMLs(this.files)">
+      </div>
+      <div style="text-align:center;margin-top:10px">
+        <button class="btn bo bsm" onclick="$('gt-inp-carpeta').click()">📁 Seleccionar una carpeta completa</button>
+        <input type="file" id="gt-inp-carpeta" accept=".xml" multiple webkitdirectory style="display:none" onchange="gtLeerXMLs(this.files)">
+      </div>
+      <div id="gt-import-res" style="margin-top:16px"></div>
+    </div>
+
+    <!-- MAPEO DE PROVEEDORES -->
+    <div class="tab-panel" id="gt-tab-prov">
+      <div id="gt-prov"><p class="empty">Cargando…</p></div>
     </div>
 
     <!-- RESUMEN ANUAL -->
@@ -1102,15 +1241,63 @@ async function gastos() {
       <div id="gt-catalogo"><p class="empty">Cargando…</p></div>
     </div>`;
 
-  // Llenar el selector de conceptos y cargar la lista
-  try {
-    const cs = await api('/gastos/conceptos');
-    window._gtConceptos = cs;
-    const sel = $('gt-concepto');
-    if (sel) sel.innerHTML = '<option value="">Todos los conceptos</option>' +
-      cs.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
-  } catch(e) { window._gtConceptos = []; }
+  await gtCargarCatalogos();
+  gtLlenarSelectConceptos();
   cargarGastos();
+  gtActualizarBadgePendientes();
+}
+
+// Catálogo jerárquico en memoria: categorías + conceptos (subcategorías)
+async function gtCargarCatalogos(forzar) {
+  if (!forzar && window._gtCategorias && window._gtConceptos) return;
+  try {
+    const [ks, cs] = await Promise.all([ api('/gastos/categorias'), api('/gastos/conceptos') ]);
+    window._gtCategorias = ks;
+    window._gtConceptos  = cs;
+  } catch(e) { window._gtCategorias = window._gtCategorias || []; window._gtConceptos = window._gtConceptos || []; }
+  const selK = $('gt-categoria');
+  if (selK) selK.innerHTML = '<option value="">Todas las categorías</option>' +
+    (window._gtCategorias||[]).map(k => `<option value="${k.id}">${k.nombre} (${k.n_conceptos})</option>`).join('');
+}
+
+// Conceptos visibles en el filtro: si hay categoría elegida, solo los suyos
+function gtLlenarSelectConceptos() {
+  const sel = $('gt-concepto'); if (!sel) return;
+  const catId = $('gt-categoria')?.value;
+  const lista = (window._gtConceptos||[]).filter(c => !catId || String(c.categoria_id) === String(catId));
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">Todos los conceptos</option>' +
+    lista.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+  if (lista.some(c => String(c.id) === prev)) sel.value = prev;
+}
+
+function gtFiltrarPorCategoria() { gtLlenarSelectConceptos(); cargarGastos(); }
+
+// Opciones de concepto agrupadas por categoría, para los selectores en cascada
+function gtOptsConceptos(catId, seleccionado) {
+  const lista = (window._gtConceptos||[]).filter(c => !catId || String(c.categoria_id) === String(catId));
+  if (!catId) {
+    // Sin categoría elegida: se agrupan con <optgroup> para no perder la jerarquía
+    const grupos = {};
+    lista.forEach(c => { (grupos[c.categoria || 'Sin categoría'] = grupos[c.categoria || 'Sin categoría'] || []).push(c); });
+    return Object.keys(grupos).map(g => `<optgroup label="${g}">` +
+      grupos[g].map(c => `<option value="${c.id}" ${String(c.id)===String(seleccionado)?'selected':''}>${c.nombre}</option>`).join('') +
+      `</optgroup>`).join('');
+  }
+  return lista.map(c => `<option value="${c.id}" ${String(c.id)===String(seleccionado)?'selected':''}>${c.nombre}</option>`).join('');
+}
+
+async function gtActualizarBadgePendientes() {
+  try {
+    const d = await api('/gastos/pendientes');
+    const n = d.totales.n;
+    const nb = $('nav-gt-pend');
+    if (nb) { nb.textContent = n; nb.style.display = n > 0 ? 'inline-block' : 'none'; }
+    const tb = $('gt-tab-badge');
+    if (tb) tb.innerHTML = n > 0
+      ? `<span style="background:#f59e0b;color:#fff;border-radius:99px;padding:1px 7px;font-size:10px;font-weight:900">${n}</span>` : '';
+    return n;
+  } catch(e) { return 0; }
 }
 
 function gtPreset(tipo) {
@@ -1132,9 +1319,12 @@ async function cargarGastos() {
   const p = [];
   const d = $('gt-desde')?.value, h = $('gt-hasta')?.value;
   const c = $('gt-concepto')?.value, b = ($('gt-buscar')?.value || '').trim();
+  const k = $('gt-categoria')?.value, o = $('gt-origen')?.value;
   if (d) p.push(`desde=${d}`);
   if (h) p.push(`hasta=${h}`);
   if (c) p.push(`concepto_id=${c}`);
+  if (k) p.push(`categoria_id=${k}`);
+  if (o) p.push(`origen=${o}`);
   if (b) p.push(`buscar=${encodeURIComponent(b)}`);
   $('gt-body').innerHTML = '<p class="empty">Cargando…</p>';
   try {
@@ -1151,14 +1341,14 @@ function renderGastos(r) {
     const prom = t.n_gastos > 0 ? parseFloat(t.total) / t.n_gastos : 0;
     kp.innerHTML = `
       <div class="gt-kpi">
-        <div class="l">Total del período</div>
-        <div class="v">${fmt(t.total)}</div>
-        <div class="s">${t.n_gastos} gasto${t.n_gastos!=1?'s':''} · ${t.conceptos} concepto${t.conceptos!=1?'s':''}</div>
-      </div>
-      <div class="gt-kpi">
         <div class="l">Deducible</div>
         <div class="v">${fmt(t.deducible)}</div>
         <div class="s">${parseFloat(t.total)>0 ? Math.round(parseFloat(t.deducible)/parseFloat(t.total)*100) : 0}% del total</div>
+      </div>
+      <div class="gt-kpi">
+        <div class="l">IVA acreditable</div>
+        <div class="v">${fmt(t.iva || 0)}</div>
+        <div class="s">${parseFloat(t.retenciones||0) > 0 ? `Retenciones ${fmt(t.retenciones)}` : 'Sin retenciones'}</div>
       </div>
       <div class="gt-kpi">
         <div class="l">Gasto promedio</div>
@@ -1168,7 +1358,39 @@ function renderGastos(r) {
       <div class="gt-kpi">
         <div class="l">Mayor concepto</div>
         <div class="v" style="font-size:15px">${r.por_concepto[0] ? fmt(r.por_concepto[0].total) : '—'}</div>
-        <div class="s">${r.por_concepto[0] ? r.por_concepto[0].concepto.slice(0,26) : 'Sin datos'}</div>
+        <div class="s">${r.por_concepto[0] ? String(r.por_concepto[0].concepto||'').slice(0,26) : 'Sin datos'}</div>
+      </div>`;
+  }
+
+  // Dashboard de egresos: colores semánticos por estado del comprobante
+  const cds = $('gt-cards');
+  if (cds) {
+    const sinClas = t.sin_clasificar || 0, cancel = t.cancelados_sat || 0;
+    const vigentes = (t.n_gastos || 0) - sinClas;
+    cds.innerHTML = `
+      <div class="gt-card total">
+        <div class="ic">💸</div>
+        <div class="l">Total del período</div>
+        <div class="v">${fmt(t.total)}</div>
+        <div class="s">${t.n_gastos} egreso${t.n_gastos!=1?'s':''} · ${t.conceptos} cuenta${t.conceptos!=1?'s':''} de gasto</div>
+      </div>
+      <div class="gt-card viva">
+        <div class="ic">📥</div>
+        <div class="l">CFDI de proveedor</div>
+        <div class="v">${t.de_xml || 0}</div>
+        <div class="s">${vigentes} clasificado${vigentes!=1?'s':''} · ${(t.n_gastos||0)-(t.de_xml||0)} captura${(t.n_gastos||0)-(t.de_xml||0)!=1?'s':''} manual${(t.n_gastos||0)-(t.de_xml||0)!=1?'es':''}</div>
+      </div>
+      <div class="gt-card cancel">
+        <div class="ic">🚫</div>
+        <div class="l">Cancelados en el SAT</div>
+        <div class="v">${cancel}</div>
+        <div class="s">${cancel ? 'Revísalos: no son deducibles' : 'Ninguno cancelado'}</div>
+      </div>
+      <div class="gt-card pend ${sinClas ? 'hay' : ''}" onclick="gtIrA('pendientes')" title="Ir a la bandeja de pendientes">
+        <div class="ic">⏳</div>
+        <div class="l">Pendientes de clasificar</div>
+        <div class="v">${sinClas}</div>
+        <div class="s">${sinClas ? `${fmt(t.monto_sin_clasificar)} sin cuenta de gasto →` : 'Todo clasificado ✓'}</div>
       </div>`;
   }
 
@@ -1214,19 +1436,32 @@ function renderGastos(r) {
   $('gt-body').innerHTML = desglose + `
     <div class="tscroll"><table>
       <thead><tr>
-        <th>Fecha</th><th>Concepto</th><th>Descripción</th><th>Proveedor</th>
-        <th>Forma de pago</th><th>Referencia</th><th style="text-align:right">Monto</th><th></th>
+        <th>Fecha</th><th>Cuenta de gasto</th><th>Proveedor / Descripción</th>
+        <th style="text-align:center">Origen</th><th style="text-align:center">SAT</th>
+        <th>Referencia</th><th style="text-align:right">Monto</th><th></th>
       </tr></thead>
       <tbody>${r.gastos.map(g => `<tr${g.deducible === false ? ' style="background:#fafafa"' : ''}>
         <td style="white-space:nowrap">${fmtDate(g.fecha)}</td>
-        <td style="font-weight:700;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${g.concepto}">${g.concepto}</td>
-        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(g.descripcion||'').replace(/"/g,'&quot;')}">${g.descripcion||'—'}</td>
-        <td style="font-size:11.5px">${g.proveedor||'—'}</td>
-        <td style="font-size:11px;color:var(--muted);text-transform:capitalize">${g.forma_pago||'—'}</td>
-        <td style="font-family:monospace;font-size:11px;color:var(--muted)">${g.referencia||'—'}</td>
+        <td style="max-width:220px">
+          ${g.concepto
+            ? `<div style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(g.concepto||'').replace(/"/g,'&quot;')}">${g.concepto}</div>
+               ${g.categoria ? `<div style="font-size:10px;font-weight:800;color:${g.categoria_color||'#94a3b8'}">● ${g.categoria}</div>` : ''}`
+            : `<span class="gt-pill sin" style="cursor:pointer" onclick="gtIrA('pendientes')" title="Clasificar en la bandeja de pendientes">⏳ Sin clasificar</span>`}
+        </td>
+        <td style="max-width:250px">
+          <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g.nombre_proveedor||g.proveedor||'—'}</div>
+          <div style="font-size:10.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+               title="${(g.descripcion||'').replace(/"/g,'&quot;')}">${g.rfc_proveedor ? `<span style="font-family:monospace">${g.rfc_proveedor}</span> · ` : ''}${g.descripcion||''}</div>
+        </td>
+        <td style="text-align:center">${g.origen === 'XML'
+          ? `<span class="gt-pill xml" title="${g.uuid||''}">📥 XML</span>`
+          : `<span class="gt-pill man">✍️ Manual</span>`}</td>
+        <td style="text-align:center">${gtPillSAT(g.estatus_sat)}</td>
+        <td style="font-family:monospace;font-size:11px;color:var(--muted)">${g.referencia||g.serie_folio||'—'}</td>
         <td style="text-align:right;font-weight:900;color:#b45309;white-space:nowrap">${fmt(g.monto)}${
           g.deducible === false ? ' <span title="No deducible" style="font-size:9px;background:#e2e8f0;color:#64748b;padding:1px 5px;border-radius:8px;font-weight:800">ND</span>' : ''}</td>
         <td style="white-space:nowrap">
+          ${canGastos() && g.uuid ? `<button class="btn bo bsm" style="padding:4px 8px" onclick="validarSATGasto(${g.id},this)" title="Consultar estatus en el SAT">🛡️</button>` : ''}
           ${canGastos()?`<button class="btn bg bsm" style="padding:4px 8px" onclick="openGasto(${g.id})" title="Editar">✏️</button>`:''}
           ${canGastos()?`<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarGasto(${g.id})" title="Eliminar">🗑</button>`:''}
         </td>
@@ -1239,9 +1474,482 @@ function renderGastos(r) {
     </table></div>`;
 }
 
+function gtPillSAT(estatus) {
+  const e = String(estatus || '').toLowerCase();
+  if (e.includes('cancel'))  return '<span class="gt-pill can">🚫 Cancelado</span>';
+  if (e.includes('vigente')) return '<span class="gt-pill vig">✓ Vigente</span>';
+  if (!estatus)              return '<span class="gt-pill nd">—</span>';
+  return `<span class="gt-pill nd">${estatus}</span>`;
+}
+
 async function eliminarGasto(id) {
   if (!await confirm2('¿Eliminar este gasto? La acción no se puede deshacer.')) return;
   try { await api(`/gastos/${id}`, { method:'DELETE' }); toast('Gasto eliminado.'); cargarGastos(); }
+  catch(e) { toast(e.message, 'err'); }
+}
+
+async function validarSATGasto(id, btn) {
+  const original = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="gt-spin" style="border-color:rgba(180,83,9,.3);border-top-color:#b45309"></span>';
+  try {
+    const r = await api(`/gastos/${id}/validar-sat`, { method:'POST' });
+    toast(`SAT: ${r.estatus_sat}`, /cancel/i.test(r.estatus_sat) ? 'warn' : 'ok');
+    cargarGastos();
+  } catch(e) {
+    toast(e.message, 'err');
+    btn.disabled = false; btn.innerHTML = original;
+  }
+}
+
+// ══ BANDEJA DE PENDIENTES DE CLASIFICAR ══════════════
+async function cargarPendientes() {
+  $('gt-pendientes').innerHTML = '<p class="empty">Cargando…</p>';
+  await gtCargarCatalogos();
+  try {
+    const d = await api('/gastos/pendientes');
+    window._gtPend = d;
+    renderPendientes(d);
+    gtActualizarBadgePendientes();
+  } catch(e) { $('gt-pendientes').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function renderPendientes(d) {
+  const cont = $('gt-pendientes');
+  if (!d.gastos.length) {
+    cont.innerHTML = `
+      <div style="background:linear-gradient(160deg,#ecfdf5,#d1fae5);border:2px dashed #6ee7b7;
+                  border-radius:18px;padding:46px 30px;text-align:center">
+        <div style="font-size:58px;margin-bottom:10px">✅</div>
+        <h3 style="margin:0 0 6px;font-size:19px;font-weight:900;color:#047857">Bandeja limpia</h3>
+        <p style="font-size:13px;color:#065f46;max-width:430px;margin:0 auto;line-height:1.55">
+          Todos los gastos tienen su cuenta de gasto asignada. Cuando importes XML de proveedores
+          nuevos, aparecerán aquí para que los clasifiques.
+        </p>
+      </div>`;
+    return;
+  }
+
+  // Agrupar por proveedor: normalmente se clasifica igual todo lo de un mismo RFC
+  const sv = v => (v == null ? '' : String(v)).replace(/"/g,'&quot;');
+  cont.innerHTML = `
+    <div class="card" style="margin-bottom:14px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;
+                             display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.4px;opacity:.9">Pendientes de clasificar</div>
+        <div style="font-size:27px;font-weight:900;line-height:1.1">${d.totales.n} gasto${d.totales.n!=1?'s':''} · ${fmt(d.totales.total)}</div>
+      </div>
+      <div style="font-size:12px;opacity:.92;text-align:right;max-width:330px;line-height:1.5">
+        Asigna la cuenta de gasto de cada uno. Marca <strong>“Recordar proveedor”</strong> y
+        la próxima factura de ese RFC entrará clasificada sola.
+      </div>
+    </div>
+
+    ${canGastos() ? `
+    <div class="card" style="margin-bottom:14px;background:var(--bg-alt);display:flex;gap:9px;
+                             align-items:end;flex-wrap:wrap">
+      <div class="fi" style="margin:0;flex:1;min-width:170px"><label style="font-size:10px">Clasificación masiva — Categoría</label>
+        <select id="gtm-cat" class="gt-mini" onchange="gtCascadaMasiva()">
+          <option value="">— Todas —</option>
+          ${(window._gtCategorias||[]).map(k=>`<option value="${k.id}">${k.nombre}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fi" style="margin:0;flex:1;min-width:200px"><label style="font-size:10px">Cuenta de gasto</label>
+        <select id="gtm-con" class="gt-mini">
+          <option value="">— Seleccionar —</option>${gtOptsConceptos('')}
+        </select>
+      </div>
+      <button class="btn bo bsm" onclick="gtAplicarATodos()" style="height:37px">↧ Aplicar a todos los visibles</button>
+    </div>` : ''}
+
+    <div>${d.gastos.map(g => `
+      <div class="gt-pend-row" id="gtp-${g.id}">
+        <div class="gt-pend-top">
+          <div style="min-width:0;flex:1">
+            <div style="font-weight:900;font-size:14px;color:var(--dark);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              ${g.nombre_proveedor || g.proveedor || 'Proveedor sin nombre'}
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">
+              ${g.rfc_proveedor ? `<span style="font-family:monospace;font-weight:700">${g.rfc_proveedor}</span> · ` : ''}
+              ${fmtDate(g.fecha)}
+              ${g.serie_folio ? ` · Folio ${g.serie_folio}` : ''}
+              ${g.origen === 'XML' ? ' · <span class="gt-pill xml">📥 XML</span>' : ' · <span class="gt-pill man">✍️ Manual</span>'}
+              ${g.estatus_sat ? ' ' + gtPillSAT(g.estatus_sat) : ''}
+            </div>
+            ${g.descripcion ? `<div style="font-size:11.5px;color:#64748b;margin-top:4px;overflow:hidden;
+              text-overflow:ellipsis;white-space:nowrap;max-width:520px">${g.descripcion}</div>` : ''}
+            ${g.uuid ? `<div style="font-size:9.5px;font-family:monospace;color:#cbd5e1;margin-top:3px">${g.uuid}</div>` : ''}
+          </div>
+          <div style="text-align:right;white-space:nowrap">
+            <div style="font-size:21px;font-weight:900;color:#b45309">${fmt(g.monto)}</div>
+            <div style="font-size:10px;color:var(--muted)">
+              ${parseFloat(g.subtotal||0) ? `Sub ${fmt(g.subtotal)}` : ''}
+              ${parseFloat(g.iva||0) ? ` · IVA ${fmt(g.iva)}` : ''}
+              ${parseFloat(g.retenciones||0) ? ` · Ret ${fmt(g.retenciones)}` : ''}
+            </div>
+          </div>
+        </div>
+        ${canGastos() ? `
+        <div class="gt-pend-sel">
+          <select class="gt-mini" id="gtc-cat-${g.id}" onchange="gtCascadaFila(${g.id})">
+            <option value="">1 · Categoría (opcional)</option>
+            ${(window._gtCategorias||[]).map(k=>`<option value="${k.id}">${k.nombre}</option>`).join('')}
+          </select>
+          <select class="gt-mini" id="gtc-con-${g.id}">
+            <option value="">2 · Cuenta de gasto…</option>${gtOptsConceptos('')}
+          </select>
+          <button class="btn bs bsm" id="gtc-btn-${g.id}" onclick="guardarClasificacion(${g.id})"
+                  style="white-space:nowrap;height:37px">💾 Guardar</button>
+        </div>
+        <label style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;font-size:11.5px;
+                      color:#78350f;cursor:pointer;font-weight:600">
+          <input type="checkbox" id="gtc-rec-${g.id}" ${g.rfc_proveedor?'checked':''} ${g.rfc_proveedor?'':'disabled'}>
+          🤖 Recordar proveedor ${g.rfc_proveedor ? `<span style="font-family:monospace">${g.rfc_proveedor}</span> para la próxima` : '(este gasto no trae RFC)'}
+        </label>` : ''}
+      </div>`).join('')}</div>`;
+}
+
+// Cascada: al elegir categoría se acotan las cuentas de gasto de esa fila
+function gtCascadaFila(id) {
+  const cat = $(`gtc-cat-${id}`).value;
+  const sel = $(`gtc-con-${id}`);
+  sel.innerHTML = '<option value="">2 · Cuenta de gasto…</option>' + gtOptsConceptos(cat);
+}
+function gtCascadaMasiva() {
+  const cat = $('gtm-cat').value;
+  $('gtm-con').innerHTML = '<option value="">— Seleccionar —</option>' + gtOptsConceptos(cat);
+}
+function gtAplicarATodos() {
+  const con = $('gtm-con').value;
+  if (!con) return toast('Elige primero la cuenta de gasto a aplicar.', 'warn');
+  const cat = $('gtm-cat').value;
+  (window._gtPend?.gastos || []).forEach(g => {
+    const sc = $(`gtc-cat-${g.id}`), ss = $(`gtc-con-${g.id}`);
+    if (!sc || !ss) return;
+    sc.value = cat; gtCascadaFila(g.id); ss.value = con;
+  });
+  toast('Aplicado a todas las filas. Revisa y guarda cada una.', 'warn');
+}
+
+async function guardarClasificacion(id) {
+  const conceptoId = $(`gtc-con-${id}`)?.value;
+  if (!conceptoId) return toast('Selecciona la cuenta de gasto.', 'warn');
+  const btn = $(`gtc-btn-${id}`);
+  const recordar = $(`gtc-rec-${id}`)?.checked === true;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="gt-spin"></span> Guardando…';
+  try {
+    const r = await api(`/gastos/${id}/clasificar`, {
+      method: 'PATCH', body: JSON.stringify({ concepto_id: conceptoId, recordar_proveedor: recordar })
+    });
+    const fila = $(`gtp-${id}`);
+    if (fila) {
+      fila.classList.add('listo');
+      btn.innerHTML = '✓ Listo';
+      // Se desvanece para que la bandeja quede solo con lo que falta
+      setTimeout(() => {
+        fila.style.transition = 'opacity .3s,transform .3s,max-height .3s';
+        fila.style.opacity = '0'; fila.style.transform = 'translateX(18px)';
+        setTimeout(() => { fila.remove(); gtActualizarBadgePendientes(); }, 320);
+      }, 520);
+    }
+    toast(r.mapeado ? 'Clasificado. Ese RFC ya quedó memorizado.' : 'Gasto clasificado.');
+    window._gtPend.gastos = window._gtPend.gastos.filter(g => g.id !== id);
+    if (!window._gtPend.gastos.length) setTimeout(cargarPendientes, 900);
+  } catch(e) {
+    toast(e.message, 'err');
+    btn.disabled = false; btn.innerHTML = '💾 Guardar';
+  }
+}
+
+// ══ IMPORTACIÓN DE CFDI DE PROVEEDOR ═════════════════
+function gtSoltarXML(ev, zona) {
+  ev.preventDefault();
+  zona.classList.remove('over');
+  gtLeerXMLs(ev.dataTransfer.files);
+}
+
+async function gtLeerXMLs(files) {
+  const arr = Array.from(files || []).filter(f => f.name.toLowerCase().endsWith('.xml'));
+  if (!arr.length) return toast('No se encontraron archivos .xml', 'warn');
+  $('gt-import-res').innerHTML = `<p class="empty">⏳ Leyendo ${arr.length} archivo${arr.length!=1?'s':''}…</p>`;
+
+  const comprobantes = [], malos = [];
+  for (const f of arr) {
+    try {
+      const p = parseCFDIGasto(await f.text(), f.name);
+      if (p.ok) comprobantes.push(p.datos); else malos.push({ archivo: f.name, error: p.error });
+    } catch(e) { malos.push({ archivo: f.name, error: e.message }); }
+  }
+  window._gtImport = { comprobantes, malos };
+  gtVistaPreviaImport();
+}
+
+// Lector de CFDI 4.0/3.3 de proveedor. Se usa DOMParser (nativo del navegador)
+// en vez de fast-xml-parser: no requiere instalar nada y resuelve los namespaces
+// solo, que es justo lo que complica el parseo de un CFDI.
+function parseCFDIGasto(xmlText, archivo) {
+  try {
+    const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
+    if (doc.querySelector('parsererror')) return { ok:false, error:'XML dañado o incompleto.' };
+
+    const comp = doc.querySelector('Comprobante');
+    if (!comp) return { ok:false, error:'No es un CFDI (falta <cfdi:Comprobante>).' };
+
+    const tipo = comp.getAttribute('TipoDeComprobante') || 'I';
+    if (tipo === 'P') return { ok:false, error:'Es un complemento de pago (tipo P), no un gasto.' };
+    if (tipo === 'T') return { ok:false, error:'Es un traslado (tipo T), no representa un gasto.' };
+
+    const emisor = doc.querySelector('Emisor');
+    const tfd    = doc.querySelector('TimbreFiscalDigital');
+    if (!emisor)               return { ok:false, error:'El CFDI no trae datos del emisor.' };
+    if (!tfd)                  return { ok:false, error:'CFDI sin timbrar: no tiene folio fiscal (UUID).' };
+
+    const fecha = comp.getAttribute('Fecha') || '';
+    const total = parseFloat(comp.getAttribute('Total') || 0);
+    if (!fecha)                return { ok:false, error:'El comprobante no tiene fecha.' };
+    if (!total || isNaN(total)) return { ok:false, error:'El total viene vacío o en cero.' };
+
+    // Impuestos: el nodo <cfdi:Impuestos> del comprobante trae los acumulados
+    let iva = 0, retenciones = 0;
+    doc.querySelectorAll('Impuestos').forEach(n => {
+      // Solo el nodo raíz (hijo directo del Comprobante) trae los totales
+      if (n.parentNode !== comp) return;
+      const tr = parseFloat(n.getAttribute('TotalImpuestosTrasladados') || 0);
+      const re = parseFloat(n.getAttribute('TotalImpuestosRetenidos')   || 0);
+      if (!isNaN(tr)) iva += tr;
+      if (!isNaN(re)) retenciones += re;
+    });
+
+    const serie = comp.getAttribute('Serie') || '', folio = comp.getAttribute('Folio') || '';
+    const conceptos = [...doc.querySelectorAll('Concepto')]
+      .map(c => c.getAttribute('Descripcion') || '').filter(Boolean);
+
+    return { ok:true, datos: {
+      archivo,
+      uuid:          (tfd.getAttribute('UUID') || '').toUpperCase(),
+      fecha:         fecha.slice(0,10),
+      total,
+      subtotal:      parseFloat(comp.getAttribute('SubTotal') || 0) || null,
+      iva:           iva || null,
+      retenciones,
+      rfc_emisor:    (emisor.getAttribute('Rfc') || '').toUpperCase(),
+      nombre_emisor: emisor.getAttribute('Nombre') || '',
+      // El receptor es una empresa nuestra; se guarda porque el SAT lo pide
+      // para poder consultar el estatus del comprobante más adelante.
+      rfc_receptor:  (doc.querySelector('Receptor')?.getAttribute('Rfc') || '').toUpperCase(),
+      serie_folio:   (serie + folio) || null,
+      forma_pago:    comp.getAttribute('MetodoPago') === 'PPD' ? 'transferencia' : 'transferencia',
+      concepto:      conceptos.slice(0,3).join(' · ').slice(0,300)
+    }};
+  } catch(e) { return { ok:false, error:e.message }; }
+}
+
+function gtVistaPreviaImport() {
+  const { comprobantes, malos } = window._gtImport;
+  const suma = comprobantes.reduce((a,c) => a + c.total, 0);
+  // Los duplicados dentro de la misma selección se avisan aquí; el servidor
+  // vuelve a validar contra la base de datos, que es la barrera real.
+  const vistos = {}, repes = [];
+  comprobantes.forEach(c => { if (vistos[c.uuid]) repes.push(c.archivo); else vistos[c.uuid] = 1; });
+
+  $('gt-import-res').innerHTML = `
+    <div class="gt-cards">
+      <div class="gt-card viva"><div class="ic">📄</div>
+        <div class="l">Listos para importar</div><div class="v">${comprobantes.length}</div>
+        <div class="s">${fmt(suma)} en total</div></div>
+      <div class="gt-card cancel"><div class="ic">⚠️</div>
+        <div class="l">No se pudieron leer</div><div class="v">${malos.length}</div>
+        <div class="s">${malos.length ? 'Ver detalle abajo' : 'Todos correctos'}</div></div>
+      <div class="gt-card pend ${repes.length?'hay':''}"><div class="ic">🔁</div>
+        <div class="l">Repetidos en la selección</div><div class="v">${repes.length}</div>
+        <div class="s">${repes.length ? 'Solo se guardará uno' : 'Sin repetidos'}</div></div>
+    </div>
+
+    ${comprobantes.length ? `
+    <div class="tscroll" style="max-height:44vh;overflow:auto;margin-bottom:14px"><table style="font-size:12px">
+      <thead><tr><th>Fecha</th><th>Proveedor</th><th>RFC</th><th>Folio</th>
+        <th style="text-align:right">Subtotal</th><th style="text-align:right">IVA</th>
+        <th style="text-align:right">Total</th><th style="text-align:center">Clasificación</th></tr></thead>
+      <tbody>${comprobantes.map(c => {
+        const mapeado = (window._gtMapeo||[]).find(m => m.rfc === c.rfc_emisor);
+        return `<tr>
+          <td style="white-space:nowrap">${fmtDate(c.fecha)}</td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+              title="${(c.nombre_emisor||'').replace(/"/g,'&quot;')}">${c.nombre_emisor||'—'}</td>
+          <td style="font-family:monospace;font-size:11px">${c.rfc_emisor}</td>
+          <td style="font-size:11px;color:var(--muted)">${c.serie_folio||'—'}</td>
+          <td style="text-align:right">${c.subtotal?fmt(c.subtotal):'—'}</td>
+          <td style="text-align:right">${c.iva?fmt(c.iva):'—'}</td>
+          <td style="text-align:right;font-weight:900;color:#b45309">${fmt(c.total)}</td>
+          <td style="text-align:center">${mapeado
+            ? `<span class="gt-pill vig" title="${mapeado.concepto}">🤖 Automática</span>`
+            : `<span class="gt-pill sin">⏳ Pendiente</span>`}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>` : ''}
+
+    ${malos.length ? `
+    <div class="card" style="border-left:4px solid var(--red);margin-bottom:14px">
+      <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.5px;color:var(--red);margin-bottom:8px">
+        Archivos que no se pudieron leer
+      </div>
+      ${malos.map(m => `<div style="font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
+        <strong style="font-family:monospace">${m.archivo}</strong>
+        <span style="color:var(--muted)"> — ${m.error}</span></div>`).join('')}
+    </div>` : ''}
+
+    <div style="display:flex;gap:9px;justify-content:flex-end">
+      <button class="btn bo" onclick="$('gt-import-res').innerHTML='';window._gtImport=null">Descartar</button>
+      ${comprobantes.length && canGastos()
+        ? `<button class="btn bs" id="gt-btn-imp" onclick="gtEjecutarImport()">📥 Importar ${comprobantes.length} comprobante${comprobantes.length!=1?'s':''}</button>`
+        : ''}
+    </div>`;
+}
+
+async function gtEjecutarImport() {
+  const btn = $('gt-btn-imp');
+  btn.disabled = true; btn.innerHTML = '<span class="gt-spin"></span> Importando…';
+  try {
+    const r = await api('/gastos/importar-xml', {
+      method:'POST', body: JSON.stringify({ comprobantes: window._gtImport.comprobantes })
+    });
+    $('gt-import-res').innerHTML = `
+      <div class="gt-cards">
+        <div class="gt-card viva"><div class="ic">✅</div>
+          <div class="l">Importados</div><div class="v">${r.insertados}</div>
+          <div class="s">Registrados como gasto</div></div>
+        <div class="gt-card cancel"><div class="ic">🔁</div>
+          <div class="l">Duplicados descartados</div><div class="v">${r.duplicados.length}</div>
+          <div class="s">${r.duplicados.length ? 'Ese folio fiscal ya estaba' : 'Ninguno repetido'}</div></div>
+        <div class="gt-card pend ${r.sin_clasificar?'hay':''}" onclick="gtIrA('pendientes')">
+          <div class="ic">⏳</div>
+          <div class="l">Sin clasificar</div><div class="v">${r.sin_clasificar}</div>
+          <div class="s">${r.sin_clasificar ? 'Ir a la bandeja →' : 'Todo auto-clasificado'}</div></div>
+      </div>
+
+      ${r.duplicados.length ? `
+      <div class="card" style="border-left:4px solid #f59e0b;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#b45309;margin-bottom:8px">
+          🛡️ Bloqueados por folio fiscal repetido — no se registraron dos veces
+        </div>
+        ${r.duplicados.map(d => `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">
+          <strong style="font-family:monospace">${d.archivo}</strong>
+          <span style="color:var(--muted)"> — UUID ${String(d.uuid||'').slice(0,18)}…${
+            d.registrado_el ? ` ya registrado con fecha ${fmtDate(d.registrado_el)}` : ''}</span></div>`).join('')}
+      </div>` : ''}
+
+      ${r.errores.length ? `
+      <div class="card" style="border-left:4px solid var(--red);margin-bottom:12px">
+        <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:var(--red);margin-bottom:8px">Con error</div>
+        ${r.errores.map(e => `<div style="font-size:12px;padding:4px 0">
+          <strong style="font-family:monospace">${e.archivo}</strong>
+          <span style="color:var(--muted)"> — ${e.error}</span></div>`).join('')}
+      </div>` : ''}
+
+      <div style="display:flex;gap:9px;justify-content:flex-end">
+        <button class="btn bo" onclick="$('gt-import-res').innerHTML=''">Cerrar</button>
+        ${r.sin_clasificar ? `<button class="btn bs" onclick="gtIrA('pendientes')">⏳ Clasificar pendientes</button>` : ''}
+      </div>`;
+    toast(`${r.insertados} gasto(s) importado(s).`);
+    window._gtImport = null;
+    cargarGastos();
+    gtActualizarBadgePendientes();
+  } catch(e) {
+    toast(e.message, 'err');
+    btn.disabled = false; btn.innerHTML = '📥 Reintentar importación';
+  }
+}
+
+// ══ MAPEO DE PROVEEDORES (auto-clasificación) ════════
+async function cargarMapeoProveedores() {
+  $('gt-prov').innerHTML = '<p class="empty">Cargando…</p>';
+  await gtCargarCatalogos();
+  try {
+    const ms = await api('/gastos/mapeo-proveedores');
+    window._gtMapeo = ms;
+    renderMapeoProveedores(ms);
+  } catch(e) { $('gt-prov').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function renderMapeoProveedores(ms) {
+  const usos = ms.reduce((a,m) => a + (m.veces_usado||0), 0);
+  $('gt-prov').innerHTML = `
+    <div class="card" style="margin-bottom:14px;background:linear-gradient(135deg,#0f766e,#0891b2);color:#fff;
+                             display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.4px;opacity:.9">Reglas de auto-clasificación</div>
+        <div style="font-size:27px;font-weight:900;line-height:1.1">${ms.length} proveedor${ms.length!=1?'es':''}</div>
+      </div>
+      <div style="font-size:12px;opacity:.92;text-align:right;max-width:340px;line-height:1.5">
+        Cada regla dice: “las facturas de este RFC son de esta cuenta de gasto”.
+        Se han aplicado <strong>${usos}</strong> ${usos===1?'vez':'veces'} al importar.
+      </div>
+    </div>
+
+    ${canGastos() ? `
+    <div class="card" style="margin-bottom:14px;background:var(--bg-alt)">
+      <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:9px">➕ Nueva regla</div>
+      <div style="display:grid;grid-template-columns:150px 1fr 1fr auto;gap:8px;align-items:end">
+        <div class="fi" style="margin:0"><label style="font-size:10px">RFC del proveedor</label>
+          <input id="gp-rfc" maxlength="13" placeholder="XAXX010101000"
+                 style="text-transform:uppercase;font-family:monospace">
+        </div>
+        <div class="fi" style="margin:0"><label style="font-size:10px">Nombre (opcional)</label>
+          <input id="gp-nombre" placeholder="Razón social">
+        </div>
+        <div class="fi" style="margin:0"><label style="font-size:10px">Cuenta de gasto</label>
+          <select id="gp-concepto"><option value="">— Seleccionar —</option>${gtOptsConceptos('')}</select>
+        </div>
+        <button class="btn bs bsm" onclick="guardarMapeoProveedor()" style="height:37px">+ Agregar</button>
+      </div>
+    </div>` : ''}
+
+    ${ms.length ? `
+    <div class="tscroll" style="max-height:60vh;overflow:auto"><table>
+      <thead><tr><th style="width:140px">RFC</th><th>Proveedor</th><th>Cuenta de gasto</th>
+        <th style="text-align:center">Aplicada</th><th></th></tr></thead>
+      <tbody>${ms.map(m => `<tr>
+        <td style="font-family:monospace;font-weight:800;font-size:12px">${m.rfc}</td>
+        <td style="font-size:12.5px">${m.nombre_proveedor||'—'}</td>
+        <td>
+          <div style="font-weight:700;font-size:12.5px">${m.concepto||'<span style="color:var(--red)">Concepto eliminado</span>'}</div>
+          ${m.categoria?`<div style="font-size:10px;color:var(--muted);font-weight:700">● ${m.categoria}</div>`:''}
+        </td>
+        <td style="text-align:center">${m.veces_usado > 0
+          ? `<span style="background:#d1fae5;color:#047857;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:900">${m.veces_usado}×</span>`
+          : '<span style="color:var(--muted);font-size:11px">Sin usar</span>'}</td>
+        <td style="text-align:right">${canGastos()
+          ? `<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarMapeoProveedor(${m.id},'${(m.rfc||'').replace(/'/g,"\\'")}')" title="Eliminar regla">🗑</button>` : ''}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>` : `
+    <div style="background:linear-gradient(160deg,#f0fdfa,#ccfbf1);border:2px dashed #5eead4;
+                border-radius:18px;padding:44px 30px;text-align:center">
+      <div style="font-size:56px;margin-bottom:10px">🤝</div>
+      <h3 style="margin:0 0 6px;font-size:19px;font-weight:900;color:#0f766e">Aún no hay reglas</h3>
+      <p style="font-size:13px;color:#115e59;max-width:450px;margin:0 auto;line-height:1.55">
+        La forma más fácil de crearlas es desde la <strong>Bandeja de pendientes</strong>: al clasificar
+        un gasto, deja marcado “Recordar proveedor” y la regla se crea sola.
+      </p>
+    </div>`}`;
+}
+
+async function guardarMapeoProveedor() {
+  const rfc = ($('gp-rfc').value||'').trim().toUpperCase();
+  const concepto_id = $('gp-concepto').value;
+  if (!rfc) return toast('Captura el RFC del proveedor.', 'warn');
+  if (!concepto_id) return toast('Selecciona la cuenta de gasto.', 'warn');
+  try {
+    await api('/gastos/mapeo-proveedores', { method:'POST', body: JSON.stringify({
+      rfc, nombre_proveedor: ($('gp-nombre').value||'').trim() || null, concepto_id }) });
+    toast(`Regla guardada para ${rfc}.`);
+    cargarMapeoProveedores();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarMapeoProveedor(id, rfc) {
+  if (!await confirm2(`¿Eliminar la regla de ${rfc}?\nLos gastos ya clasificados no se modifican.`)) return;
+  try { await api(`/gastos/mapeo-proveedores/${id}`, { method:'DELETE' });
+    toast('Regla eliminada.'); cargarMapeoProveedores(); }
   catch(e) { toast(e.message, 'err'); }
 }
 
@@ -1275,28 +1983,38 @@ function exportarGastosExcel() {
 
 // ── Modal de captura de gasto ──
 async function openGasto(id) {
-  const conceptos = window._gtConceptos && window._gtConceptos.length
-    ? window._gtConceptos : await api('/gastos/conceptos');
-  window._gtConceptos = conceptos;
+  await gtCargarCatalogos();
+  const conceptos = window._gtConceptos || [];
   let g = { concepto_id:'', fecha:new Date().toISOString().slice(0,10), monto:'',
             descripcion:'', proveedor:'', forma_pago:'transferencia', referencia:'',
-            factura_rfc:'', deducible:true, notas:'' };
+            factura_rfc:'', deducible:true, notas:'', uuid:'', subtotal:'', iva:'', retenciones:'' };
   if (id) {
-    const enLista = (window._gtData?.gastos || []).find(x => x.id === id);
+    const enLista = (window._gtData?.gastos || []).find(x => x.id === id)
+                 || (window._gtPend?.gastos || []).find(x => x.id === id);
     if (enLista) g = { ...g, ...enLista };
   }
   const sv = v => (v == null ? '' : String(v)).replace(/"/g,'&quot;');
+  const catActual = (conceptos.find(c => String(c.id) === String(g.concepto_id))||{}).categoria_id || '';
 
   $('modal-gasto-body').innerHTML = `
     <div style="margin:-28px -28px 20px;padding:20px 26px;background:linear-gradient(135deg,#7c2d12,#d97706);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
-      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">${id?'Editar':'Nuevo'} gasto de operación</div>
-      <div style="font-size:20px;font-weight:900;margin-top:3px">🧾 Captura de gasto</div>
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">${id?'Editar':'Nuevo'} egreso · captura manual</div>
+      <div style="font-size:20px;font-weight:900;margin-top:3px">🧾 Gasto sin CFDI</div>
+      <div style="font-size:11.5px;opacity:.85;margin-top:4px">
+        Nómina, impuestos, gastos del extranjero… Todo lo que no llega con XML de proveedor.
+      </div>
     </div>
     <div class="fg" style="gap:11px">
-      <div class="fi full"><label>Concepto <span style="color:var(--red)">*</span></label>
+      <div class="fi"><label>Categoría</label>
+        <select id="gf-categoria" onchange="gtCascadaModal()">
+          <option value="">— Todas —</option>
+          ${(window._gtCategorias||[]).map(k => `<option value="${k.id}" ${String(k.id)===String(catActual)?'selected':''}>${k.nombre}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fi"><label>Cuenta de gasto <span style="color:var(--red)">*</span></label>
         <select id="gf-concepto">
-          <option value="">— Seleccionar concepto —</option>
-          ${conceptos.map(c => `<option value="${c.id}" ${g.concepto_id==c.id?'selected':''}>${c.nombre}</option>`).join('')}
+          <option value="">— Seleccionar —</option>
+          ${gtOptsConceptos(catActual, g.concepto_id)}
         </select>
       </div>
       <div class="fi"><label>Fecha <span style="color:var(--red)">*</span></label>
@@ -1324,9 +2042,35 @@ async function openGasto(id) {
       <div class="fi"><label>Referencia <span style="color:var(--muted);font-weight:400;font-size:10px">(folio, cheque, SPEI)</span></label>
         <input id="gf-referencia" value="${sv(g.referencia)}" style="font-family:monospace">
       </div>
-      <div class="fi"><label>RFC de la factura <span style="color:var(--muted);font-weight:400;font-size:10px">(opcional)</span></label>
-        <input id="gf-rfc" value="${sv(g.factura_rfc)}" maxlength="13" style="text-transform:uppercase;font-family:monospace">
+      <div class="fi"><label>RFC del proveedor <span style="color:var(--muted);font-weight:400;font-size:10px">(opcional)</span></label>
+        <input id="gf-rfc" value="${sv(g.factura_rfc || g.rfc_proveedor)}" maxlength="13" style="text-transform:uppercase;font-family:monospace">
       </div>
+
+      <div class="fi full">
+        <details ${g.uuid || parseFloat(g.iva||0) ? 'open' : ''}
+                 style="background:var(--bg-alt);border:1.5px solid var(--border);border-radius:11px;padding:11px 14px">
+          <summary style="cursor:pointer;font-size:12px;font-weight:800;color:#b45309;list-style:none">
+            🧮 Desglose fiscal <span style="color:var(--muted);font-weight:500">— solo si tienes el comprobante a la mano</span>
+          </summary>
+          <div class="fg" style="gap:10px;margin-top:11px">
+            <div class="fi"><label style="font-size:10px">Subtotal</label>
+              <input type="number" step="0.01" id="gf-subtotal" value="${g.subtotal||''}" placeholder="0.00" style="text-align:right"></div>
+            <div class="fi"><label style="font-size:10px">IVA trasladado</label>
+              <input type="number" step="0.01" id="gf-iva" value="${g.iva||''}" placeholder="0.00" style="text-align:right"></div>
+            <div class="fi"><label style="font-size:10px">Retenciones</label>
+              <input type="number" step="0.01" id="gf-retenciones" value="${g.retenciones||''}" placeholder="0.00" style="text-align:right"></div>
+            <div class="fi"><label style="font-size:10px">Folio fiscal (UUID)</label>
+              <input id="gf-uuid" value="${sv(g.uuid)}" maxlength="36" placeholder="Solo si el gasto tiene CFDI"
+                     style="text-transform:uppercase;font-family:monospace;font-size:11px"
+                     ${id && g.uuid ? 'readonly title="El folio fiscal no se puede cambiar"' : ''}></div>
+          </div>
+          <div style="font-size:10.5px;color:var(--muted);margin-top:7px;line-height:1.5">
+            Si capturas un folio fiscal, el sistema impide que ese mismo comprobante se registre otra vez,
+            aunque después lo importes por XML.
+          </div>
+        </details>
+      </div>
+
       <div class="fi full">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--bg-alt);
                       border:1.5px solid var(--border);border-radius:10px;padding:10px 13px">
@@ -1341,12 +2085,19 @@ async function openGasto(id) {
     </div>
     <div class="form-actions">
       <button class="btn bo" onclick="closeModal('modal-gasto')">Cancelar</button>
-      <button class="btn bs" onclick="guardarGasto(${id||'null'})">💾 ${id?'Guardar cambios':'Registrar gasto'}</button>
+      <button class="btn bs" id="gf-btn" onclick="guardarGasto(${id||'null'})">💾 ${id?'Guardar cambios':'Registrar gasto'}</button>
     </div>`;
   openModal('modal-gasto');
 }
 
+// Cascada del modal: acotar las cuentas de gasto a la categoría elegida
+function gtCascadaModal() {
+  const cat = $('gf-categoria').value, sel = $('gf-concepto'), prev = sel.value;
+  sel.innerHTML = '<option value="">— Seleccionar —</option>' + gtOptsConceptos(cat, prev);
+}
+
 async function guardarGasto(id) {
+  const num = v => { const n = parseFloat(v); return isNaN(n) ? null : n; };
   const body = {
     concepto_id: $('gf-concepto').value,
     fecha      : $('gf-fecha').value,
@@ -1357,35 +2108,71 @@ async function guardarGasto(id) {
     referencia : $('gf-referencia').value.trim(),
     factura_rfc: $('gf-rfc').value.trim().toUpperCase(),
     deducible  : $('gf-deducible').checked,
-    notas      : $('gf-notas').value.trim()
+    notas      : $('gf-notas').value.trim(),
+    subtotal   : num($('gf-subtotal')?.value),
+    iva        : num($('gf-iva')?.value),
+    retenciones: num($('gf-retenciones')?.value),
+    uuid       : ($('gf-uuid')?.value || '').trim().toUpperCase() || null
   };
-  if (!body.concepto_id) return toast('Selecciona el concepto del gasto.', 'warn');
+  // La captura manual exige clasificar de inmediato: sin cuenta de gasto no hay estado financiero
+  if (!body.concepto_id) return toast('Selecciona la cuenta de gasto.', 'warn');
   if (!body.fecha)       return toast('Captura la fecha.', 'warn');
   if (!(body.monto > 0)) return toast('El monto debe ser mayor a 0.', 'warn');
+  if (body.uuid && body.uuid.length !== 36)
+    return toast('El folio fiscal (UUID) debe tener 36 caracteres. Déjalo vacío si no lo tienes.', 'warn');
+
+  const btn = $('gf-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="gt-spin"></span> Guardando…';
   try {
     if (id) await api(`/gastos/${id}`, { method:'PUT',  body: JSON.stringify(body) });
     else    await api('/gastos',       { method:'POST', body: JSON.stringify(body) });
     toast(id ? 'Gasto actualizado.' : 'Gasto registrado.');
     closeModal('modal-gasto');
     cargarGastos();
-  } catch(e) { toast(e.message, 'err'); }
+    gtActualizarBadgePendientes();
+  } catch(e) {
+    toast(e.message, 'err');
+    btn.disabled = false; btn.innerHTML = id ? '💾 Guardar cambios' : '💾 Registrar gasto';
+  }
 }
 
 // ── Catálogo de conceptos ──
 async function cargarCatalogoGastos() {
   $('gt-catalogo').innerHTML = '<p class="empty">Cargando…</p>';
+  await gtCargarCatalogos(true);
   try {
     const cs = await api('/gastos/conceptos?todos=true');
-    window._gtConceptos = cs.filter(c => c.activo);
     const activos = cs.filter(c => c.activo).length;
+    const cats = window._gtCategorias || [];
+    const sinCat = cs.filter(c => !c.categoria_id).length;
     $('gt-catalogo').innerHTML = `
+      <div class="gt-cards" style="margin-bottom:14px">
+        ${cats.map(k => {
+          const tot = cs.filter(c => String(c.categoria_id) === String(k.id))
+                        .reduce((a,c) => a + parseFloat(c.total_historico||0), 0);
+          return `<div class="gt-card" style="border-color:${k.color}33;background:${k.color}0d;cursor:pointer"
+                       onclick="gtIrA('lista');$('gt-categoria').value='${k.id}';gtFiltrarPorCategoria()">
+            <div class="ic">📂</div>
+            <div class="l" style="color:${k.color}">${k.nombre}</div>
+            <div class="v" style="color:${k.color};font-size:21px">${fmt(tot)}</div>
+            <div class="s" style="color:#64748b">${k.n_conceptos} cuenta${k.n_conceptos!=1?'s':''} de gasto</div>
+          </div>`;
+        }).join('')}
+      </div>
+
       ${canGastos()?`
       <div class="card" style="margin-bottom:14px;background:var(--bg-alt)">
-        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:9px">➕ Agregar concepto</div>
-        <div style="display:grid;grid-template-columns:1fr 90px auto;gap:8px;align-items:end">
-          <div class="fi" style="margin:0"><label style="font-size:10px">Nombre del concepto</label>
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:9px">➕ Agregar cuenta de gasto</div>
+        <div style="display:grid;grid-template-columns:1fr 200px 90px auto;gap:8px;align-items:end">
+          <div class="fi" style="margin:0"><label style="font-size:10px">Nombre</label>
             <input id="gc-nombre" placeholder="Ej: MANTENIMIENTO DE AIRE ACONDICIONADO"
                    onkeydown="if(event.key==='Enter')crearConceptoGasto()">
+          </div>
+          <div class="fi" style="margin:0"><label style="font-size:10px">Categoría</label>
+            <select id="gc-categoria">
+              <option value="">— Sin categoría —</option>
+              ${cats.map(k=>`<option value="${k.id}">${k.nombre}</option>`).join('')}
+            </select>
           </div>
           <div class="fi" style="margin:0"><label style="font-size:10px">Orden</label>
             <input type="number" id="gc-orden" value="99" style="text-align:center">
@@ -1394,17 +2181,28 @@ async function cargarCatalogoGastos() {
         </div>
       </div>`:''}
       <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">
-        Conceptos registrados — ${activos} activo${activos!=1?'s':''}${cs.length-activos ? ` · ${cs.length-activos} inactivo${cs.length-activos!=1?'s':''}` : ''}
+        Cuentas de gasto — ${activos} activa${activos!=1?'s':''}${cs.length-activos ? ` · ${cs.length-activos} inactiva${cs.length-activos!=1?'s':''}` : ''}${sinCat ? ` · <span style="color:#b45309">${sinCat} sin categoría</span>` : ''}
       </div>
       <div class="tscroll" style="max-height:60vh;overflow:auto"><table>
         <thead><tr>
-          <th style="width:60px">Orden</th><th>Concepto</th>
+          <th style="width:60px">Orden</th><th>Cuenta de gasto</th>
           <th style="text-align:center">Registros</th><th style="text-align:right">Total histórico</th>
           <th style="text-align:center">Estado</th><th></th>
         </tr></thead>
         <tbody>${cs.map(c => `<tr${c.activo?'':' style="opacity:.5"'}>
           <td style="text-align:center;color:var(--muted)">${c.orden}</td>
-          <td style="font-weight:700">${c.nombre}</td>
+          <td>
+            <div style="font-weight:700">${c.nombre}</div>
+            ${canGastos()
+              ? `<select class="gt-mini" style="margin-top:3px;font-size:10.5px;padding:3px 7px;max-width:230px;
+                          color:${c.categoria_color||'#94a3b8'}"
+                         onchange="recategorizarConcepto(${c.id},this.value)">
+                   <option value="">○ Sin categoría</option>
+                   ${cats.map(k=>`<option value="${k.id}" ${String(k.id)===String(c.categoria_id)?'selected':''}>● ${k.nombre}</option>`).join('')}
+                 </select>`
+              : `<div style="font-size:10px;font-weight:800;color:${c.categoria_color||'#cbd5e1'}">
+                   ${c.categoria ? `● ${c.categoria}` : '○ Sin categoría'}</div>`}
+          </td>
           <td style="text-align:center">${c.n_gastos > 0
             ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:800">${c.n_gastos}</span>`
             : '<span style="color:var(--muted)">—</span>'}</td>
@@ -1424,10 +2222,12 @@ async function cargarCatalogoGastos() {
 async function crearConceptoGasto() {
   const nombre = ($('gc-nombre')?.value || '').trim();
   const orden  = parseInt($('gc-orden')?.value) || 99;
-  if (!nombre) return toast('Escribe el nombre del concepto.', 'warn');
+  const categoria_id = $('gc-categoria')?.value || null;
+  if (!nombre) return toast('Escribe el nombre de la cuenta de gasto.', 'warn');
   try {
-    await api('/gastos/conceptos', { method:'POST', body: JSON.stringify({ nombre, orden }) });
-    toast(`Concepto "${nombre}" agregado.`);
+    await api('/gastos/conceptos', { method:'POST', body: JSON.stringify({ nombre, orden, categoria_id }) });
+    toast(`Cuenta de gasto "${nombre}" agregada.`);
+    $('gc-nombre').value = '';
     cargarCatalogoGastos();
   } catch(e) { toast(e.message, 'err'); }
 }
@@ -1436,15 +2236,28 @@ async function editarConceptoGasto(id) {
   const c = (window._gtConceptos || []).find(x => x.id === id)
          || (await api('/gastos/conceptos?todos=true')).find(x => x.id === id);
   if (!c) return;
-  const nombre = window.prompt('Nombre del concepto:', c.nombre);
+  const nombre = window.prompt('Nombre de la cuenta de gasto:', c.nombre);
   if (nombre == null || !nombre.trim()) return;
   try {
     await api(`/gastos/conceptos/${id}`, {
       method:'PUT', body: JSON.stringify({ nombre, orden: c.orden, activo: c.activo })
     });
-    toast('Concepto actualizado.');
+    toast('Cuenta de gasto actualizada.');
     cargarCatalogoGastos();
   } catch(e) { toast(e.message, 'err'); }
+}
+
+// Cambiar de categoría desde el propio catálogo, sin abrir nada
+async function recategorizarConcepto(id, categoriaId) {
+  const c = (await api('/gastos/conceptos?todos=true')).find(x => x.id === id);
+  if (!c) return;
+  try {
+    await api(`/gastos/conceptos/${id}`, { method:'PUT', body: JSON.stringify({
+      nombre: c.nombre, orden: c.orden, activo: c.activo, categoria_id: categoriaId || null }) });
+    toast('Categoría actualizada.');
+    await gtCargarCatalogos(true);
+    cargarCatalogoGastos();
+  } catch(e) { toast(e.message, 'err'); cargarCatalogoGastos(); }
 }
 
 async function eliminarConceptoGasto(id, nombre, nGastos) {

@@ -147,6 +147,10 @@ const CATEGORIAS_SEED = [
     await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS uuid TEXT`);
     await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS origen TEXT DEFAULT 'MANUAL'`);
     await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS rfc_proveedor TEXT`);
+    // Receptor del CFDI: es una de nuestras empresas. Se guarda porque el SAT
+    // exige ambos RFC para consultar el estatus del comprobante.
+    await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS rfc_receptor TEXT`);
+    await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS sat_detalle TEXT`);
     await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS nombre_proveedor TEXT`);
     await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS subtotal NUMERIC(14,2)`);
     await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS iva NUMERIC(14,2)`);
@@ -333,12 +337,13 @@ router.post('/importar-xml', requireRol('admin', 'capturista', 'tesoreria', 'ger
         await query(
           `INSERT INTO fac_gastos(
              concepto_id, fecha, monto, subtotal, iva, retenciones,
-             uuid, origen, rfc_proveedor, nombre_proveedor, serie_folio,
+             uuid, origen, rfc_proveedor, nombre_proveedor, serie_folio, rfc_receptor,
              descripcion, proveedor, factura_rfc, forma_pago, creado_por)
-           VALUES($1,$2,$3,$4,$5,$6,$7,'XML',$8,$9,$10,$11,$12,$13,$14,$15)`,
+           VALUES($1,$2,$3,$4,$5,$6,$7,'XML',$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
           [conceptoId, c.fecha.slice(0,10), parseFloat(c.total),
            parseFloat(c.subtotal) || null, parseFloat(c.iva) || null, parseFloat(c.retenciones) || 0,
            uuid, rfc, c.nombre_emisor || null, c.serie_folio || null,
+           (c.rfc_receptor || '').trim().toUpperCase() || null,
            c.concepto || null, c.nombre_emisor || null, rfc,
            c.forma_pago || 'transferencia', req.usuario.id]
         );
@@ -403,6 +408,106 @@ router.patch('/:id/clasificar', requireRol('admin', 'capturista', 'tesoreria', '
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══ VALIDACIÓN DEL CFDI ANTE EL SAT ════════════════
+const SAT_WSDL = 'https://consultaqr.facturaelectronica.sat.gob.mx/ConsultaCFDIService.svc';
+
+function _tagSAT(xml, tag) {
+  const m = xml.match(new RegExp(`<a:${tag}[^>]*>([\\s\\S]*?)</a:${tag}>`, 'i'));
+  return m ? m[1].trim() : '';
+}
+
+async function consultarSAT({ re, rr, tt, id }) {
+  const expresion = `?re=${re}&rr=${rr}&tt=${tt}&id=${id}`;
+  const envelope =
+    `<?xml version="1.0" encoding="UTF-8"?>` +
+    `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">` +
+    `<s:Header/><s:Body><tem:Consulta><tem:expresionImpresa><![CDATA[${expresion}]]></tem:expresionImpresa>` +
+    `</tem:Consulta></s:Body></s:Envelope>`;
+  // El servicio del SAT llega a tardar; se corta a los 20 s para no colgar la petición
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const resp = await fetch(SAT_WSDL, {
+      method : 'POST',
+      headers: { 'Content-Type': 'text/xml; charset=utf-8',
+                 'SOAPAction'  : 'http://tempuri.org/IConsultaCFDIService/Consulta' },
+      body: envelope, signal: ctrl.signal
+    });
+    const xml = await resp.text();
+    if (!resp.ok) throw new Error(`El SAT respondió ${resp.status}`);
+    return {
+      estado             : _tagSAT(xml, 'Estado'),
+      codigo_estatus     : _tagSAT(xml, 'CodigoEstatus'),
+      estatus_cancelacion: _tagSAT(xml, 'EstatusCancelacion'),
+      validacion_efos    : _tagSAT(xml, 'ValidacionEFOS')
+    };
+  } finally { clearTimeout(timer); }
+}
+
+// POST /api/gastos/:id/validar-sat
+// En un gasto el emisor es el proveedor y el receptor es una empresa nuestra.
+router.post('/:id/validar-sat', async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT uuid, monto, rfc_proveedor, rfc_receptor FROM fac_gastos WHERE id=$1`,
+      [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Gasto no encontrado.' });
+
+    const g = r.rows[0];
+    if (!g.uuid)          return res.status(400).json({ error: 'Este gasto no tiene folio fiscal (UUID) que consultar.' });
+    if (!g.rfc_proveedor) return res.status(400).json({ error: 'Falta el RFC del proveedor para consultar al SAT.' });
+
+    // Si el XML no traía receptor guardado, se prueban los RFC de nuestras emisoras
+    let receptores = [];
+    if (g.rfc_receptor) receptores = [g.rfc_receptor.trim().toUpperCase()];
+    else {
+      const er = await query(`SELECT rfc FROM fac_empresas_receptoras WHERE rfc IS NOT NULL`);
+      receptores = er.rows.map(x => String(x.rfc).trim().toUpperCase()).filter(Boolean);
+      if (!receptores.length)
+        return res.status(400).json({ error: 'No se sabe a qué empresa se facturó este gasto. Reimporta el XML o captura el RFC receptor.' });
+    }
+
+    const emisor = g.rfc_proveedor.trim().toUpperCase();
+    const uuid   = String(g.uuid).trim().toUpperCase();
+    const n = parseFloat(g.monto);
+    // El SAT es estricto con el formato del total; se prueban las variantes válidas
+    const formatosTT = [...new Set([n.toFixed(2), String(n), n.toFixed(6), n.toFixed(0)])];
+
+    // Cada consulta puede tardar; se acotan los intentos para no colgar la petición.
+    // Con varios receptores posibles se prueba primero el formato de total más común
+    // en todos ellos, y solo después las variantes.
+    const intentos = [];
+    if (receptores.length === 1) {
+      formatosTT.forEach(tt => intentos.push({ rr: receptores[0], tt }));
+    } else {
+      receptores.forEach(rr => intentos.push({ rr, tt: formatosTT[0] }));
+      formatosTT.slice(1).forEach(tt => intentos.push({ rr: receptores[0], tt }));
+    }
+
+    let sat = null;
+    for (const it of intentos.slice(0, 12)) {
+      const q = await consultarSAT({ re: emisor, rr: it.rr, tt: it.tt, id: uuid });
+      if (!sat) sat = q;
+      if (q.estado && !/no encontrado/i.test(q.estado)) { sat = q; break; }
+    }
+
+    const estatus = (sat && sat.estado) || 'Sin respuesta';
+    const detalle = [sat?.codigo_estatus, sat?.estatus_cancelacion, sat?.validacion_efos]
+      .filter(Boolean).join(' · ');
+    await query(
+      `UPDATE fac_gastos SET estatus_sat=$1, sat_detalle=$2, sat_validado_en=NOW() WHERE id=$3`,
+      [estatus, detalle || null, req.params.id]
+    );
+    res.json({ ok: true, estatus_sat: estatus, detalle: detalle || null,
+               consultado: { emisor, receptores_probados: receptores.length, uuid } });
+  } catch (e) {
+    const msg = e.name === 'AbortError'
+      ? 'El SAT no respondió a tiempo. Vuelve a intentar en unos segundos.'
+      : e.message;
+    res.status(500).json({ error: msg });
+  }
+});
+
 // ═══ CATÁLOGO DE CONCEPTOS ══════════════════════════
 router.get('/conceptos', async (req, res) => {
   try {
@@ -423,12 +528,15 @@ router.get('/conceptos', async (req, res) => {
 
 router.post('/conceptos', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
   try {
-    const { nombre, grupo, orden } = req.body;
+    const { nombre, grupo, orden, categoria_id } = req.body;
     if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Nombre del concepto requerido.' });
     const r = await query(
-      `INSERT INTO fac_gastos_conceptos(nombre, grupo, orden) VALUES($1,$2,$3)
-       ON CONFLICT (nombre) DO UPDATE SET activo = TRUE RETURNING *`,
-      [nombre.trim(), grupo || 'Gastos de Operación', parseInt(orden) || 99]
+      `INSERT INTO fac_gastos_conceptos(nombre, grupo, orden, categoria_id) VALUES($1,$2,$3,$4)
+       ON CONFLICT (nombre) DO UPDATE
+         SET activo = TRUE,
+             categoria_id = COALESCE(EXCLUDED.categoria_id, fac_gastos_conceptos.categoria_id)
+       RETURNING *`,
+      [nombre.trim(), grupo || 'Gastos de Operación', parseInt(orden) || 99, categoria_id || null]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -436,11 +544,18 @@ router.post('/conceptos', requireRol('admin', 'capturista', 'tesoreria', 'gerent
 
 router.put('/conceptos/:id', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
   try {
-    const { nombre, grupo, orden, activo } = req.body;
+    const { nombre, grupo, orden, activo, categoria_id } = req.body;
     if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Nombre del concepto requerido.' });
+    // Solo se toca la categoría si el cliente la mandó: así se puede dejar un
+    // concepto sin categoría (null) sin que las demás ediciones la borren.
+    const tocarCat = Object.prototype.hasOwnProperty.call(req.body, 'categoria_id');
     await query(
-      `UPDATE fac_gastos_conceptos SET nombre=$1, grupo=$2, orden=$3, activo=$4 WHERE id=$5`,
-      [nombre.trim(), grupo || 'Gastos de Operación', parseInt(orden) || 99, activo !== false, req.params.id]
+      `UPDATE fac_gastos_conceptos
+          SET nombre=$1, grupo=$2, orden=$3, activo=$4,
+              categoria_id = CASE WHEN $5 THEN $6::int ELSE categoria_id END
+        WHERE id=$7`,
+      [nombre.trim(), grupo || 'Gastos de Operación', parseInt(orden) || 99,
+       activo !== false, tocarCat, categoria_id || null, req.params.id]
     );
     res.json({ ok: true });
   } catch (e) {
@@ -589,21 +704,46 @@ router.post('/', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), asyn
 router.put('/:id', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
   try {
     const { concepto_id, fecha, monto, descripcion, proveedor,
-            forma_pago, referencia, factura_rfc, deducible, notas } = req.body;
+            forma_pago, referencia, factura_rfc, deducible, notas,
+            uuid, subtotal, iva, retenciones, rfc_proveedor } = req.body;
     if (!concepto_id || !fecha || !monto)
       return res.status(400).json({ error: 'Concepto, fecha y monto son requeridos.' });
     const m = parseFloat(monto);
     if (!(m > 0)) return res.status(400).json({ error: 'El monto debe ser mayor a 0.' });
+
+    // El folio fiscal solo se puede fijar si el gasto aún no tenía uno, y nunca
+    // repitiendo el de otro registro.
+    const actual = await query(`SELECT uuid FROM fac_gastos WHERE id=$1`, [req.params.id]);
+    if (!actual.rows.length) return res.status(404).json({ error: 'Gasto no encontrado.' });
+    let uuidFinal = actual.rows[0].uuid;
+    if (!uuidFinal) {
+      const nuevo = (uuid || '').trim().toUpperCase() || null;
+      if (nuevo) {
+        const ya = await query(`SELECT id FROM fac_gastos WHERE uuid=$1 AND id<>$2`, [nuevo, req.params.id]);
+        if (ya.rows.length)
+          return res.status(400).json({ error: 'Ese folio fiscal (UUID) ya está registrado en otro gasto.' });
+        uuidFinal = nuevo;
+      }
+    }
+
+    const num = v => { const n = parseFloat(v); return isNaN(n) ? null : n; };
     await query(
       `UPDATE fac_gastos SET concepto_id=$1, fecha=$2, monto=$3, descripcion=$4, proveedor=$5,
-         forma_pago=$6, referencia=$7, factura_rfc=$8, deducible=$9, notas=$10, actualizado_en=NOW()
-       WHERE id=$11`,
+         forma_pago=$6, referencia=$7, factura_rfc=$8, deducible=$9, notas=$10,
+         uuid=$11, subtotal=$12, iva=$13, retenciones=COALESCE($14, retenciones),
+         rfc_proveedor=COALESCE($15, rfc_proveedor), actualizado_en=NOW()
+       WHERE id=$16`,
       [concepto_id, fecha, m, descripcion || null, proveedor || null,
        forma_pago || 'transferencia', referencia || null, factura_rfc || null,
-       deducible !== false, notas || null, req.params.id]
+       deducible !== false, notas || null,
+       uuidFinal, num(subtotal), num(iva), num(retenciones),
+       (rfc_proveedor || factura_rfc || '').trim().toUpperCase() || null, req.params.id]
     );
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'Ese folio fiscal (UUID) ya está registrado.' });
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Mismos roles que canGastos() en la interfaz, para que quien vea el botón pueda usarlo
