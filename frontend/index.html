@@ -2258,13 +2258,21 @@ async function guardarGasto(id) {
 
 // ── Catálogo de conceptos ──
 async function cargarCatalogoGastos() {
+  // Recategorizar o agregar una cuenta vuelve a pintar toda la pestaña;
+  // se conserva lo que el usuario tenía filtrado para no perder su lugar.
+  const filtro = {
+    q  : $('gcf-buscar')?.value ?? '',
+    cat: $('gcf-cat')?.value ?? '',
+    est: $('gcf-estado')?.value ?? 'activo',
+    uso: $('gcf-uso')?.value ?? ''
+  };
   $('gt-catalogo').innerHTML = '<p class="empty">Cargando…</p>';
   await gtCargarCatalogos(true);
+  window._gtFiltroCat = filtro;
   try {
     const cs = await api('/gastos/conceptos?todos=true');
-    const activos = cs.filter(c => c.activo).length;
+    window._gtCatalogo = cs;
     const cats = window._gtCategorias || [];
-    const sinCat = cs.filter(c => !c.categoria_id).length;
     $('gt-catalogo').innerHTML = `
       <div class="gt-cards" style="margin-bottom:14px">
         ${cats.map(k => {
@@ -2275,9 +2283,11 @@ async function cargarCatalogoGastos() {
             <div class="l" style="color:${k.color}">${k.nombre}</div>
             <div class="v" style="color:${k.color};font-size:21px">${fmt(tot)}</div>
             <div class="s" style="color:#64748b">${k.n_conceptos} cuenta${k.n_conceptos!=1?'s':''} de gasto</div>
-            <div style="display:flex;gap:5px;margin-top:9px">
+            <div style="display:flex;gap:5px;margin-top:9px;flex-wrap:wrap">
               <button class="btn bo bsm" style="padding:3px 9px;font-size:10.5px"
-                      onclick="gtIrA('lista');$('gt-categoria').value='${k.id}';gtFiltrarPorCategoria()">Ver gastos</button>
+                      onclick="gtFiltrarCatalogoPorCat('${k.id}')" title="Ver sus cuentas de gasto aquí abajo">📂 Cuentas</button>
+              <button class="btn bo bsm" style="padding:3px 9px;font-size:10.5px"
+                      onclick="gtIrA('lista');$('gt-categoria').value='${k.id}';gtFiltrarPorCategoria()">💸 Gastos</button>
               ${canGastos()?`<button class="btn bo bsm" style="padding:3px 8px;font-size:10.5px"
                       onclick="editarCategoriaGasto(${k.id})" title="Renombrar o cambiar color">✏️</button>`:''}
               ${canGastosCatalogo()?`<button class="btn bd bsm" style="padding:3px 8px;font-size:10.5px"
@@ -2315,43 +2325,154 @@ async function cargarCatalogoGastos() {
           <button class="btn bs bsm" onclick="crearConceptoGasto()" style="height:36px">+ Agregar</button>
         </div>
       </div>`:''}
-      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">
-        Cuentas de gasto — ${activos} activa${activos!=1?'s':''}${cs.length-activos ? ` · ${cs.length-activos} inactiva${cs.length-activos!=1?'s':''}` : ''}${sinCat ? ` · <span style="color:#b45309">${sinCat} sin categoría</span>` : ''}
+      <div class="gt-toolbar" style="margin-bottom:10px">
+        <div class="gt-search">
+          <span style="color:#94a3b8;font-size:14px">🔍</span>
+          <input id="gcf-buscar" placeholder="Buscar cuenta de gasto por nombre…" oninput="renderTablaCatalogo()">
+        </div>
+        <select id="gcf-cat" class="gt-filtro" onchange="renderTablaCatalogo()" style="max-width:230px">
+          <option value="">Todas las categorías</option>
+          ${cats.map(k=>`<option value="${k.id}">${k.nombre}</option>`).join('')}
+          <option value="__sin">○ Sin categoría</option>
+        </select>
+        <select id="gcf-estado" class="gt-filtro" onchange="renderTablaCatalogo()">
+          <option value="activo">Solo activas</option>
+          <option value="">Activas e inactivas</option>
+          <option value="inactivo">Solo inactivas</option>
+        </select>
+        <select id="gcf-uso" class="gt-filtro" onchange="renderTablaCatalogo()">
+          <option value="">Con y sin movimientos</option>
+          <option value="con">Solo con gastos registrados</option>
+          <option value="sin">Solo sin usar</option>
+        </select>
+        <button class="btn bo bsm" onclick="gtLimpiarFiltroCatalogo()" style="margin-left:auto">✕ Limpiar</button>
       </div>
-      <div class="tscroll" style="max-height:60vh;overflow:auto"><table>
-        <thead><tr>
-          <th style="width:60px">Orden</th><th>Cuenta de gasto</th>
-          <th style="text-align:center">Registros</th><th style="text-align:right">Total histórico</th>
-          <th style="text-align:center">Estado</th><th></th>
-        </tr></thead>
-        <tbody>${cs.map(c => `<tr${c.activo?'':' style="opacity:.5"'}>
-          <td style="text-align:center;color:var(--muted)">${c.orden}</td>
-          <td>
-            <div style="font-weight:700">${c.nombre}</div>
-            ${canGastos()
-              ? `<select class="gt-mini" style="margin-top:3px;font-size:10.5px;padding:3px 7px;max-width:230px;
-                          color:${c.categoria_color||'#94a3b8'}"
-                         onchange="recategorizarConcepto(${c.id},this.value)">
-                   <option value="">○ Sin categoría</option>
-                   ${cats.map(k=>`<option value="${k.id}" ${String(k.id)===String(c.categoria_id)?'selected':''}>● ${k.nombre}</option>`).join('')}
-                 </select>`
-              : `<div style="font-size:10px;font-weight:800;color:${c.categoria_color||'#cbd5e1'}">
-                   ${c.categoria ? `● ${c.categoria}` : '○ Sin categoría'}</div>`}
-          </td>
-          <td style="text-align:center">${c.n_gastos > 0
-            ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:800">${c.n_gastos}</span>`
-            : '<span style="color:var(--muted)">—</span>'}</td>
-          <td style="text-align:right;font-weight:800;color:${parseFloat(c.total_historico)>0?'#b45309':'var(--muted)'}">${fmt(c.total_historico)}</td>
-          <td style="text-align:center">${c.activo
-            ? '<span style="color:#166534;font-weight:700;font-size:11px">● Activo</span>'
-            : '<span style="color:var(--muted);font-size:11px">○ Inactivo</span>'}</td>
-          <td style="white-space:nowrap;text-align:right">
-            ${canGastos()?`<button class="btn bg bsm" style="padding:4px 8px" onclick="editarConceptoGasto(${c.id})" title="Editar">✏️</button>`:''}
-            ${canGastosCatalogo()?`<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarConceptoGasto(${c.id},'${(c.nombre||'').replace(/'/g,"\\'")}',${c.n_gastos})" title="${c.n_gastos>0?'Desactivar (tiene gastos)':'Eliminar'}">🗑</button>`:''}
-          </td>
-        </tr>`).join('')}</tbody>
-      </table></div>`;
+      <div id="gt-cat-tabla"></div>`;
+    const f = window._gtFiltroCat;
+    if (f) {
+      $('gcf-buscar').value = f.q;
+      $('gcf-cat').value    = f.cat;
+      $('gcf-estado').value = f.est;
+      $('gcf-uso').value    = f.uso;
+    }
+    renderTablaCatalogo();
   } catch(e) { $('gt-catalogo').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function gtFiltrarCatalogoPorCat(catId) {
+  const sel = $('gcf-cat'); if (!sel) return;
+  sel.value = catId;
+  renderTablaCatalogo();
+  $('gt-cat-tabla')?.scrollIntoView({ behavior:'smooth', block:'start' });
+}
+
+function gtLimpiarFiltroCatalogo() {
+  $('gcf-buscar').value = '';
+  $('gcf-cat').value = '';
+  $('gcf-estado').value = 'activo';
+  $('gcf-uso').value = '';
+  renderTablaCatalogo();
+}
+
+// El filtrado es en memoria: el catálogo son decenas de cuentas, no miles,
+// así que no vale la pena ir al servidor en cada tecla.
+function renderTablaCatalogo() {
+  const cont = $('gt-cat-tabla'); if (!cont) return;
+  const todas = window._gtCatalogo || [];
+  const cats  = window._gtCategorias || [];
+
+  const q      = ($('gcf-buscar')?.value || '').trim().toLowerCase();
+  const catSel = $('gcf-cat')?.value || '';
+  const est    = $('gcf-estado')?.value ?? 'activo';
+  const uso    = $('gcf-uso')?.value || '';
+
+  const norm = s => String(s||'').toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g,'');   // para que "nomina" encuentre "NÓMINA"
+  const qn = norm(q);
+
+  const cs = todas.filter(c => {
+    if (qn && !norm(c.nombre).includes(qn) && !norm(c.categoria).includes(qn)) return false;
+    if (catSel === '__sin' && c.categoria_id) return false;
+    if (catSel && catSel !== '__sin' && String(c.categoria_id) !== catSel) return false;
+    if (est === 'activo'   && !c.activo) return false;
+    if (est === 'inactivo' &&  c.activo) return false;
+    if (uso === 'con' && !(c.n_gastos > 0)) return false;
+    if (uso === 'sin' &&   c.n_gastos > 0)  return false;
+    return true;
+  });
+
+  const filtrando = qn || catSel || est !== 'activo' || uso;
+  const sumaFiltro = cs.reduce((a,c) => a + parseFloat(c.total_historico||0), 0);
+  const sinCat = todas.filter(c => !c.categoria_id && c.activo).length;
+
+  if (!cs.length) {
+    cont.innerHTML = `
+      <div style="background:var(--bg-alt);border:2px dashed var(--border);border-radius:14px;
+                  padding:34px 24px;text-align:center">
+        <div style="font-size:40px;opacity:.4">🔍</div>
+        <h4 style="margin:8px 0 4px;font-size:15px;font-weight:900;color:var(--dark)">Ninguna cuenta coincide</h4>
+        <p style="font-size:12.5px;color:var(--muted);margin:0 0 14px">Prueba con otro texto o quita algún filtro.</p>
+        <button class="btn bo bsm" onclick="gtLimpiarFiltroCatalogo()">✕ Limpiar filtros</button>
+      </div>`;
+    return;
+  }
+
+  cont.innerHTML = `
+    <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;
+                color:var(--muted);margin-bottom:8px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <span>${filtrando ? `${cs.length} de ${todas.length} cuenta${todas.length!=1?'s':''}` :
+                          `Cuentas de gasto — ${cs.length}`}${
+             sinCat && !filtrando ? ` · <span style="color:#b45309">${sinCat} sin categoría</span>` : ''}</span>
+      <span style="color:#b45309">Total histórico ${fmt(sumaFiltro)}</span>
+    </div>
+    <div class="tscroll" style="max-height:60vh;overflow:auto"><table>
+      <thead><tr>
+        <th style="width:60px">Orden</th><th>Cuenta de gasto</th>
+        <th style="text-align:center">Registros</th><th style="text-align:right">Total histórico</th>
+        <th style="text-align:center">Estado</th><th></th>
+      </tr></thead>
+      <tbody>${cs.map(c => `<tr${c.activo?'':' style="opacity:.5"'}>
+        <td style="text-align:center;color:var(--muted)">${c.orden}</td>
+        <td>
+          <div style="font-weight:700">${gtResaltar(c.nombre, q)}</div>
+          ${canGastos()
+            ? `<select class="gt-mini" style="margin-top:3px;font-size:10.5px;padding:3px 7px;max-width:230px;
+                        color:${c.categoria_color||'#94a3b8'}"
+                       onchange="recategorizarConcepto(${c.id},this.value)">
+                 <option value="">○ Sin categoría</option>
+                 ${cats.map(k=>`<option value="${k.id}" ${String(k.id)===String(c.categoria_id)?'selected':''}>● ${k.nombre}</option>`).join('')}
+               </select>`
+            : `<div style="font-size:10px;font-weight:800;color:${c.categoria_color||'#cbd5e1'}">
+                 ${c.categoria ? `● ${c.categoria}` : '○ Sin categoría'}</div>`}
+        </td>
+        <td style="text-align:center">${c.n_gastos > 0
+          ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:800">${c.n_gastos}</span>`
+          : '<span style="color:var(--muted)">—</span>'}</td>
+        <td style="text-align:right;font-weight:800;color:${parseFloat(c.total_historico)>0?'#b45309':'var(--muted)'}">${fmt(c.total_historico)}</td>
+        <td style="text-align:center">${c.activo
+          ? '<span style="color:#166534;font-weight:700;font-size:11px">● Activo</span>'
+          : '<span style="color:var(--muted);font-size:11px">○ Inactivo</span>'}</td>
+        <td style="white-space:nowrap;text-align:right">
+          ${c.n_gastos > 0 ? `<button class="btn bo bsm" style="padding:4px 8px"
+             onclick="gtIrA('lista');$('gt-concepto').value='${c.id}';cargarGastos()" title="Ver sus gastos">💸</button>` : ''}
+          ${canGastos()?`<button class="btn bg bsm" style="padding:4px 8px" onclick="editarConceptoGasto(${c.id})" title="Editar">✏️</button>`:''}
+          ${canGastosCatalogo()?`<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarConceptoGasto(${c.id},'${(c.nombre||'').replace(/'/g,"\\'")}',${c.n_gastos})" title="${c.n_gastos>0?'Desactivar (tiene gastos)':'Eliminar'}">🗑</button>`:''}
+        </td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+// Resalta lo buscado dentro del nombre, para ubicarlo de un vistazo.
+// Solo se resalta cuando el texto coincide tal cual: quitar acentos con NFD
+// cambia la longitud de la cadena y las posiciones dejarían de corresponder,
+// así que en ese caso se devuelve el nombre sin marcar (la fila igual salió).
+function gtResaltar(texto, q) {
+  const t = String(texto || '');
+  if (!q) return t;
+  const i = t.toLowerCase().indexOf(q.toLowerCase());
+  if (i < 0) return t;
+  return t.slice(0,i) + `<mark style="background:#fde68a;color:#78350f;padding:0 2px;border-radius:3px">` +
+         t.slice(i, i+q.length) + `</mark>` + t.slice(i+q.length);
 }
 
 async function crearConceptoGasto() {
