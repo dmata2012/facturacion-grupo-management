@@ -459,67 +459,174 @@ async function consultarSAT({ re, rr, tt, id }) {
   } finally { clearTimeout(timer); }
 }
 
-// POST /api/gastos/:id/validar-sat
+// Valida un gasto contra el SAT y guarda el resultado.
 // En un gasto el emisor es el proveedor y el receptor es una empresa nuestra.
+// Lanza Error con mensaje legible cuando falta algún dato para poder consultar.
+async function validarGastoSAT(gastoId, receptoresCache) {
+  const r = await query(
+    `SELECT uuid, monto, rfc_proveedor, rfc_receptor FROM fac_gastos WHERE id=$1`, [gastoId]);
+  if (!r.rows.length) { const e = new Error('Gasto no encontrado.'); e.status = 404; throw e; }
+
+  const g = r.rows[0];
+  if (!g.uuid)          { const e = new Error('Este gasto no tiene folio fiscal (UUID) que consultar.'); e.status = 400; throw e; }
+  if (!g.rfc_proveedor) { const e = new Error('Falta el RFC del proveedor para consultar al SAT.');      e.status = 400; throw e; }
+
+  // Si el XML no traía receptor guardado, se prueban los RFC de nuestras emisoras
+  let receptores = [];
+  if (g.rfc_receptor) receptores = [g.rfc_receptor.trim().toUpperCase()];
+  else if (receptoresCache) receptores = receptoresCache;
+  else {
+    const er = await query(`SELECT rfc FROM fac_empresas_receptoras WHERE rfc IS NOT NULL`);
+    receptores = er.rows.map(x => String(x.rfc).trim().toUpperCase()).filter(Boolean);
+  }
+  if (!receptores.length) {
+    const e = new Error('No se sabe a qué empresa se facturó este gasto. Reimporta el XML o captura el RFC receptor.');
+    e.status = 400; throw e;
+  }
+
+  const emisor = g.rfc_proveedor.trim().toUpperCase();
+  const uuid   = String(g.uuid).trim().toUpperCase();
+  const n = parseFloat(g.monto);
+  // El SAT es estricto con el formato del total; se prueban las variantes válidas
+  const formatosTT = [...new Set([n.toFixed(2), String(n), n.toFixed(6), n.toFixed(0)])];
+
+  // Cada consulta puede tardar; se acotan los intentos para no colgar la petición.
+  // Con varios receptores posibles se prueba primero el formato de total más común
+  // en todos ellos, y solo después las variantes.
+  const intentos = [];
+  if (receptores.length === 1) {
+    formatosTT.forEach(tt => intentos.push({ rr: receptores[0], tt }));
+  } else {
+    receptores.forEach(rr => intentos.push({ rr, tt: formatosTT[0] }));
+    formatosTT.slice(1).forEach(tt => intentos.push({ rr: receptores[0], tt }));
+  }
+
+  let sat = null;
+  for (const it of intentos.slice(0, 12)) {
+    const q = await consultarSAT({ re: emisor, rr: it.rr, tt: it.tt, id: uuid });
+    if (!sat) sat = q;
+    if (q.estado && !/no encontrado/i.test(q.estado)) { sat = q; break; }
+  }
+
+  const estatus = (sat && sat.estado) || 'Sin respuesta';
+  const detalle = [sat?.codigo_estatus, sat?.estatus_cancelacion, sat?.validacion_efos]
+    .filter(Boolean).join(' · ');
+  await query(
+    `UPDATE fac_gastos SET estatus_sat=$1, sat_detalle=$2, sat_validado_en=NOW() WHERE id=$3`,
+    [estatus, detalle || null, gastoId]
+  );
+  return { estatus, detalle: detalle || null, emisor, uuid, receptores };
+}
+
+// ── Validación en lote ──
+// El SAT tarda segundos por comprobante, así que el lote corre en segundo plano
+// y el navegador solo consulta el avance. El estado vive en memoria: si Render
+// reinicia el proceso, el lote se pierde y basta con volver a lanzarlo — lo ya
+// validado quedó guardado en la base.
+const _lotesSAT = new Map();
+const LOTE_MAX = 400;
+
+function _limpiarLotesViejos() {
+  const hace2h = Date.now() - 2 * 60 * 60 * 1000;
+  for (const [k, v] of _lotesSAT) if (v.terminado_en && v.terminado_en < hace2h) _lotesSAT.delete(k);
+}
+
+async function _correrLoteSAT(loteId, ids) {
+  const lote = _lotesSAT.get(loteId);
+  let receptores = null;
+  try {
+    const er = await query(`SELECT rfc FROM fac_empresas_receptoras WHERE rfc IS NOT NULL`);
+    receptores = er.rows.map(x => String(x.rfc).trim().toUpperCase()).filter(Boolean);
+  } catch (e) { receptores = []; }
+
+  for (const id of ids) {
+    if (lote.cancelado) break;
+    try {
+      const r = await validarGastoSAT(id, receptores);
+      if (/cancelad/i.test(r.estatus))          lote.cancelados++;
+      else if (/vigente/i.test(r.estatus))      lote.vigentes++;
+      else if (/no encontrado/i.test(r.estatus)) lote.no_encontrados++;
+      else                                       lote.sin_respuesta++;
+    } catch (e) {
+      lote.errores.push({ id, error: e.message });
+    }
+    lote.hechos++;
+    // Respiro entre consultas: el servicio del SAT rechaza ráfagas
+    await new Promise(r => setTimeout(r, 300));
+  }
+  lote.estado = lote.cancelado ? 'cancelado' : 'terminado';
+  lote.terminado_en = Date.now();
+  console.log(`[SAT lote ${loteId}] ${lote.estado}: ${lote.hechos}/${lote.total} · ` +
+              `${lote.vigentes} vigentes, ${lote.cancelados} cancelados, ${lote.errores.length} con error`);
+}
+
+// POST /api/gastos/validar-sat-lote — arranca el lote y devuelve su id
+router.post('/validar-sat-lote', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
+  try {
+    _limpiarLotesViejos();
+    const enCurso = [..._lotesSAT.values()].find(l => l.estado === 'corriendo');
+    if (enCurso) return res.status(409).json({
+      error: 'Ya hay una validación en curso. Espera a que termine o cancélala.', lote_id: enCurso.id });
+
+    const { desde, hasta, solo_sin_validar } = req.body || {};
+    const params = [];
+    let where = `WHERE uuid IS NOT NULL AND rfc_proveedor IS NOT NULL`;
+    if (desde) { params.push(desde); where += ` AND fecha >= $${params.length}`; }
+    if (hasta) { params.push(hasta); where += ` AND fecha <= $${params.length}`; }
+    // Por omisión se revalida todo: un CFDI vigente puede cancelarse después
+    if (solo_sin_validar) where += ` AND sat_validado_en IS NULL`;
+
+    const r = await query(
+      `SELECT id FROM fac_gastos ${where} ORDER BY fecha DESC LIMIT ${LOTE_MAX}`, params);
+    const ids = r.rows.map(x => x.id);
+    if (!ids.length) return res.status(400).json({
+      error: 'No hay gastos con folio fiscal que validar en ese período.' });
+
+    const loteId = 'L' + Date.now().toString(36);
+    _lotesSAT.set(loteId, {
+      id: loteId, estado: 'corriendo', total: ids.length, hechos: 0,
+      vigentes: 0, cancelados: 0, no_encontrados: 0, sin_respuesta: 0,
+      errores: [], cancelado: false, iniciado_en: Date.now(), terminado_en: null,
+      por: req.usuario.nombre
+    });
+    // Deliberadamente sin await: la respuesta sale ya y el lote sigue corriendo
+    _correrLoteSAT(loteId, ids).catch(e => {
+      const l = _lotesSAT.get(loteId);
+      if (l) { l.estado = 'error'; l.error = e.message; l.terminado_en = Date.now(); }
+      console.error(`[SAT lote ${loteId}]`, e.message);
+    });
+
+    res.json({ lote_id: loteId, total: ids.length,
+               aviso: ids.length === LOTE_MAX ? `Se validarán los ${LOTE_MAX} más recientes del período.` : null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/gastos/validar-sat-lote/:loteId — avance del lote
+router.get('/validar-sat-lote/:loteId', (req, res) => {
+  const l = _lotesSAT.get(req.params.loteId);
+  if (!l) return res.status(404).json({ error: 'Ese lote ya no existe. Vuelve a lanzarlo si hace falta.' });
+  res.json(l);
+});
+
+// DELETE /api/gastos/validar-sat-lote/:loteId — detener el lote en curso
+router.delete('/validar-sat-lote/:loteId', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), (req, res) => {
+  const l = _lotesSAT.get(req.params.loteId);
+  if (!l) return res.status(404).json({ error: 'Lote no encontrado.' });
+  l.cancelado = true;
+  res.json({ ok: true });
+});
+
+// POST /api/gastos/:id/validar-sat
 router.post('/:id/validar-sat', async (req, res) => {
   try {
-    const r = await query(
-      `SELECT uuid, monto, rfc_proveedor, rfc_receptor FROM fac_gastos WHERE id=$1`,
-      [req.params.id]);
-    if (!r.rows.length) return res.status(404).json({ error: 'Gasto no encontrado.' });
-
-    const g = r.rows[0];
-    if (!g.uuid)          return res.status(400).json({ error: 'Este gasto no tiene folio fiscal (UUID) que consultar.' });
-    if (!g.rfc_proveedor) return res.status(400).json({ error: 'Falta el RFC del proveedor para consultar al SAT.' });
-
-    // Si el XML no traía receptor guardado, se prueban los RFC de nuestras emisoras
-    let receptores = [];
-    if (g.rfc_receptor) receptores = [g.rfc_receptor.trim().toUpperCase()];
-    else {
-      const er = await query(`SELECT rfc FROM fac_empresas_receptoras WHERE rfc IS NOT NULL`);
-      receptores = er.rows.map(x => String(x.rfc).trim().toUpperCase()).filter(Boolean);
-      if (!receptores.length)
-        return res.status(400).json({ error: 'No se sabe a qué empresa se facturó este gasto. Reimporta el XML o captura el RFC receptor.' });
-    }
-
-    const emisor = g.rfc_proveedor.trim().toUpperCase();
-    const uuid   = String(g.uuid).trim().toUpperCase();
-    const n = parseFloat(g.monto);
-    // El SAT es estricto con el formato del total; se prueban las variantes válidas
-    const formatosTT = [...new Set([n.toFixed(2), String(n), n.toFixed(6), n.toFixed(0)])];
-
-    // Cada consulta puede tardar; se acotan los intentos para no colgar la petición.
-    // Con varios receptores posibles se prueba primero el formato de total más común
-    // en todos ellos, y solo después las variantes.
-    const intentos = [];
-    if (receptores.length === 1) {
-      formatosTT.forEach(tt => intentos.push({ rr: receptores[0], tt }));
-    } else {
-      receptores.forEach(rr => intentos.push({ rr, tt: formatosTT[0] }));
-      formatosTT.slice(1).forEach(tt => intentos.push({ rr: receptores[0], tt }));
-    }
-
-    let sat = null;
-    for (const it of intentos.slice(0, 12)) {
-      const q = await consultarSAT({ re: emisor, rr: it.rr, tt: it.tt, id: uuid });
-      if (!sat) sat = q;
-      if (q.estado && !/no encontrado/i.test(q.estado)) { sat = q; break; }
-    }
-
-    const estatus = (sat && sat.estado) || 'Sin respuesta';
-    const detalle = [sat?.codigo_estatus, sat?.estatus_cancelacion, sat?.validacion_efos]
-      .filter(Boolean).join(' · ');
-    await query(
-      `UPDATE fac_gastos SET estatus_sat=$1, sat_detalle=$2, sat_validado_en=NOW() WHERE id=$3`,
-      [estatus, detalle || null, req.params.id]
-    );
-    res.json({ ok: true, estatus_sat: estatus, detalle: detalle || null,
-               consultado: { emisor, receptores_probados: receptores.length, uuid } });
+    const r = await validarGastoSAT(req.params.id);
+    res.json({ ok: true, estatus_sat: r.estatus, detalle: r.detalle,
+               consultado: { emisor: r.emisor, receptores_probados: r.receptores.length, uuid: r.uuid } });
   } catch (e) {
     const msg = e.name === 'AbortError'
       ? 'El SAT no respondió a tiempo. Vuelve a intentar en unos segundos.'
       : e.message;
-    res.status(500).json({ error: msg });
+    res.status(e.status || 500).json({ error: msg });
   }
 });
 

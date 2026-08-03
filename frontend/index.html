@@ -1179,10 +1179,12 @@ async function gastos() {
           <button class="btn bo bsm" onclick="gtPreset('mes')">Este mes</button>
           <button class="btn bo bsm" onclick="gtPreset('anio')">Este año</button>
           <button class="btn bo bsm" onclick="exportarGastosExcel()">⬇ Excel</button>
+          ${canGastos()?`<button class="btn bo bsm" id="gt-btn-lote" onclick="validarSATLote()">🛡️ Validar todas</button>`:''}
           ${canGastos()?`<button class="btn bo bsm" onclick="gtIrA('importar')">📥 Importar XML</button>`:''}
           ${canGastos()?`<button class="btn bs bsm" onclick="openGasto()">＋ Nuevo gasto</button>`:''}
         </div>
       </div>
+      <div id="gt-lote" style="display:none;margin-bottom:14px"></div>
       <div id="gt-body"><p class="empty">Cargando…</p></div>
     </div>
 
@@ -1248,6 +1250,14 @@ async function gastos() {
   gtLlenarSelectConceptos();
   cargarGastos();
   gtActualizarBadgePendientes();
+
+  // Si quedó una validación corriendo (recarga o cambio de pantalla), se retoma
+  const loteVivo = localStorage.getItem('gt-lote-sat');
+  if (loteVivo) {
+    const btn = $('gt-btn-lote');
+    if (btn) { btn.disabled = true; btn.innerHTML = '🛡️ Validando…'; }
+    gtSeguirLote(loteVivo);
+  }
 }
 
 // Catálogo jerárquico en memoria: categorías + conceptos (subcategorías)
@@ -1502,6 +1512,113 @@ async function validarSATGasto(id, btn) {
     toast(e.message, 'err');
     btn.disabled = false; btn.innerHTML = original;
   }
+}
+
+// ══ VALIDACIÓN EN LOTE CONTRA EL SAT ═════════════════
+// El lote corre en el servidor; aquí solo se consulta el avance cada 2 s.
+// Se recuerda el id en localStorage para poder retomarlo si se recarga la página.
+let _gtLoteTimer = null;
+
+async function validarSATLote() {
+  const desde = $('gt-desde')?.value, hasta = $('gt-hasta')?.value;
+  const rango = desde && hasta ? `del ${fmtDate(desde)} al ${fmtDate(hasta)}` : 'de todo el histórico';
+  if (!await confirm2(
+    `Se consultará al SAT el estatus de todos los gastos ${rango} que tengan folio fiscal.\n\n` +
+    `Cada consulta tarda unos segundos, así que el proceso corre en segundo plano: ` +
+    `puedes seguir trabajando y ver el avance aquí mismo.\n\n¿Comenzar?`)) return;
+
+  const btn = $('gt-btn-lote');
+  btn.disabled = true; btn.innerHTML = '<span class="gt-spin" style="border-color:rgba(180,83,9,.3);border-top-color:#b45309"></span> Iniciando…';
+  try {
+    const r = await api('/gastos/validar-sat-lote', {
+      method:'POST', body: JSON.stringify({ desde, hasta })
+    });
+    localStorage.setItem('gt-lote-sat', r.lote_id);
+    if (r.aviso) toast(r.aviso, 'warn');
+    toast(`Validando ${r.total} comprobante(s) en segundo plano.`);
+    gtSeguirLote(r.lote_id);
+  } catch(e) {
+    toast(e.message, 'err');
+    btn.disabled = false; btn.innerHTML = '🛡️ Validar todas';
+  }
+}
+
+function gtSeguirLote(loteId) {
+  clearInterval(_gtLoteTimer);
+  const tick = async () => {
+    if (!$('gt-lote')) { clearInterval(_gtLoteTimer); return; }   // salió de la pantalla
+    try {
+      const l = await api(`/gastos/validar-sat-lote/${loteId}`);
+      gtPintarLote(l);
+      if (l.estado !== 'corriendo') {
+        clearInterval(_gtLoteTimer);
+        localStorage.removeItem('gt-lote-sat');
+        const btn = $('gt-btn-lote');
+        if (btn) { btn.disabled = false; btn.innerHTML = '🛡️ Validar todas'; }
+        if (l.estado === 'terminado') {
+          toast(`Listo: ${l.vigentes} vigente(s), ${l.cancelados} cancelado(s).`,
+                l.cancelados ? 'warn' : 'ok');
+          cargarGastos();
+        }
+      }
+    } catch(e) {
+      // El lote se perdió (reinicio del servidor): se deja de insistir
+      clearInterval(_gtLoteTimer);
+      localStorage.removeItem('gt-lote-sat');
+      const cont = $('gt-lote'); if (cont) cont.style.display = 'none';
+      const btn = $('gt-btn-lote'); if (btn) { btn.disabled = false; btn.innerHTML = '🛡️ Validar todas'; }
+    }
+  };
+  tick();
+  _gtLoteTimer = setInterval(tick, 2000);
+}
+
+function gtPintarLote(l) {
+  const cont = $('gt-lote'); if (!cont) return;
+  cont.style.display = 'block';
+  const pct = l.total > 0 ? Math.round(l.hechos / l.total * 100) : 0;
+  const corriendo = l.estado === 'corriendo';
+  const titulo = corriendo ? 'Validando ante el SAT…'
+               : l.estado === 'cancelado' ? 'Validación detenida'
+               : l.estado === 'error' ? 'La validación falló'
+               : 'Validación terminada';
+  cont.innerHTML = `
+    <div class="card" style="border-left:4px solid ${corriendo?'#d97706':l.errores.length?'#ef4444':'#10b981'}">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="font-size:14px;font-weight:900;color:var(--dark)">
+          ${corriendo?'<span class="gt-spin" style="border-color:rgba(180,83,9,.3);border-top-color:#b45309"></span> ':''}${titulo}
+          <span style="font-weight:600;color:var(--muted);font-size:12px"> — ${l.hechos} de ${l.total}</span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <span class="gt-pill vig">✓ ${l.vigentes} vigentes</span>
+          ${l.cancelados ? `<span class="gt-pill can">🚫 ${l.cancelados} cancelados</span>` : ''}
+          ${l.no_encontrados ? `<span class="gt-pill nd">? ${l.no_encontrados} no encontrados</span>` : ''}
+          ${l.errores.length ? `<span class="gt-pill can">⚠️ ${l.errores.length} con error</span>` : ''}
+          ${corriendo
+            ? `<button class="btn bd bsm" style="padding:3px 10px" onclick="detenerLoteSAT('${l.id}')">Detener</button>`
+            : `<button class="btn bo bsm" style="padding:3px 10px" onclick="$('gt-lote').style.display='none'">Cerrar</button>`}
+        </div>
+      </div>
+      <div class="gt-barra" style="height:9px;margin-top:10px">
+        <i style="width:${pct}%;transition:width .4s;${corriendo?'':'background:linear-gradient(90deg,#10b981,#059669)'}"></i>
+      </div>
+      ${l.errores.length ? `
+        <details style="margin-top:9px">
+          <summary style="cursor:pointer;font-size:11.5px;font-weight:800;color:var(--red)">
+            Ver los ${l.errores.length} que no se pudieron consultar
+          </summary>
+          <div style="margin-top:6px;max-height:150px;overflow:auto">
+            ${l.errores.map(e => `<div style="font-size:11.5px;padding:3px 0;color:var(--muted)">
+              Gasto #${e.id} — ${e.error}</div>`).join('')}
+          </div>
+        </details>` : ''}
+    </div>`;
+}
+
+async function detenerLoteSAT(loteId) {
+  try { await api(`/gastos/validar-sat-lote/${loteId}`, { method:'DELETE' });
+        toast('Deteniendo… termina el comprobante en curso.'); }
+  catch(e) { toast(e.message, 'err'); }
 }
 
 // ══ BANDEJA DE PENDIENTES DE CLASIFICAR ══════════════
