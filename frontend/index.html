@@ -790,6 +790,9 @@ function canWrite() { return ME && ['admin','capturista','tesoreria'].includes(M
 function canFacturar() { return ME && ['admin','capturista','tesoreria','gerente'].includes(ME.rol); }
 // Gastos de Operación: gerencia también captura, edita y elimina
 function canGastos() { return ME && ['admin','capturista','tesoreria','gerente'].includes(ME.rol); }
+// Cambios de fondo del catálogo de CxP (borrar categorías y cuentas de gasto):
+// gerencia sí, porque es quien define el plan de gastos
+function canGastosCatalogo() { return ME && ['admin','gerente'].includes(ME.rol); }
 function canAdmin() { return ME && ME.rol === 'admin'; }
 function isCapturista()        { return ME && ME.rol === 'capturista'; }
 function isTesoreria()         { return ME && ME.rol === 'tesoreria'; }
@@ -2150,14 +2153,28 @@ async function cargarCatalogoGastos() {
         ${cats.map(k => {
           const tot = cs.filter(c => String(c.categoria_id) === String(k.id))
                         .reduce((a,c) => a + parseFloat(c.total_historico||0), 0);
-          return `<div class="gt-card" style="border-color:${k.color}33;background:${k.color}0d;cursor:pointer"
-                       onclick="gtIrA('lista');$('gt-categoria').value='${k.id}';gtFiltrarPorCategoria()">
+          return `<div class="gt-card" style="border-color:${k.color}33;background:${k.color}0d">
             <div class="ic">📂</div>
             <div class="l" style="color:${k.color}">${k.nombre}</div>
             <div class="v" style="color:${k.color};font-size:21px">${fmt(tot)}</div>
             <div class="s" style="color:#64748b">${k.n_conceptos} cuenta${k.n_conceptos!=1?'s':''} de gasto</div>
+            <div style="display:flex;gap:5px;margin-top:9px">
+              <button class="btn bo bsm" style="padding:3px 9px;font-size:10.5px"
+                      onclick="gtIrA('lista');$('gt-categoria').value='${k.id}';gtFiltrarPorCategoria()">Ver gastos</button>
+              ${canGastos()?`<button class="btn bo bsm" style="padding:3px 8px;font-size:10.5px"
+                      onclick="editarCategoriaGasto(${k.id})" title="Renombrar o cambiar color">✏️</button>`:''}
+              ${canGastosCatalogo()?`<button class="btn bd bsm" style="padding:3px 8px;font-size:10.5px"
+                      onclick="eliminarCategoriaGasto(${k.id},'${(k.nombre||'').replace(/'/g,"\\'")}',${k.n_conceptos})" title="Eliminar categoría">🗑</button>`:''}
+            </div>
           </div>`;
         }).join('')}
+        ${canGastos()?`
+        <div class="gt-card" style="border-color:#cbd5e1;border-style:dashed;background:#f8fafc;cursor:pointer;
+                                    display:flex;flex-direction:column;align-items:center;justify-content:center"
+             onclick="crearCategoriaGasto()">
+          <div style="font-size:30px;opacity:.5">➕</div>
+          <div style="font-size:12px;font-weight:900;color:#64748b;margin-top:5px">Nueva categoría</div>
+        </div>`:''}
       </div>
 
       ${canGastos()?`
@@ -2212,7 +2229,7 @@ async function cargarCatalogoGastos() {
             : '<span style="color:var(--muted);font-size:11px">○ Inactivo</span>'}</td>
           <td style="white-space:nowrap;text-align:right">
             ${canGastos()?`<button class="btn bg bsm" style="padding:4px 8px" onclick="editarConceptoGasto(${c.id})" title="Editar">✏️</button>`:''}
-            ${canAdmin()?`<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarConceptoGasto(${c.id},'${(c.nombre||'').replace(/'/g,"\\'")}',${c.n_gastos})" title="${c.n_gastos>0?'Desactivar (tiene gastos)':'Eliminar'}">🗑</button>`:''}
+            ${canGastosCatalogo()?`<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarConceptoGasto(${c.id},'${(c.nombre||'').replace(/'/g,"\\'")}',${c.n_gastos})" title="${c.n_gastos>0?'Desactivar (tiene gastos)':'Eliminar'}">🗑</button>`:''}
           </td>
         </tr>`).join('')}</tbody>
       </table></div>`;
@@ -2243,6 +2260,84 @@ async function editarConceptoGasto(id) {
       method:'PUT', body: JSON.stringify({ nombre, orden: c.orden, activo: c.activo })
     });
     toast('Cuenta de gasto actualizada.');
+    cargarCatalogoGastos();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+// ── Categorías del catálogo ──
+const COLORES_CAT = ['#7c3aed','#0891b2','#059669','#2563eb','#ea580c',
+                     '#be185d','#c026d3','#475569','#78716c','#d97706'];
+
+function crearCategoriaGasto()      { openCategoriaGasto(null); }
+function editarCategoriaGasto(id)   { openCategoriaGasto(id); }
+
+function openCategoriaGasto(id) {
+  const k = id ? (window._gtCategorias||[]).find(x => x.id === id) : null;
+  const color = k?.color || COLORES_CAT[0];
+  $('modal-gasto-body').innerHTML = `
+    <div style="margin:-28px -28px 20px;padding:20px 26px;background:linear-gradient(135deg,#7c2d12,#d97706);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">${id?'Editar':'Nueva'} categoría</div>
+      <div style="font-size:20px;font-weight:900;margin-top:3px">📂 Agrupador de cuentas de gasto</div>
+    </div>
+    <div class="fg" style="gap:11px">
+      <div class="fi full"><label>Nombre <span style="color:var(--red)">*</span></label>
+        <input id="kc-nombre" value="${(k?.nombre||'').replace(/"/g,'&quot;')}"
+               placeholder="Ej: Vehículos y Viáticos" onkeydown="if(event.key==='Enter')guardarCategoriaGasto(${id||'null'})">
+      </div>
+      <div class="fi"><label>Orden en el listado</label>
+        <input type="number" id="kc-orden" value="${k?.orden ?? 99}" style="text-align:center">
+      </div>
+      <div class="fi full"><label>Color</label>
+        <div style="display:flex;gap:7px;flex-wrap:wrap" id="kc-colores">
+          ${COLORES_CAT.map(c => `<div onclick="gtElegirColor('${c}')" data-color="${c}"
+            style="width:34px;height:34px;border-radius:10px;background:${c};cursor:pointer;
+                   border:3px solid ${c===color?'#0f172a':'transparent'};transition:transform .15s"
+            onmouseover="this.style.transform='scale(1.12)'" onmouseout="this.style.transform=''"></div>`).join('')}
+        </div>
+        <input type="hidden" id="kc-color" value="${color}">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gasto')">Cancelar</button>
+      <button class="btn bs" id="kc-btn" onclick="guardarCategoriaGasto(${id||'null'})">💾 ${id?'Guardar cambios':'Crear categoría'}</button>
+    </div>`;
+  openModal('modal-gasto');
+}
+
+function gtElegirColor(c) {
+  $('kc-color').value = c;
+  document.querySelectorAll('#kc-colores [data-color]').forEach(d => {
+    d.style.border = '3px solid ' + (d.dataset.color === c ? '#0f172a' : 'transparent');
+  });
+}
+
+async function guardarCategoriaGasto(id) {
+  const nombre = ($('kc-nombre').value || '').trim();
+  if (!nombre) return toast('Escribe el nombre de la categoría.', 'warn');
+  const body = { nombre, color: $('kc-color').value, orden: parseInt($('kc-orden').value) || 99 };
+  const btn = $('kc-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="gt-spin"></span> Guardando…';
+  try {
+    if (id) await api(`/gastos/categorias/${id}`, { method:'PUT',  body: JSON.stringify(body) });
+    else    await api('/gastos/categorias',       { method:'POST', body: JSON.stringify(body) });
+    toast(id ? 'Categoría actualizada.' : `Categoría "${nombre}" creada.`);
+    closeModal('modal-gasto');
+    await gtCargarCatalogos(true);
+    cargarCatalogoGastos();
+  } catch(e) {
+    toast(e.message, 'err');
+    btn.disabled = false; btn.innerHTML = id ? '💾 Guardar cambios' : '💾 Crear categoría';
+  }
+}
+
+async function eliminarCategoriaGasto(id, nombre, nConceptos) {
+  if (nConceptos > 0)
+    return toast(`"${nombre}" tiene ${nConceptos} cuenta(s) de gasto. Muévelas a otra categoría antes de eliminarla.`, 'warn');
+  if (!await confirm2(`¿Eliminar la categoría "${nombre}"?`)) return;
+  try {
+    await api(`/gastos/categorias/${id}`, { method:'DELETE' });
+    toast('Categoría eliminada.');
+    await gtCargarCatalogos(true);
     cargarCatalogoGastos();
   } catch(e) { toast(e.message, 'err'); }
 }

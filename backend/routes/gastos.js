@@ -251,11 +251,26 @@ router.post('/categorias', requireRol('admin', 'capturista', 'tesoreria', 'geren
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/categorias/:id', requireRol('admin'), async (req, res) => {
+router.put('/categorias/:id', requireRol('admin', 'gerente', 'tesoreria', 'capturista'), async (req, res) => {
+  try {
+    const { nombre, color, orden } = req.body;
+    if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Nombre requerido.' });
+    await query(
+      `UPDATE fac_gastos_categorias SET nombre=$1, color=$2, orden=$3 WHERE id=$4`,
+      [nombre.trim(), color || '#d97706', parseInt(orden) || 99, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'Ya existe otra categoría con ese nombre.' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/categorias/:id', requireRol('admin', 'gerente'), async (req, res) => {
   try {
     const uso = await query(`SELECT COUNT(*)::int AS n FROM fac_gastos_conceptos WHERE categoria_id=$1`, [req.params.id]);
     if (uso.rows[0].n > 0)
-      return res.status(400).json({ error: `No se puede eliminar: ${uso.rows[0].n} concepto(s) pertenecen a esta categoría.` });
+      return res.status(400).json({ error: `No se puede eliminar: ${uso.rows[0].n} cuenta(s) de gasto pertenecen a esta categoría. Muévelas primero.` });
     await query(`DELETE FROM fac_gastos_categorias WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -565,7 +580,7 @@ router.put('/conceptos/:id', requireRol('admin', 'capturista', 'tesoreria', 'ger
 });
 
 // Baja lógica: si el concepto ya tiene gastos, no se elimina para no romper el histórico
-router.delete('/conceptos/:id', requireRol('admin'), async (req, res) => {
+router.delete('/conceptos/:id', requireRol('admin', 'gerente'), async (req, res) => {
   try {
     const uso = await query(`SELECT COUNT(*)::int AS n FROM fac_gastos WHERE concepto_id=$1`, [req.params.id]);
     if (uso.rows[0].n > 0) {
