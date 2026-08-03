@@ -667,6 +667,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-chequeras"><div class="modal" style="width:min(780px,96vw)" id="modal-chequeras-body"></div></div>
 <div class="overlay" id="modal-mov-banco"><div class="modal" style="width:min(720px,96vw)" id="modal-mov-banco-body"></div></div>
 <div class="overlay" id="modal-gasto"><div class="modal" style="width:min(680px,96vw)" id="modal-gasto-body"></div></div>
+<div class="overlay" id="modal-gt-cats"><div class="modal" style="width:min(720px,96vw)" id="modal-gt-cats-body"></div></div>
 <div class="overlay" id="modal-benef-bnc"><div class="modal" style="width:min(640px,96vw)" id="modal-benef-bnc-body"></div></div>
 <div class="overlay" id="modal-notif-ch"><div class="modal" style="width:min(720px,96vw)" id="modal-notif-ch-body"></div></div>
 <div class="overlay" id="modal-notif-show"><div class="modal modal-sm" id="modal-notif-show-body"></div></div>
@@ -2274,6 +2275,12 @@ async function cargarCatalogoGastos() {
     window._gtCatalogo = cs;
     const cats = window._gtCategorias || [];
     $('gt-catalogo').innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:9px;flex-wrap:wrap">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)">
+          Categorías — ${cats.length}
+        </div>
+        ${canGastos()?`<button class="btn bo bsm" onclick="openAdminCategorias()">⚙️ Administrar categorías</button>`:''}
+      </div>
       <div class="gt-cards" style="margin-bottom:14px">
         ${cats.map(k => {
           const tot = cs.filter(c => String(c.categoria_id) === String(k.id))
@@ -2312,7 +2319,12 @@ async function cargarCatalogoGastos() {
             <input id="gc-nombre" placeholder="Ej: MANTENIMIENTO DE AIRE ACONDICIONADO"
                    onkeydown="if(event.key==='Enter')crearConceptoGasto()">
           </div>
-          <div class="fi" style="margin:0"><label style="font-size:10px">Categoría</label>
+          <div class="fi" style="margin:0">
+            <label style="font-size:10px;display:flex;justify-content:space-between;align-items:center;gap:6px">
+              Categoría
+              <span onclick="openAdminCategorias()" title="Renombrar o eliminar categorías"
+                    style="cursor:pointer;color:#b45309;font-weight:800;font-size:10px">⚙️ administrar</span>
+            </label>
             <select id="gc-categoria" onchange="gcCambiarCategoria(this)">
               <option value="">— Sin categoría —</option>
               ${cats.map(k=>`<option value="${k.id}">${k.nombre}</option>`).join('')}
@@ -2510,6 +2522,65 @@ const COLORES_CAT = ['#7c3aed','#0891b2','#059669','#2563eb','#ea580c',
 function crearCategoriaGasto()      { openCategoriaGasto(null); }
 function editarCategoriaGasto(id)   { openCategoriaGasto(id); }
 
+// ── Administrar categorías: un solo lugar para verlas, renombrarlas y borrarlas ──
+let _gtAdminCatsAbierto = false;
+
+async function openAdminCategorias() {
+  _gtAdminCatsAbierto = true;
+  await gtCargarCatalogos(true);
+  pintarAdminCategorias();
+  openModal('modal-gt-cats');
+}
+
+function cerrarAdminCategorias() {
+  _gtAdminCatsAbierto = false;
+  closeModal('modal-gt-cats');
+}
+
+function pintarAdminCategorias() {
+  const cats = window._gtCategorias || [];
+  const cs   = window._gtCatalogo   || [];
+  const cuentasDe = k => cs.filter(c => String(c.categoria_id) === String(k.id)).length || k.n_conceptos || 0;
+
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#7c2d12,#d97706);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Catálogo de gastos</div>
+      <div style="font-size:20px;font-weight:900;margin-top:3px">📂 Administrar categorías</div>
+      <div style="font-size:11.5px;opacity:.85;margin-top:4px">Renombra, cambia el color o elimina las que hayas dado mal de alta.</div>
+    </div>
+
+    ${cats.length ? `
+    <div style="max-height:52vh;overflow:auto;margin:0 -6px;padding:0 6px">
+      ${cats.map(k => {
+        const n = cuentasDe(k);
+        return `<div style="display:flex;align-items:center;gap:11px;padding:11px 13px;margin-bottom:7px;
+                            border:1.5px solid var(--border);border-radius:12px;background:#fff">
+          <div style="width:13px;height:13px;border-radius:50%;background:${k.color};flex-shrink:0"></div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:800;font-size:13.5px;color:var(--dark);overflow:hidden;
+                        text-overflow:ellipsis;white-space:nowrap">${k.nombre}</div>
+            <div style="font-size:11px;color:${n ? 'var(--muted)' : '#16a34a'};margin-top:1px">
+              ${n ? `${n} cuenta${n!=1?'s':''} de gasto — hay que moverlas antes de eliminar`
+                  : 'Vacía — se puede eliminar'}
+            </div>
+          </div>
+          ${canGastos()?`<button class="btn bo bsm" style="padding:5px 10px"
+                  onclick="editarCategoriaGasto(${k.id})" title="Renombrar o cambiar color">✏️</button>`:''}
+          ${canGastosCatalogo()
+            ? `<button class="btn ${n?'bo':'bd'} bsm" style="padding:5px 10px;${n?'opacity:.45':''}"
+                       onclick="eliminarCategoriaGasto(${k.id},'${(k.nombre||'').replace(/'/g,"\\'")}',${n})"
+                       title="${n?`Tiene ${n} cuenta(s): muévelas primero`:'Eliminar categoría'}">🗑</button>`
+            : ''}
+        </div>`;
+      }).join('')}
+    </div>` : `<p class="empty">Todavía no hay categorías.</p>`}
+
+    <div class="form-actions">
+      <button class="btn bo" onclick="cerrarAdminCategorias()">Cerrar</button>
+      ${canGastos()?`<button class="btn bs" onclick="crearCategoriaGasto()">➕ Nueva categoría</button>`:''}
+    </div>`;
+}
+
 // Crear la categoría sin salir del formulario de la cuenta de gasto:
 // al volver, queda seleccionada y no se pierde lo que ya se había escrito.
 let _gtVolverACategoria = null;
@@ -2583,6 +2654,7 @@ async function guardarCategoriaGasto(id) {
       if ($('gc-nombre')) { $('gc-nombre').value = nombreEnCurso; $('gc-nombre').focus(); }
       _gtVolverACategoria = null;
     }
+    if (_gtAdminCatsAbierto) pintarAdminCategorias();
   } catch(e) {
     toast(e.message, 'err');
     btn.disabled = false; btn.innerHTML = id ? '💾 Guardar cambios' : '💾 Crear categoría';
@@ -2597,7 +2669,8 @@ async function eliminarCategoriaGasto(id, nombre, nConceptos) {
     await api(`/gastos/categorias/${id}`, { method:'DELETE' });
     toast('Categoría eliminada.');
     await gtCargarCatalogos(true);
-    cargarCatalogoGastos();
+    await cargarCatalogoGastos();
+    if (_gtAdminCatsAbierto) pintarAdminCategorias();
   } catch(e) { toast(e.message, 'err'); }
 }
 
