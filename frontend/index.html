@@ -2303,9 +2303,10 @@ async function cargarCatalogoGastos() {
                    onkeydown="if(event.key==='Enter')crearConceptoGasto()">
           </div>
           <div class="fi" style="margin:0"><label style="font-size:10px">Categoría</label>
-            <select id="gc-categoria">
+            <select id="gc-categoria" onchange="gcCambiarCategoria(this)">
               <option value="">— Sin categoría —</option>
               ${cats.map(k=>`<option value="${k.id}">${k.nombre}</option>`).join('')}
+              <option value="__nueva" style="font-weight:900;color:#b45309">➕ Crear categoría nueva…</option>
             </select>
           </div>
           <div class="fi" style="margin:0"><label style="font-size:10px">Orden</label>
@@ -2388,7 +2389,17 @@ const COLORES_CAT = ['#7c3aed','#0891b2','#059669','#2563eb','#ea580c',
 function crearCategoriaGasto()      { openCategoriaGasto(null); }
 function editarCategoriaGasto(id)   { openCategoriaGasto(id); }
 
-function openCategoriaGasto(id) {
+// Crear la categoría sin salir del formulario de la cuenta de gasto:
+// al volver, queda seleccionada y no se pierde lo que ya se había escrito.
+let _gtVolverACategoria = null;
+function gcCambiarCategoria(sel) {
+  if (sel.value !== '__nueva') return;
+  sel.value = '';
+  openCategoriaGasto(null, 'gc-categoria');
+}
+
+function openCategoriaGasto(id, volverA) {
+  _gtVolverACategoria = volverA || null;
   const k = id ? (window._gtCategorias||[]).find(x => x.id === id) : null;
   const color = k?.color || COLORES_CAT[0];
   $('modal-gasto-body').innerHTML = `
@@ -2434,13 +2445,23 @@ async function guardarCategoriaGasto(id) {
   const body = { nombre, color: $('kc-color').value, orden: parseInt($('kc-orden').value) || 99 };
   const btn = $('kc-btn');
   btn.disabled = true; btn.innerHTML = '<span class="gt-spin"></span> Guardando…';
+  // Lo que el usuario ya tenía escrito en el formulario de la cuenta de gasto:
+  // recargar el catálogo lo borraría, así que se guarda y se repone.
+  const nombreEnCurso = $('gc-nombre')?.value || '';
   try {
+    let creada = null;
     if (id) await api(`/gastos/categorias/${id}`, { method:'PUT',  body: JSON.stringify(body) });
-    else    await api('/gastos/categorias',       { method:'POST', body: JSON.stringify(body) });
+    else    creada = await api('/gastos/categorias', { method:'POST', body: JSON.stringify(body) });
     toast(id ? 'Categoría actualizada.' : `Categoría "${nombre}" creada.`);
     closeModal('modal-gasto');
     await gtCargarCatalogos(true);
-    cargarCatalogoGastos();
+    await cargarCatalogoGastos();
+    if (_gtVolverACategoria) {
+      const sel = $(_gtVolverACategoria);
+      if (sel && creada) sel.value = creada.id;
+      if ($('gc-nombre')) { $('gc-nombre').value = nombreEnCurso; $('gc-nombre').focus(); }
+      _gtVolverACategoria = null;
+    }
   } catch(e) {
     toast(e.message, 'err');
     btn.disabled = false; btn.innerHTML = id ? '💾 Guardar cambios' : '💾 Crear categoría';
