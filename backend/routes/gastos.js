@@ -159,6 +159,19 @@ const CATEGORIAS_SEED = [
     await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS sat_validado_en TIMESTAMP`);
     await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS serie_folio TEXT`);
 
+    // ── Control de pago (cuentas por pagar) ──
+    // Se guarda el importe pagado, no un estado: así el "parcial" sale solo y
+    // los totales por pagar se calculan sin depender de que alguien mantenga
+    // una etiqueta al día. El estatus se deriva en cada consulta.
+    await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS pagado NUMERIC(14,2) DEFAULT 0`);
+    await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS fecha_pago DATE`);
+    await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS fecha_vencimiento DATE`);
+    await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS pago_forma TEXT`);
+    await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS pago_referencia TEXT`);
+    await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS pago_notas TEXT`);
+    await query(`UPDATE fac_gastos SET pagado = 0 WHERE pagado IS NULL`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_gastos_venc ON fac_gastos(fecha_vencimiento)`);
+
     // Blindaje anti-duplicados: un mismo folio fiscal no puede registrarse dos veces.
     // El índice es parcial para que los gastos manuales (uuid NULL) no choquen entre sí.
     await query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_gastos_uuid_unico ON fac_gastos(uuid) WHERE uuid IS NOT NULL`);
@@ -457,6 +470,76 @@ router.get('/pendientes', async (req, res) => {
       FROM fac_gastos WHERE concepto_id IS NULL
     `);
     res.json({ gastos: r.rows, totales: tot.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══ CONTROL DE PAGO ════════════════════════════════
+// PATCH /api/gastos/:id/pago — registrar un pago (total, parcial o revertirlo)
+router.patch('/:id/pago', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
+  try {
+    const { importe, todo, fecha_pago, pago_forma, pago_referencia, pago_notas,
+            fecha_vencimiento, revertir } = req.body;
+
+    const g = await query(`SELECT monto, COALESCE(pagado,0) AS pagado FROM fac_gastos WHERE id=$1`,
+      [req.params.id]);
+    if (!g.rows.length) return res.status(404).json({ error: 'Gasto no encontrado.' });
+    const monto = parseFloat(g.rows[0].monto);
+
+    // Solo mover la fecha de vencimiento, sin tocar el pago
+    if (fecha_vencimiento !== undefined && importe === undefined && !todo && !revertir) {
+      await query(`UPDATE fac_gastos SET fecha_vencimiento=$1, actualizado_en=NOW() WHERE id=$2`,
+        [fecha_vencimiento || null, req.params.id]);
+      return res.json({ ok: true, fecha_vencimiento: fecha_vencimiento || null });
+    }
+
+    let pagado;
+    if (revertir)          pagado = 0;
+    else if (todo)         pagado = monto;
+    else {
+      const n = parseFloat(importe);
+      if (isNaN(n) || n < 0) return res.status(400).json({ error: 'El importe pagado no es válido.' });
+      // Se guarda el acumulado, no el abono: así "parcial" y saldo salen solos
+      pagado = n;
+    }
+    if (pagado > monto)
+      return res.status(400).json({ error: `El pago (${pagado.toFixed(2)}) no puede exceder el monto del gasto (${monto.toFixed(2)}).` });
+
+    const liquidado = pagado >= monto;
+    await query(
+      `UPDATE fac_gastos
+          SET pagado=$1,
+              fecha_pago = CASE WHEN $2 THEN COALESCE($3::date, CURRENT_DATE) ELSE NULL END,
+              pago_forma=$4, pago_referencia=$5, pago_notas=$6,
+              fecha_vencimiento = COALESCE($7::date, fecha_vencimiento),
+              actualizado_en=NOW()
+        WHERE id=$8`,
+      [pagado, liquidado, fecha_pago || null,
+       pago_forma || null, pago_referencia || null, pago_notas || null,
+       fecha_vencimiento || null, req.params.id]
+    );
+    res.json({ ok: true, pagado, saldo: Math.max(monto - pagado, 0),
+               estatus_pago: liquidado ? 'pagado' : pagado > 0 ? 'parcial' : 'pendiente' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/gastos/pagos-lote — marcar varios como pagados de una vez
+router.post('/pagos-lote', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
+  try {
+    const { ids, fecha_pago, pago_forma, pago_referencia } = req.body;
+    if (!Array.isArray(ids) || !ids.length)
+      return res.status(400).json({ error: 'No se recibió ningún gasto.' });
+    const r = await query(
+      `UPDATE fac_gastos
+          SET pagado = monto,
+              fecha_pago = COALESCE($1::date, CURRENT_DATE),
+              pago_forma = COALESCE($2, pago_forma),
+              pago_referencia = COALESCE($3, pago_referencia),
+              actualizado_en = NOW()
+        WHERE id = ANY($4::int[]) AND COALESCE(pagado,0) < monto
+        RETURNING id`,
+      [fecha_pago || null, pago_forma || null, pago_referencia || null, ids]
+    );
+    res.json({ ok: true, marcados: r.rows.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -766,7 +849,7 @@ router.delete('/conceptos/:id', requireRol('admin', 'gerente'), async (req, res)
 // ═══ GASTOS ═════════════════════════════════════════
 router.get('/', async (req, res) => {
   try {
-    const { desde, hasta, concepto_id, categoria_id, origen, buscar } = req.query;
+    const { desde, hasta, concepto_id, categoria_id, origen, buscar, pago } = req.query;
     const params = [];
     let where = 'WHERE 1=1';
     if (desde)        { params.push(desde);        where += ` AND g.fecha >= $${params.length}`; }
@@ -774,6 +857,14 @@ router.get('/', async (req, res) => {
     if (concepto_id)  { params.push(concepto_id);  where += ` AND g.concepto_id = $${params.length}`; }
     if (categoria_id) { params.push(categoria_id); where += ` AND c.categoria_id = $${params.length}`; }
     if (origen)       { params.push(origen);       where += ` AND g.origen = $${params.length}`; }
+    // El estatus de pago no se almacena: se deriva del importe pagado, así que el
+    // filtro repite la misma condición en vez de comparar contra una etiqueta.
+    if (pago === 'pagado')     where += ` AND COALESCE(g.pagado,0) >= g.monto`;
+    if (pago === 'parcial')    where += ` AND COALESCE(g.pagado,0) > 0 AND COALESCE(g.pagado,0) < g.monto`;
+    if (pago === 'pendiente')  where += ` AND COALESCE(g.pagado,0) < g.monto`;
+    if (pago === 'vencido')    where += ` AND COALESCE(g.pagado,0) < g.monto
+                                          AND g.fecha_vencimiento IS NOT NULL
+                                          AND g.fecha_vencimiento < CURRENT_DATE`;
     if (buscar) {
       params.push(`%${buscar}%`);
       where += ` AND (g.descripcion ILIKE $${params.length} OR g.proveedor ILIKE $${params.length}
@@ -785,6 +876,16 @@ router.get('/', async (req, res) => {
     // LEFT JOIN: los gastos importados por XML aún no tienen concepto asignado
     const r = await query(`
       SELECT g.*, TO_CHAR(g.fecha,'YYYY-MM-DD') AS fecha,
+        TO_CHAR(g.fecha_pago,'YYYY-MM-DD')        AS fecha_pago,
+        TO_CHAR(g.fecha_vencimiento,'YYYY-MM-DD') AS fecha_vencimiento,
+        GREATEST(g.monto - COALESCE(g.pagado,0), 0) AS saldo,
+        CASE
+          WHEN COALESCE(g.pagado,0) >= g.monto THEN 'pagado'
+          WHEN COALESCE(g.pagado,0) > 0        THEN 'parcial'
+          WHEN g.fecha_vencimiento IS NOT NULL
+           AND g.fecha_vencimiento < CURRENT_DATE THEN 'vencido'
+          ELSE 'pendiente'
+        END AS estatus_pago,
         c.nombre AS concepto, c.grupo,
         k.nombre AS categoria, k.color AS categoria_color,
         u.nombre AS capturado_por
@@ -809,14 +910,25 @@ router.get('/', async (req, res) => {
         COUNT(g.id) FILTER (WHERE g.origen = 'XML')::int                 AS de_xml,
         COUNT(g.id) FILTER (WHERE g.estatus_sat ILIKE '%cancelad%')::int AS cancelados_sat,
         COALESCE(SUM(g.iva),0)                 AS iva,
-        COALESCE(SUM(g.retenciones),0)         AS retenciones
+        COALESCE(SUM(g.retenciones),0)         AS retenciones,
+        COALESCE(SUM(LEAST(COALESCE(g.pagado,0), g.monto)),0)                  AS pagado,
+        COALESCE(SUM(GREATEST(g.monto - COALESCE(g.pagado,0), 0)),0)           AS por_pagar,
+        COUNT(g.id) FILTER (WHERE COALESCE(g.pagado,0) < g.monto)::int         AS n_por_pagar,
+        COUNT(g.id) FILTER (WHERE COALESCE(g.pagado,0) >= g.monto)::int        AS n_pagados,
+        COUNT(g.id) FILTER (WHERE COALESCE(g.pagado,0) < g.monto
+                              AND g.fecha_vencimiento IS NOT NULL
+                              AND g.fecha_vencimiento < CURRENT_DATE)::int     AS n_vencidos,
+        COALESCE(SUM(GREATEST(g.monto - COALESCE(g.pagado,0), 0))
+                 FILTER (WHERE g.fecha_vencimiento IS NOT NULL
+                           AND g.fecha_vencimiento < CURRENT_DATE),0)          AS monto_vencido
       FROM fac_gastos g
       LEFT JOIN fac_gastos_conceptos c ON c.id = g.concepto_id
       ${where}
     `, params);
 
     const porConcepto = await query(`
-      SELECT c.id, c.nombre AS concepto, k.nombre AS categoria, k.color AS categoria_color,
+      SELECT c.id, COALESCE(c.nombre,'Sin clasificar') AS concepto,
+        k.nombre AS categoria, k.color AS categoria_color,
         COUNT(g.id)::int         AS n,
         COALESCE(SUM(g.monto),0) AS total
       FROM fac_gastos g

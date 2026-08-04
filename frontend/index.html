@@ -668,6 +668,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-mov-banco"><div class="modal" style="width:min(720px,96vw)" id="modal-mov-banco-body"></div></div>
 <div class="overlay" id="modal-gasto"><div class="modal" style="width:min(680px,96vw)" id="modal-gasto-body"></div></div>
 <div class="overlay" id="modal-gt-cats"><div class="modal" style="width:min(720px,96vw)" id="modal-gt-cats-body"></div></div>
+<div class="overlay" id="modal-gt-pago"><div class="modal" style="width:min(560px,96vw)" id="modal-gt-pago-body"></div></div>
 <div class="overlay" id="modal-benef-bnc"><div class="modal" style="width:min(640px,96vw)" id="modal-benef-bnc-body"></div></div>
 <div class="overlay" id="modal-notif-ch"><div class="modal" style="width:min(720px,96vw)" id="modal-notif-ch-body"></div></div>
 <div class="overlay" id="modal-notif-show"><div class="modal modal-sm" id="modal-notif-show-body"></div></div>
@@ -1112,6 +1113,10 @@ async function gastos() {
       .gt-pill.xml {background:#dbeafe;color:#1d4ed8}
       .gt-pill.man {background:#f3e8ff;color:#7e22ce}
       .gt-pill.sin {background:#fef3c7;color:#b45309}
+      .gt-pill.pgd {background:#d1fae5;color:#047857}
+      .gt-pill.prc {background:#dbeafe;color:#1d4ed8}
+      .gt-pill.pdt {background:#fef3c7;color:#b45309}
+      .gt-pill.ven {background:#ffe4e6;color:#be123c}
 
       /* ── Bandeja de pendientes ── */
       .gt-pend-row{background:#fff;border:1.5px solid #fde68a;border-radius:14px;padding:13px 15px;
@@ -1173,6 +1178,13 @@ async function gastos() {
           <option value="">Todo origen</option>
           <option value="XML">📥 Desde XML</option>
           <option value="MANUAL">✍️ Manual</option>
+        </select>
+        <select id="gt-pago" onchange="cargarGastos()" class="gt-filtro">
+          <option value="">Pagados y pendientes</option>
+          <option value="pendiente">⏳ Por pagar</option>
+          <option value="vencido">🔴 Vencidos</option>
+          <option value="parcial">◐ Pago parcial</option>
+          <option value="pagado">✓ Pagados</option>
         </select>
         <input type="date" id="gt-desde" value="${y}-${m}-01" onchange="cargarGastos()" class="gt-filtro">
         <input type="date" id="gt-hasta" value="${finMes}" onchange="cargarGastos()" class="gt-filtro">
@@ -1322,6 +1334,7 @@ function gtVerTodoElHistorico() {
   $('gt-categoria').value = ''; gtLlenarSelectConceptos();
   $('gt-concepto').value = '';
   $('gt-origen').value   = '';
+  $('gt-pago').value     = '';
   $('gt-buscar').value   = '';
   cargarGastos();
 }
@@ -1345,12 +1358,13 @@ async function cargarGastos() {
   const p = [];
   const d = $('gt-desde')?.value, h = $('gt-hasta')?.value;
   const c = $('gt-concepto')?.value, b = ($('gt-buscar')?.value || '').trim();
-  const k = $('gt-categoria')?.value, o = $('gt-origen')?.value;
+  const k = $('gt-categoria')?.value, o = $('gt-origen')?.value, pg = $('gt-pago')?.value;
   if (d) p.push(`desde=${d}`);
   if (h) p.push(`hasta=${h}`);
   if (c) p.push(`concepto_id=${c}`);
   if (k) p.push(`categoria_id=${k}`);
   if (o) p.push(`origen=${o}`);
+  if (pg) p.push(`pago=${pg}`);
   if (b) p.push(`buscar=${encodeURIComponent(b)}`);
   $('gt-body').innerHTML = '<p class="empty">Cargando…</p>';
   try {
@@ -1406,11 +1420,21 @@ function renderGastos(r) {
         <div class="v">${t.de_xml || 0}</div>
         <div class="s">${vigentes} clasificado${vigentes!=1?'s':''} · ${(t.n_gastos||0)-(t.de_xml||0)} captura${(t.n_gastos||0)-(t.de_xml||0)!=1?'s':''} manual${(t.n_gastos||0)-(t.de_xml||0)!=1?'es':''}</div>
       </div>
-      <div class="gt-card cancel">
-        <div class="ic">🚫</div>
-        <div class="l">Cancelados en el SAT</div>
-        <div class="v">${cancel}</div>
-        <div class="s">${cancel ? 'Revísalos: no son deducibles' : 'Ninguno cancelado'}</div>
+      <div class="gt-card ${t.n_vencidos ? 'cancel' : 'total'}" style="cursor:pointer"
+           onclick="$('gt-pago').value='${t.n_vencidos ? 'vencido' : 'pendiente'}';cargarGastos()"
+           title="Ver solo lo que falta pagar">
+        <div class="ic">💳</div>
+        <div class="l">Por pagar</div>
+        <div class="v">${fmt(t.por_pagar || 0)}</div>
+        <div class="s">${t.n_por_pagar || 0} sin liquidar${
+          t.n_vencidos ? ` · <strong>${t.n_vencidos} vencido${t.n_vencidos!=1?'s':''}</strong> (${fmt(t.monto_vencido)})` : ''}</div>
+      </div>
+      <div class="gt-card ${cancel ? 'cancel' : 'viva'}">
+        <div class="ic">${cancel ? '🚫' : '✓'}</div>
+        <div class="l">${cancel ? 'Cancelados en el SAT' : 'Pagado'}</div>
+        <div class="v">${cancel ? cancel : fmt(t.pagado || 0)}</div>
+        <div class="s">${cancel ? 'Revísalos: no son deducibles'
+                                : `${t.n_pagados || 0} gasto${t.n_pagados!=1?'s':''} liquidado${t.n_pagados!=1?'s':''}`}</div>
       </div>
       <div class="gt-card pend ${sinClas ? 'hay' : ''}" onclick="gtIrA('pendientes')" title="Ir a la bandeja de pendientes">
         <div class="ic">⏳</div>
@@ -1491,7 +1515,8 @@ function renderGastos(r) {
       <thead><tr>
         <th>Fecha</th><th>Cuenta de gasto</th><th>Proveedor / Descripción</th>
         <th style="text-align:center">Origen</th><th style="text-align:center">SAT</th>
-        <th>Referencia</th><th style="text-align:right">Monto</th><th></th>
+        <th style="text-align:center">Pago</th>
+        <th style="text-align:right">Monto</th><th></th>
       </tr></thead>
       <tbody>${r.gastos.map(g => `<tr${g.deducible === false ? ' style="background:#fafafa"' : ''}>
         <td style="white-space:nowrap">${fmtDate(g.fecha)}</td>
@@ -1510,21 +1535,169 @@ function renderGastos(r) {
           ? `<span class="gt-pill xml" title="${g.uuid||''}">📥 XML</span>`
           : `<span class="gt-pill man">✍️ Manual</span>`}</td>
         <td style="text-align:center">${gtPillSAT(g.estatus_sat)}</td>
-        <td style="font-family:monospace;font-size:11px;color:var(--muted)">${g.referencia||g.serie_folio||'—'}</td>
+        <td style="text-align:center">${gtPillPago(g)}</td>
         <td style="text-align:right;font-weight:900;color:#b45309;white-space:nowrap">${fmt(g.monto)}${
-          g.deducible === false ? ' <span title="No deducible" style="font-size:9px;background:#e2e8f0;color:#64748b;padding:1px 5px;border-radius:8px;font-weight:800">ND</span>' : ''}</td>
+          g.deducible === false ? ' <span title="No deducible" style="font-size:9px;background:#e2e8f0;color:#64748b;padding:1px 5px;border-radius:8px;font-weight:800">ND</span>' : ''}
+          ${parseFloat(g.saldo||0) > 0 && parseFloat(g.pagado||0) > 0
+            ? `<div style="font-size:9.5px;font-weight:700;color:#1d4ed8">saldo ${fmt(g.saldo)}</div>` : ''}</td>
         <td style="white-space:nowrap">
+          ${canGastos()?`<button class="btn ${g.estatus_pago==='pagado'?'bo':'bs'} bsm" style="padding:4px 8px"
+             onclick="openPagoGasto(${g.id})" title="${g.estatus_pago==='pagado'?'Ver o corregir el pago':'Registrar pago'}">💵</button>`:''}
           ${canGastos() && g.uuid ? `<button class="btn bo bsm" style="padding:4px 8px" onclick="validarSATGasto(${g.id},this)" title="Consultar estatus en el SAT">🛡️</button>` : ''}
           ${canGastos()?`<button class="btn bg bsm" style="padding:4px 8px" onclick="openGasto(${g.id})" title="Editar">✏️</button>`:''}
           ${canGastos()?`<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarGasto(${g.id})" title="Eliminar">🗑</button>`:''}
         </td>
       </tr>`).join('')}</tbody>
-      <tfoot><tr style="border-top:2px solid var(--dark);background:var(--bg-alt);font-weight:900">
-        <td colspan="6" style="padding:10px;text-align:right">TOTAL DEL PERÍODO:</td>
-        <td style="text-align:right;padding:10px;color:#b45309">${fmt(t.total)}</td>
-        <td></td>
-      </tr></tfoot>
+      <tfoot>
+        <tr style="border-top:2px solid var(--dark);background:var(--bg-alt);font-weight:900">
+          <td colspan="6" style="padding:10px;text-align:right">TOTAL DEL PERÍODO:</td>
+          <td style="text-align:right;padding:10px;color:#b45309">${fmt(t.total)}</td>
+          <td></td>
+        </tr>
+        <tr style="background:var(--bg-alt);font-weight:800;font-size:11.5px">
+          <td colspan="6" style="padding:4px 10px 9px;text-align:right;color:var(--muted)">
+            Pagado ${fmt(t.pagado||0)} · pendiente de pago:</td>
+          <td style="text-align:right;padding:4px 10px 9px;color:${parseFloat(t.por_pagar||0)>0?'#be123c':'#047857'}">${fmt(t.por_pagar||0)}</td>
+          <td></td>
+        </tr>
+      </tfoot>
     </table></div>`;
+}
+
+// Estatus de pago. No viene guardado: el servidor lo deriva del importe pagado,
+// así que "parcial" y "vencido" no dependen de que alguien mantenga una etiqueta.
+function gtPillPago(g) {
+  const e = g.estatus_pago || 'pendiente';
+  if (e === 'pagado')  return `<span class="gt-pill pgd" title="Pagado el ${g.fecha_pago ? fmtDate(g.fecha_pago) : '—'}">✓ Pagado</span>`;
+  if (e === 'parcial') return `<span class="gt-pill prc" title="Abonado ${fmt(g.pagado)} de ${fmt(g.monto)}">◐ Parcial</span>`;
+  if (e === 'vencido') return `<span class="gt-pill ven" title="Venció el ${fmtDate(g.fecha_vencimiento)}">🔴 Vencido</span>`;
+  return `<span class="gt-pill pdt"${g.fecha_vencimiento ? ` title="Vence el ${fmtDate(g.fecha_vencimiento)}"` : ''}>⏳ Por pagar</span>`;
+}
+
+async function openPagoGasto(id) {
+  const g = (window._gtData?.gastos || []).find(x => x.id === id);
+  if (!g) return toast('No se encontró el gasto en la lista.', 'err');
+  const monto  = parseFloat(g.monto);
+  const pagado = parseFloat(g.pagado || 0);
+  const saldo  = Math.max(monto - pagado, 0);
+  const hoy    = new Date().toISOString().slice(0,10);
+  const sv = v => (v == null ? '' : String(v)).replace(/"/g,'&quot;');
+
+  $('modal-gt-pago-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#065f46,#059669);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Control de pago</div>
+      <div style="font-size:19px;font-weight:900;margin-top:3px">💵 ${g.nombre_proveedor || g.proveedor || 'Gasto'}</div>
+      <div style="font-size:11.5px;opacity:.88;margin-top:3px">
+        ${fmtDate(g.fecha)} · ${g.concepto || 'Sin clasificar'} · ${g.serie_folio || g.referencia || 's/folio'}
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:16px;text-align:center">
+      <div style="background:var(--bg-alt);border-radius:11px;padding:10px">
+        <div style="font-size:9.5px;font-weight:900;text-transform:uppercase;color:var(--muted)">Monto</div>
+        <div style="font-size:16px;font-weight:900;color:var(--dark)">${fmt(monto)}</div>
+      </div>
+      <div style="background:#ecfdf5;border-radius:11px;padding:10px">
+        <div style="font-size:9.5px;font-weight:900;text-transform:uppercase;color:#047857">Pagado</div>
+        <div style="font-size:16px;font-weight:900;color:#047857" id="pg-pagado-v">${fmt(pagado)}</div>
+      </div>
+      <div style="background:${saldo>0?'#fef2f2':'#f8fafc'};border-radius:11px;padding:10px">
+        <div style="font-size:9.5px;font-weight:900;text-transform:uppercase;color:${saldo>0?'#be123c':'var(--muted)'}">Saldo</div>
+        <div style="font-size:16px;font-weight:900;color:${saldo>0?'#be123c':'var(--muted)'}" id="pg-saldo-v">${fmt(saldo)}</div>
+      </div>
+    </div>
+
+    <div class="fg" style="gap:11px">
+      <div class="fi full"><label>Importe pagado acumulado</label>
+        <div style="display:flex;gap:7px;align-items:center">
+          <div style="position:relative;flex:1">
+            <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#047857;font-weight:900;font-size:16px;pointer-events:none">$</span>
+            <input type="number" step="0.01" id="pg-importe" value="${pagado || ''}" placeholder="0.00"
+                   oninput="pgRecalcular(${monto})"
+                   style="padding-left:26px;font-size:17px;font-weight:900;text-align:right;color:#047857">
+          </div>
+          <button class="btn bo bsm" onclick="$('pg-importe').value='${monto.toFixed(2)}';pgRecalcular(${monto})"
+                  style="white-space:nowrap">Todo</button>
+        </div>
+        <div style="font-size:10.5px;color:var(--muted);margin-top:4px">
+          Es el total abonado, no el abono de hoy. Si ya habías pagado una parte, súmala.
+        </div>
+      </div>
+      <div class="fi"><label>Fecha de pago</label>
+        <input type="date" id="pg-fecha" value="${sv(g.fecha_pago) || hoy}">
+      </div>
+      <div class="fi"><label>Vence el <span style="color:var(--muted);font-weight:400;font-size:10px">(opcional)</span></label>
+        <input type="date" id="pg-vence" value="${sv(g.fecha_vencimiento)}">
+      </div>
+      <div class="fi"><label>Forma de pago</label>
+        <select id="pg-forma">
+          <option value="">— Sin especificar —</option>
+          ${FORMAS_PAGO_GTO.map(f => `<option value="${f}" ${(g.pago_forma||g.forma_pago)===f?'selected':''}>${f.charAt(0).toUpperCase()+f.slice(1)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fi"><label>Referencia <span style="color:var(--muted);font-weight:400;font-size:10px">(cheque, SPEI)</span></label>
+        <input id="pg-ref" value="${sv(g.pago_referencia)}" style="font-family:monospace">
+      </div>
+      <div class="fi full"><label>Notas del pago <span style="color:var(--muted);font-weight:400;font-size:10px">(opcional)</span></label>
+        <input id="pg-notas" value="${sv(g.pago_notas)}" maxlength="200">
+      </div>
+    </div>
+
+    <div class="form-actions" style="justify-content:space-between">
+      <div>${pagado > 0 && canGastos()
+        ? `<button class="btn bd bsm" onclick="revertirPagoGasto(${id})" title="Dejarlo como no pagado">↺ Marcar sin pagar</button>` : ''}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn bo" onclick="closeModal('modal-gt-pago')">Cancelar</button>
+        <button class="btn bs" id="pg-btn" onclick="guardarPagoGasto(${id},${monto})">💾 Guardar pago</button>
+      </div>
+    </div>`;
+  openModal('modal-gt-pago');
+}
+
+function pgRecalcular(monto) {
+  const v = parseFloat($('pg-importe').value) || 0;
+  const saldo = Math.max(monto - v, 0);
+  $('pg-pagado-v').textContent = fmt(v);
+  const s = $('pg-saldo-v');
+  s.textContent = fmt(saldo);
+  s.style.color = saldo > 0 ? '#be123c' : '#047857';
+}
+
+async function guardarPagoGasto(id, monto) {
+  const importe = parseFloat($('pg-importe').value) || 0;
+  if (importe < 0) return toast('El importe no puede ser negativo.', 'warn');
+  if (importe > monto + 0.005)
+    return toast(`El pago no puede exceder el monto del gasto (${fmt(monto)}).`, 'warn');
+  const btn = $('pg-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="gt-spin"></span> Guardando…';
+  try {
+    const r = await api(`/gastos/${id}/pago`, { method:'PATCH', body: JSON.stringify({
+      importe,
+      fecha_pago       : $('pg-fecha').value || null,
+      fecha_vencimiento: $('pg-vence').value || null,
+      pago_forma       : $('pg-forma').value || null,
+      pago_referencia  : $('pg-ref').value.trim() || null,
+      pago_notas       : $('pg-notas').value.trim() || null
+    })});
+    toast(r.estatus_pago === 'pagado' ? 'Gasto liquidado.'
+        : r.estatus_pago === 'parcial' ? `Pago parcial. Queda un saldo de ${fmt(r.saldo)}.`
+        : 'Gasto marcado como pendiente.');
+    closeModal('modal-gt-pago');
+    cargarGastos();
+  } catch(e) {
+    toast(e.message, 'err');
+    btn.disabled = false; btn.innerHTML = '💾 Guardar pago';
+  }
+}
+
+async function revertirPagoGasto(id) {
+  if (!await confirm2('¿Dejar este gasto como no pagado?\nSe borra el importe pagado y sus datos.')) return;
+  try {
+    await api(`/gastos/${id}/pago`, { method:'PATCH', body: JSON.stringify({ revertir: true }) });
+    toast('Gasto marcado como pendiente de pago.');
+    closeModal('modal-gt-pago');
+    cargarGastos();
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 function gtPillSAT(estatus) {
@@ -2033,6 +2206,7 @@ async function gtEjecutarImport() {
       if (d && (!d.value || rango.desde < d.value)) d.value = rango.desde;
       if (h && (!h.value || rango.hasta > h.value)) h.value = rango.hasta;
       const or = $('gt-origen'); if (or) or.value = '';
+      const pa = $('gt-pago');   if (pa) pa.value = '';
       const ca = $('gt-categoria'); if (ca) { ca.value = ''; gtLlenarSelectConceptos(); }
       const co = $('gt-concepto'); if (co) co.value = '';
       const bu = $('gt-buscar'); if (bu) bu.value = '';
@@ -2173,16 +2347,23 @@ function exportarGastosExcel() {
   const aoa = [['GASTOS DE OPERACIÓN — GRUPO MANAGEMENT'],
                [`Período: ${fmtDate($('gt-desde').value)} al ${fmtDate($('gt-hasta').value)}`],
                [`Generado: ${new Date().toLocaleString('es-MX')}`], [],
-               ['Fecha','Concepto','Descripción','Proveedor','Forma de pago','Referencia','RFC factura','Deducible','Monto','Capturó']];
+               ['Fecha','Categoría','Cuenta de gasto','Proveedor','RFC','Descripción','Origen',
+                'Estatus SAT','Estatus de pago','Vence','Pagado el','Monto','Pagado','Saldo','Referencia','Capturó']];
+  const ESTP = { pagado:'Pagado', parcial:'Pago parcial', vencido:'Vencido', pendiente:'Por pagar' };
   r.gastos.forEach(g => aoa.push([
-    g.fecha, g.concepto, g.descripcion||'', g.proveedor||'', g.forma_pago||'',
-    g.referencia||'', g.factura_rfc||'', g.deducible === false ? 'No':'Sí',
-    parseFloat(g.monto), g.capturado_por||''
+    g.fecha, g.categoria||'', g.concepto||'Sin clasificar',
+    g.nombre_proveedor||g.proveedor||'', g.rfc_proveedor||g.factura_rfc||'',
+    g.descripcion||'', g.origen||'MANUAL', g.estatus_sat||'',
+    ESTP[g.estatus_pago] || 'Por pagar', g.fecha_vencimiento||'', g.fecha_pago||'',
+    parseFloat(g.monto), parseFloat(g.pagado||0), parseFloat(g.saldo||0),
+    g.pago_referencia||g.referencia||'', g.capturado_por||''
   ]));
   aoa.push([]);
-  aoa.push(['','','','','','','','TOTAL:', parseFloat(r.totales.total)]);
+  aoa.push(['','','','','','','','','','','TOTAL:',
+            parseFloat(r.totales.total), parseFloat(r.totales.pagado||0), parseFloat(r.totales.por_pagar||0)]);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{wch:12},{wch:38},{wch:34},{wch:24},{wch:14},{wch:16},{wch:14},{wch:10},{wch:14},{wch:18}];
+  ws['!cols'] = [{wch:12},{wch:22},{wch:34},{wch:26},{wch:15},{wch:30},{wch:9},
+                 {wch:13},{wch:14},{wch:12},{wch:12},{wch:14},{wch:14},{wch:14},{wch:16},{wch:18}];
   XLSX.utils.book_append_sheet(wb, ws, 'Gastos');
   // Hoja de desglose por concepto
   const aoaC = [['Concepto','Registros','Total']];
