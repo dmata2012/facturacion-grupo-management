@@ -315,6 +315,43 @@ router.delete('/mapeo-proveedores/:id', requireRol('admin', 'tesoreria', 'gerent
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/gastos/proveedores
+// Para el selector de la captura manual: junta los proveedores con regla dada de
+// alta y los que ya aparecen en algún gasto, aunque nunca se les haya hecho regla.
+router.get('/proveedores', async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT
+        MIN(nombre)                            AS nombre,
+        MAX(rfc) FILTER (WHERE rfc <> '')      AS rfc,
+        MAX(concepto_id)                       AS concepto_id,
+        SUM(veces)::int                        AS veces,
+        BOOL_OR(con_regla)                     AS con_regla
+      FROM (
+        SELECT COALESCE(NULLIF(TRIM(m.nombre_proveedor),''), m.rfc) AS nombre,
+               UPPER(TRIM(COALESCE(m.rfc,'')))  AS rfc,
+               m.concepto_id,
+               GREATEST(m.veces_usado, 1)       AS veces,
+               TRUE                             AS con_regla
+        FROM fac_gastos_mapeo_proveedores m
+        UNION ALL
+        SELECT TRIM(COALESCE(NULLIF(TRIM(g.nombre_proveedor),''), g.proveedor)) AS nombre,
+               UPPER(TRIM(COALESCE(g.rfc_proveedor, g.factura_rfc, ''))) AS rfc,
+               NULL::int                        AS concepto_id,
+               1                                AS veces,
+               FALSE                            AS con_regla
+        FROM fac_gastos g
+        WHERE COALESCE(NULLIF(TRIM(g.nombre_proveedor),''), g.proveedor) IS NOT NULL
+      ) t
+      WHERE nombre IS NOT NULL AND TRIM(nombre) <> ''
+      GROUP BY UPPER(TRIM(nombre))
+      ORDER BY BOOL_OR(con_regla) DESC, SUM(veces) DESC, MIN(nombre)
+      LIMIT 500
+    `);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ═══ IMPORTACIÓN DE CFDI DE PROVEEDOR ═══════════════
 // El navegador parsea los XML y manda aquí el arreglo de comprobantes.
 // Se resuelve en el servidor para poder validar duplicados de forma confiable.

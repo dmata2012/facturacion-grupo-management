@@ -2106,6 +2106,8 @@ function exportarGastosExcel() {
 async function openGasto(id) {
   await gtCargarCatalogos();
   const conceptos = window._gtConceptos || [];
+  try { window._gtProveedores = await api('/gastos/proveedores'); }
+  catch(e) { window._gtProveedores = window._gtProveedores || []; }
   let g = { concepto_id:'', fecha:new Date().toISOString().slice(0,10), monto:'',
             descripcion:'', proveedor:'', forma_pago:'transferencia', referencia:'',
             factura_rfc:'', deducible:true, notas:'', uuid:'', subtotal:'', iva:'', retenciones:'' };
@@ -2152,8 +2154,14 @@ async function openGasto(id) {
         <input id="gf-descripcion" value="${sv(g.descripcion)}" maxlength="300"
                placeholder="Ej: Pago de renta de julio · Gasolina unidad 3">
       </div>
-      <div class="fi"><label>Proveedor / Beneficiario</label>
-        <input id="gf-proveedor" value="${sv(g.proveedor)}" placeholder="A quién se le pagó">
+      <div class="fi">
+        <label style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+          Proveedor / Beneficiario
+          <span id="gf-prov-hint" style="font-weight:600;font-size:9.5px;color:var(--muted);text-transform:none;letter-spacing:0"></span>
+        </label>
+        <input id="gf-proveedor" value="${sv(g.proveedor || g.nombre_proveedor)}" list="gf-proveedores"
+               placeholder="Escribe o elige de la lista ▾" oninput="gfProveedorElegido()" autocomplete="off">
+        <datalist id="gf-proveedores"></datalist>
       </div>
       <div class="fi"><label>Forma de pago</label>
         <select id="gf-forma">
@@ -2208,7 +2216,48 @@ async function openGasto(id) {
       <button class="btn bo" onclick="closeModal('modal-gasto')">Cancelar</button>
       <button class="btn bs" id="gf-btn" onclick="guardarGasto(${id||'null'})">💾 ${id?'Guardar cambios':'Registrar gasto'}</button>
     </div>`;
+  gfLlenarProveedores();
+  gfProveedorElegido(true);
   openModal('modal-gasto');
+}
+
+// Sugerencias del campo Proveedor. Se usa <datalist> y no un <select> a propósito:
+// en la captura manual el beneficiario muchas veces no es un proveedor dado de
+// alta (el SAT, un empleado, una notaría), así que hay que poder escribir libre.
+function gfLlenarProveedores() {
+  const dl = $('gf-proveedores'); if (!dl) return;
+  dl.innerHTML = (window._gtProveedores || []).map(p =>
+    `<option value="${String(p.nombre).replace(/"/g,'&quot;')}">${
+      [p.rfc, p.con_regla ? 'clasifica solo' : null].filter(Boolean).join(' · ')}</option>`).join('');
+}
+
+// Al elegir uno conocido se rellena su RFC y se sugiere su cuenta de gasto
+function gfProveedorElegido(silencioso) {
+  const inp = $('gf-proveedor'); if (!inp) return;
+  const hint = $('gf-prov-hint');
+  const nombre = (inp.value || '').trim().toLowerCase();
+  const p = (window._gtProveedores || []).find(x => String(x.nombre).trim().toLowerCase() === nombre);
+
+  if (!p) { if (hint) hint.textContent = ''; return; }
+
+  const rfc = $('gf-rfc');
+  if (rfc && !rfc.value.trim() && p.rfc) rfc.value = p.rfc;
+
+  // La cuenta de gasto solo se propone si aún no se ha elegido ninguna
+  const sel = $('gf-concepto');
+  let sugerida = '';
+  if (sel && !sel.value && p.concepto_id) {
+    const c = (window._gtConceptos || []).find(x => String(x.id) === String(p.concepto_id));
+    if (c) {
+      const cat = $('gf-categoria');
+      if (cat) { cat.value = c.categoria_id || ''; gtCascadaModal(); }
+      sel.value = p.concepto_id;
+      sugerida = c.nombre;
+    }
+  }
+  if (hint) hint.textContent = sugerida ? `✓ ${p.rfc || ''} · ${sugerida}`.trim()
+                             : p.rfc     ? `✓ ${p.rfc}` : '✓ ya registrado';
+  if (!silencioso && sugerida) toast(`Se propuso la cuenta "${sugerida}" por el proveedor.`);
 }
 
 // Cascada del modal: acotar las cuentas de gasto a la categoría elegida
