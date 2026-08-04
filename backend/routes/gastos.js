@@ -316,32 +316,52 @@ router.delete('/mapeo-proveedores/:id', requireRol('admin', 'tesoreria', 'gerent
 });
 
 // GET /api/gastos/proveedores
-// Para el selector de la captura manual: junta los proveedores con regla dada de
-// alta y los que ya aparecen en algún gasto, aunque nunca se les haya hecho regla.
+// Directorio unificado de a quién se le paga. Junta tres orígenes, porque en el
+// sistema un mismo proveedor puede haberse dado de alta en cualquiera de ellos:
+//   1. Reglas de auto-clasificación de gastos
+//   2. Beneficiarios de Bancos (los que reciben cheques)
+//   3. Los que ya aparecen escritos en algún gasto
 router.get('/proveedores', async (req, res) => {
   try {
+    // Bancos puede no existir todavía en instalaciones viejas
+    const hayBenef = await query(`SELECT to_regclass('public.fac_bancos_beneficiarios') AS t`);
+    const bloqueBancos = hayBenef.rows[0].t ? `
+        UNION ALL
+        SELECT TRIM(b.nombre_completo)          AS nombre,
+               UPPER(TRIM(COALESCE(b.rfc,'')))  AS rfc,
+               NULL::int                        AS concepto_id,
+               1                                AS veces,
+               FALSE                            AS con_regla,
+               TRUE                             AS de_bancos
+        FROM fac_bancos_beneficiarios b
+        WHERE b.activo AND NULLIF(TRIM(b.nombre_completo),'') IS NOT NULL` : '';
+
     const r = await query(`
       SELECT
         MIN(nombre)                            AS nombre,
         MAX(rfc) FILTER (WHERE rfc <> '')      AS rfc,
         MAX(concepto_id)                       AS concepto_id,
         SUM(veces)::int                        AS veces,
-        BOOL_OR(con_regla)                     AS con_regla
+        BOOL_OR(con_regla)                     AS con_regla,
+        BOOL_OR(de_bancos)                     AS de_bancos
       FROM (
         SELECT COALESCE(NULLIF(TRIM(m.nombre_proveedor),''), m.rfc) AS nombre,
                UPPER(TRIM(COALESCE(m.rfc,'')))  AS rfc,
                m.concepto_id,
                GREATEST(m.veces_usado, 1)       AS veces,
-               TRUE                             AS con_regla
+               TRUE                             AS con_regla,
+               FALSE                            AS de_bancos
         FROM fac_gastos_mapeo_proveedores m
         UNION ALL
         SELECT TRIM(COALESCE(NULLIF(TRIM(g.nombre_proveedor),''), g.proveedor)) AS nombre,
                UPPER(TRIM(COALESCE(g.rfc_proveedor, g.factura_rfc, ''))) AS rfc,
                NULL::int                        AS concepto_id,
                1                                AS veces,
-               FALSE                            AS con_regla
+               FALSE                            AS con_regla,
+               FALSE                            AS de_bancos
         FROM fac_gastos g
         WHERE COALESCE(NULLIF(TRIM(g.nombre_proveedor),''), g.proveedor) IS NOT NULL
+        ${bloqueBancos}
       ) t
       WHERE nombre IS NOT NULL AND TRIM(nombre) <> ''
       GROUP BY UPPER(TRIM(nombre))

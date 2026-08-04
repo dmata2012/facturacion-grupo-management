@@ -1986,8 +1986,12 @@ async function cargarMapeoProveedores() {
   $('gt-prov').innerHTML = '<p class="empty">Cargando…</p>';
   await gtCargarCatalogos();
   try {
-    const ms = await api('/gastos/mapeo-proveedores');
+    const [ms, ps] = await Promise.all([
+      api('/gastos/mapeo-proveedores'),
+      api('/gastos/proveedores').catch(() => [])
+    ]);
     window._gtMapeo = ms;
+    window._gtProveedores = ps;
     renderMapeoProveedores(ms);
   } catch(e) { $('gt-prov').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
 }
@@ -2001,22 +2005,34 @@ function renderMapeoProveedores(ms) {
         <div style="font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.4px;opacity:.9">Reglas de auto-clasificación</div>
         <div style="font-size:27px;font-weight:900;line-height:1.1">${ms.length} proveedor${ms.length!=1?'es':''}</div>
       </div>
-      <div style="font-size:12px;opacity:.92;text-align:right;max-width:340px;line-height:1.5">
+      <div style="font-size:12px;opacity:.92;text-align:right;max-width:360px;line-height:1.5">
         Cada regla dice: “las facturas de este RFC son de esta cuenta de gasto”.
         Se han aplicado <strong>${usos}</strong> ${usos===1?'vez':'veces'} al importar.
+        <div style="margin-top:5px;font-size:11px;opacity:.85">
+          Aquí solo salen los que ya tienen regla${
+            (window._gtProveedores||[]).length > ms.length
+              ? `. Conoces <strong>${(window._gtProveedores||[]).length}</strong> proveedores en total — agrégalos abajo.`
+              : '.'}
+        </div>
       </div>
     </div>
 
     ${canGastos() ? `
     <div class="card" style="margin-bottom:14px;background:var(--bg-alt)">
-      <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:9px">➕ Nueva regla</div>
-      <div style="display:grid;grid-template-columns:150px 1fr 1fr auto;gap:8px;align-items:end">
-        <div class="fi" style="margin:0"><label style="font-size:10px">RFC del proveedor</label>
+      <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px">➕ Nueva regla</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:9px;line-height:1.5">
+        Elige un proveedor de la lista — incluye los beneficiarios de Bancos y a quienes
+        ya les has capturado gastos — o escribe uno nuevo.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 150px 1fr auto;gap:8px;align-items:end">
+        <div class="fi" style="margin:0"><label style="font-size:10px">Proveedor</label>
+          <input id="gp-nombre" list="gp-proveedores" autocomplete="off"
+                 placeholder="Escribe o elige de la lista ▾" oninput="gpProveedorElegido()">
+          <datalist id="gp-proveedores">${gtOptsProveedores()}</datalist>
+        </div>
+        <div class="fi" style="margin:0"><label style="font-size:10px">RFC <span style="color:var(--red)">*</span></label>
           <input id="gp-rfc" maxlength="13" placeholder="XAXX010101000"
                  style="text-transform:uppercase;font-family:monospace">
-        </div>
-        <div class="fi" style="margin:0"><label style="font-size:10px">Nombre (opcional)</label>
-          <input id="gp-nombre" placeholder="Razón social">
         </div>
         <div class="fi" style="margin:0"><label style="font-size:10px">Cuenta de gasto</label>
           <select id="gp-concepto"><option value="">— Seleccionar —</option>${gtOptsConceptos('')}</select>
@@ -2052,6 +2068,17 @@ function renderMapeoProveedores(ms) {
         un gasto, deja marcado “Recordar proveedor” y la regla se crea sola.
       </p>
     </div>`}`;
+}
+
+// Al elegir un proveedor conocido en la regla nueva, se rellena su RFC
+function gpProveedorElegido() {
+  const nombre = ($('gp-nombre')?.value || '').trim().toLowerCase();
+  const p = (window._gtProveedores || []).find(x => String(x.nombre).trim().toLowerCase() === nombre);
+  if (!p) return;
+  const rfc = $('gp-rfc');
+  if (rfc && !rfc.value.trim() && p.rfc) rfc.value = p.rfc;
+  const sel = $('gp-concepto');
+  if (sel && !sel.value && p.concepto_id) sel.value = p.concepto_id;
 }
 
 async function guardarMapeoProveedor() {
@@ -2226,9 +2253,15 @@ async function openGasto(id) {
 // alta (el SAT, un empleado, una notaría), así que hay que poder escribir libre.
 function gfLlenarProveedores() {
   const dl = $('gf-proveedores'); if (!dl) return;
-  dl.innerHTML = (window._gtProveedores || []).map(p =>
+  dl.innerHTML = gtOptsProveedores();
+}
+
+// Etiqueta de cada sugerencia: RFC y de dónde salió el proveedor
+function gtOptsProveedores() {
+  return (window._gtProveedores || []).map(p =>
     `<option value="${String(p.nombre).replace(/"/g,'&quot;')}">${
-      [p.rfc, p.con_regla ? 'clasifica solo' : null].filter(Boolean).join(' · ')}</option>`).join('');
+      [p.rfc, p.con_regla ? 'clasifica solo' : p.de_bancos ? 'de Bancos' : null]
+        .filter(Boolean).join(' · ')}</option>`).join('');
 }
 
 // Al elegir uno conocido se rellena su RFC y se sugiere su cuenta de gasto
