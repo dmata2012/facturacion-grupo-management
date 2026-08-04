@@ -2256,12 +2256,18 @@ function gfLlenarProveedores() {
   dl.innerHTML = gtOptsProveedores();
 }
 
-// Etiqueta de cada sugerencia: RFC y de dónde salió el proveedor
+// Etiqueta de cada sugerencia: RFC y de dónde salió el proveedor.
+// El origen siempre se dice, para poder rastrear dónde se dio de alta cada quien.
+function gtOrigenProveedor(p) {
+  if (p.con_regla) return 'regla de gastos';
+  if (p.de_bancos) return 'beneficiario de Bancos';
+  return 'usado en un gasto';
+}
+
 function gtOptsProveedores() {
   return (window._gtProveedores || []).map(p =>
     `<option value="${String(p.nombre).replace(/"/g,'&quot;')}">${
-      [p.rfc, p.con_regla ? 'clasifica solo' : p.de_bancos ? 'de Bancos' : null]
-        .filter(Boolean).join(' · ')}</option>`).join('');
+      [p.rfc, gtOrigenProveedor(p)].filter(Boolean).join(' · ')}</option>`).join('');
 }
 
 // Al elegir uno conocido se rellena su RFC y se sugiere su cuenta de gasto
@@ -2288,8 +2294,9 @@ function gfProveedorElegido(silencioso) {
       sugerida = c.nombre;
     }
   }
-  if (hint) hint.textContent = sugerida ? `✓ ${p.rfc || ''} · ${sugerida}`.trim()
-                             : p.rfc     ? `✓ ${p.rfc}` : '✓ ya registrado';
+  if (hint) hint.textContent = sugerida
+    ? `✓ ${[p.rfc, sugerida].filter(Boolean).join(' · ')}`
+    : `✓ ${[p.rfc, gtOrigenProveedor(p)].filter(Boolean).join(' · ')}`;
   if (!silencioso && sugerida) toast(`Se propuso la cuenta "${sugerida}" por el proveedor.`);
 }
 
