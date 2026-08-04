@@ -1930,6 +1930,10 @@ function gtVistaPreviaImport() {
 async function gtEjecutarImport() {
   const btn = $('gt-btn-imp');
   btn.disabled = true; btn.innerHTML = '<span class="gt-spin"></span> Importando…';
+  // Los CFDI casi nunca son del mes en curso, y el listado arranca filtrado a ese
+  // mes: sin ampliar el rango, lo recién importado no aparecería por ningún lado.
+  const fechas = window._gtImport.comprobantes.map(c => c.fecha).filter(Boolean).sort();
+  const rango = fechas.length ? { desde: fechas[0], hasta: fechas[fechas.length-1] } : null;
   try {
     const r = await api('/gastos/importar-xml', {
       method:'POST', body: JSON.stringify({ comprobantes: window._gtImport.comprobantes })
@@ -1967,12 +1971,33 @@ async function gtEjecutarImport() {
           <span style="color:var(--muted)"> — ${e.error}</span></div>`).join('')}
       </div>` : ''}
 
+      ${r.insertados && rango ? `
+      <div class="card" style="border-left:4px solid #10b981;margin-bottom:12px;font-size:12.5px;line-height:1.6">
+        📍 <strong>Dónde quedaron.</strong> Se registraron como gastos con fecha
+        ${rango.desde === rango.hasta ? `del <strong>${fmtDate(rango.desde)}</strong>`
+                                      : `entre el <strong>${fmtDate(rango.desde)}</strong> y el <strong>${fmtDate(rango.hasta)}</strong>`}.
+        El listado de <em>Cuentas por Pagar</em> arranca filtrado al mes en curso, así que
+        ya ajusté las fechas del filtro para que los veas.
+        ${r.sin_clasificar ? `<br>Los <strong>${r.sin_clasificar}</strong> sin cuenta de gasto están además en la <em>Bandeja de pendientes</em>.` : ''}
+      </div>` : ''}
+
       <div style="display:flex;gap:9px;justify-content:flex-end">
         <button class="btn bo" onclick="$('gt-import-res').innerHTML=''">Cerrar</button>
+        ${r.insertados ? `<button class="btn bo" onclick="gtIrA('lista')">🧾 Ver los importados</button>` : ''}
         ${r.sin_clasificar ? `<button class="btn bs" onclick="gtIrA('pendientes')">⏳ Clasificar pendientes</button>` : ''}
       </div>`;
     toast(`${r.insertados} gasto(s) importado(s).`);
     window._gtImport = null;
+    // Ampliar el filtro para abarcar lo importado, sin encoger lo que ya se veía
+    if (r.insertados && rango) {
+      const d = $('gt-desde'), h = $('gt-hasta');
+      if (d && (!d.value || rango.desde < d.value)) d.value = rango.desde;
+      if (h && (!h.value || rango.hasta > h.value)) h.value = rango.hasta;
+      const or = $('gt-origen'); if (or) or.value = '';
+      const ca = $('gt-categoria'); if (ca) { ca.value = ''; gtLlenarSelectConceptos(); }
+      const co = $('gt-concepto'); if (co) co.value = '';
+      const bu = $('gt-buscar'); if (bu) bu.value = '';
+    }
     cargarGastos();
     gtActualizarBadgePendientes();
   } catch(e) {
