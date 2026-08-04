@@ -1314,6 +1314,18 @@ async function gtActualizarBadgePendientes() {
   } catch(e) { return 0; }
 }
 
+// Abrir el filtro a todo lo capturado, usando las fechas reales de la base
+function gtVerTodoElHistorico() {
+  const G = window._gtData?.global;
+  $('gt-desde').value = G?.primera || '2000-01-01';
+  $('gt-hasta').value = G?.ultima  || new Date().toISOString().slice(0,10);
+  $('gt-categoria').value = ''; gtLlenarSelectConceptos();
+  $('gt-concepto').value = '';
+  $('gt-origen').value   = '';
+  $('gt-buscar').value   = '';
+  cargarGastos();
+}
+
 function gtPreset(tipo) {
   const hoy = new Date(), y = hoy.getFullYear(), pad = n => String(n).padStart(2,'0');
   if (tipo === 'mes') {
@@ -1409,16 +1421,43 @@ function renderGastos(r) {
   }
 
   if (!r.gastos.length) {
+    const G = r.global || { n: 0 };
+    // Distinguir "no hay nada capturado" de "sí hay, pero el filtro los deja fuera"
+    if (G.n > 0) {
+      $('gt-body').innerHTML = `
+        <div style="background:linear-gradient(160deg,#eff6ff,#dbeafe);border:2px dashed #60a5fa;
+                    border-radius:18px;padding:38px 30px;text-align:center">
+          <div style="font-size:54px;margin-bottom:10px">🔎</div>
+          <h3 style="margin:0 0 6px;font-size:19px;font-weight:900;color:#1e40af">
+            Hay ${G.n} gasto${G.n!=1?'s':''} registrado${G.n!=1?'s':''}, pero ninguno cae en este filtro
+          </h3>
+          <p style="font-size:13px;color:#1e3a8a;max-width:520px;margin:0 auto 8px;line-height:1.6">
+            El más antiguo es del <strong>${fmtDate(G.primera)}</strong> y el más reciente del
+            <strong>${fmtDate(G.ultima)}</strong>.
+            ${G.de_xml ? `<br>${G.de_xml} entraron por importación de XML.` : ''}
+            ${G.sin_clasificar ? `<br><strong>${G.sin_clasificar}</strong> están sin cuenta de gasto, en la Bandeja de pendientes.` : ''}
+          </p>
+          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:16px">
+            <button class="btn bs" onclick="gtVerTodoElHistorico()">📅 Ver todo el histórico</button>
+            ${G.sin_clasificar ? `<button class="btn bo" onclick="gtIrA('pendientes')">⏳ Ir a la bandeja (${G.sin_clasificar})</button>` : ''}
+          </div>
+        </div>`;
+      return;
+    }
     $('gt-body').innerHTML = `
       <div style="background:linear-gradient(160deg,#fffbeb,#fef3c7);border:2px dashed #fbbf24;
                   border-radius:18px;padding:44px 30px;text-align:center">
         <div style="font-size:60px;margin-bottom:12px">🧾</div>
-        <h3 style="margin:0 0 6px;font-size:19px;font-weight:900;color:#92400e">Sin gastos en este período</h3>
-        <p style="font-size:13px;color:#78350f;max-width:440px;margin:0 auto 20px;line-height:1.55">
-          Registra los gastos de operación para llevar el control mensual por concepto
-          y comparar cómo se comporta cada rubro a lo largo del año.
+        <h3 style="margin:0 0 6px;font-size:19px;font-weight:900;color:#92400e">Todavía no hay ningún gasto capturado</h3>
+        <p style="font-size:13px;color:#78350f;max-width:460px;margin:0 auto 20px;line-height:1.55">
+          Ni manuales ni importados: la tabla está vacía. Si acabas de importar XML y no ves nada,
+          revisa el resultado de la importación — es probable que se hayan descartado por folio
+          fiscal repetido o por algún error de lectura.
         </p>
-        ${canGastos()?`<button class="btn bs" onclick="openGasto()" style="font-size:14px;padding:11px 24px">＋ Registrar primer gasto</button>`:''}
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+          ${canGastos()?`<button class="btn bo" onclick="gtIrA('importar')">📥 Importar XML</button>`:''}
+          ${canGastos()?`<button class="btn bs" onclick="openGasto()">＋ Registrar primer gasto</button>`:''}
+        </div>
       </div>`;
     return;
   }

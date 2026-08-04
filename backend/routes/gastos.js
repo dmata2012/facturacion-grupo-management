@@ -834,9 +834,22 @@ router.get('/', async (req, res) => {
       ORDER BY total DESC
     `, params);
 
+    // Panorama sin filtros: sirve para explicar en pantalla por qué un listado
+    // salió vacío (hay gastos, pero fuera del rango consultado) en vez de dejar
+    // creer que no se guardó nada.
+    const global = await query(`
+      SELECT COUNT(*)::int                          AS n,
+             TO_CHAR(MIN(fecha),'YYYY-MM-DD')       AS primera,
+             TO_CHAR(MAX(fecha),'YYYY-MM-DD')       AS ultima,
+             COUNT(*) FILTER (WHERE origen='XML')::int        AS de_xml,
+             COUNT(*) FILTER (WHERE concepto_id IS NULL)::int AS sin_clasificar
+      FROM fac_gastos
+    `);
+
     res.json({
       gastos: r.rows, totales: tot.rows[0],
-      por_concepto: porConcepto.rows, por_categoria: porCategoria.rows
+      por_concepto: porConcepto.rows, por_categoria: porCategoria.rows,
+      global: global.rows[0]
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
