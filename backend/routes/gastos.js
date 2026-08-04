@@ -396,9 +396,16 @@ router.post('/importar-xml', requireRol('admin', 'capturista', 'tesoreria', 'ger
         if (!c.fecha || !c.total) { resultado.errores.push({ archivo, error: 'Faltan fecha o total en el XML.' }); continue; }
 
         // Bloqueo anti-duplicidad: se consulta antes de intentar insertar
-        const ya = await query(`SELECT id, fecha, total FROM fac_gastos WHERE uuid=$1`, [uuid]);
+        // La columna del importe en fac_gastos es "monto", no "total"
+        const ya = await query(
+          `SELECT id, TO_CHAR(fecha,'YYYY-MM-DD') AS fecha, monto FROM fac_gastos WHERE uuid=$1`,
+          [uuid]);
         if (ya.rows.length) {
-          resultado.duplicados.push({ archivo, uuid, registrado_el: ya.rows[0].fecha });
+          resultado.duplicados.push({
+            archivo, uuid,
+            registrado_el: ya.rows[0].fecha,
+            monto: ya.rows[0].monto
+          });
           continue;
         }
 
