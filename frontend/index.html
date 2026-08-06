@@ -10860,24 +10860,79 @@ function editarCeldaAsist(empId, fecha, codActual, notaActual, nombre) {
     <div class="fg">
       <div class="fi full">
         <label>Código</label>
-        <select id="ac-cod">
+        <select id="ac-cod" onchange="acValidarNota()">
           ${opciones.map(o => `<option value="${o.v}" ${o.v===codActual?'selected':''}>${o.l}</option>`).join('')}
         </select>
         <div style="font-size:11px;color:var(--muted);margin-top:3px">"Automático" borra el ajuste manual y regresa al valor calculado.</div>
       </div>
       <div class="fi full">
-        <label>Nota / Justificación <span style="font-weight:400;color:var(--muted);font-size:10.5px">(opcional — se muestra en el tooltip y en el Excel)</span></label>
-        <textarea id="ac-notas" rows="3" placeholder="Ej: Presentó incapacidad IMSS folio 12345 · Cita médica agendada · Autorizado por gerente...">${(notaActual||'').replace(/</g,'&lt;')}</textarea>
+        <label>Nota / Justificación <span id="ac-req" style="color:var(--red)"></span></label>
+        <textarea id="ac-notas" rows="3" oninput="acValidarNota()"
+          placeholder="Ej: Presentó incapacidad IMSS folio 12345 · Cita médica agendada · Autorizado por gerente...">${(notaActual||'').replace(/</g,'&lt;')}</textarea>
+        <div id="ac-aviso" style="font-size:11.5px;margin-top:6px"></div>
       </div>
     </div>
+    <div id="ac-hist" style="margin-top:4px"></div>
     <div class="form-actions">
       <button class="btn bo" onclick="closeModal('modal-asist-cell')">Cancelar</button>
-      <button class="btn bs" onclick="guardarAjusteAsist(${empId},'${fecha}')">💾 Guardar</button>
+      <button class="btn bs" id="ac-btn" onclick="guardarAjusteAsist(${empId},'${fecha}')">💾 Guardar</button>
     </div>`;
+  window._acOriginal = codActual || 'auto';
+  acValidarNota();
+  cargarHistorialAsist(empId, fecha);
   openModal('modal-asist-cell');
 }
 
+const AC_MIN_NOTA = 5;
+
+// Cambiar la incidencia exige explicar por qué. Corregir solo la nota no, porque
+// eso es justamente documentar mejor lo que ya se había decidido.
+function acValidarNota() {
+  const cambia = $('ac-cod').value !== window._acOriginal;
+  const nota   = ($('ac-notas').value || '').trim();
+  const falta  = cambia && nota.length < AC_MIN_NOTA;
+
+  $('ac-req').textContent = cambia ? '* obligatoria para cambiar la incidencia' : '(opcional)';
+  $('ac-req').style.color = cambia ? 'var(--red)' : 'var(--muted)';
+  $('ac-req').style.fontWeight = cambia ? '700' : '400';
+  $('ac-req').style.fontSize = '10.5px';
+
+  const aviso = $('ac-aviso');
+  aviso.innerHTML = falta
+    ? `<div style="background:#fef2f2;border:1.5px solid #fecaca;color:#b91c1c;border-radius:9px;padding:8px 11px;font-weight:700">
+       Estás cambiando la incidencia: anota el motivo (al menos ${AC_MIN_NOTA} caracteres).</div>`
+    : cambia
+      ? `<div style="background:#f0fdf4;border:1.5px solid #bbf7d0;color:#166534;border-radius:9px;padding:8px 11px">
+         Queda registrado quién hizo el cambio y por qué.</div>`
+      : '';
+
+  const btn = $('ac-btn');
+  if (btn) { btn.disabled = falta; btn.style.opacity = falta ? '.45' : ''; btn.style.cursor = falta ? 'not-allowed' : ''; }
+  return !falta;
+}
+
+async function cargarHistorialAsist(empId, fecha) {
+  try {
+    const h = await api(`/checador/asistencia/historial?empleado_id=${empId}&fecha=${fecha}`);
+    const cont = $('ac-hist'); if (!cont || !h.length) return;
+    cont.innerHTML = `
+      <details style="background:var(--bg-alt);border:1.5px solid var(--border);border-radius:10px;padding:9px 12px">
+        <summary style="cursor:pointer;font-size:11.5px;font-weight:800;color:var(--dark)">
+          📜 Historial de cambios (${h.length})
+        </summary>
+        <div style="margin-top:8px;max-height:150px;overflow:auto">
+          ${h.map(x => `<div style="font-size:11.5px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <strong>${x.codigo_antes || 'automático'} → ${x.codigo_despues || 'automático'}</strong>
+            <span style="color:var(--muted)"> · ${x.hecho_por_nombre || '—'} · ${new Date(x.creado_en).toLocaleString('es-MX')}</span>
+            ${x.notas ? `<div style="color:#475569;margin-top:2px">“${x.notas}”</div>` : ''}
+          </div>`).join('')}
+        </div>
+      </details>`;
+  } catch(e) { /* el historial es informativo: si falla no estorba el ajuste */ }
+}
+
 async function guardarAjusteAsist(empId, fecha) {
+  if (!acValidarNota()) return toast('Anota el motivo del cambio.', 'warn');
   const codigo = $('ac-cod').value;
   const notas  = $('ac-notas').value.trim();
   try {

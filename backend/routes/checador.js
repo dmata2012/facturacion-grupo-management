@@ -393,6 +393,28 @@ router.get('/reporte', async (req, res) => {
   } catch (e) { console.warn('Migración ajustes asistencia:', e.message); }
 })();
 
+// Historial de cambios de incidencia. La nota obligatoria no sirve de nada si
+// se pierde al siguiente cambio: aquí queda quién la cambió, de qué a qué y por qué.
+(async () => {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS fac_asistencia_ajustes_hist (
+        id SERIAL PRIMARY KEY,
+        empleado_id INT NOT NULL,
+        fecha DATE NOT NULL,
+        codigo_antes TEXT,
+        codigo_despues TEXT,
+        notas TEXT,
+        hecho_por INT,
+        hecho_por_nombre TEXT,
+        creado_en TIMESTAMP DEFAULT NOW()
+      )`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_asist_hist ON fac_asistencia_ajustes_hist(empleado_id, fecha)`);
+  } catch (e) { console.warn('Migración historial asistencia:', e.message); }
+})();
+
+const MIN_NOTA = 5;
+
 // POST /api/checador/asistencia/ajuste — insertar o actualizar override + nota
 router.post('/asistencia/ajuste', editarAsistencia, async (req, res) => {
   try {
@@ -400,18 +422,55 @@ router.post('/asistencia/ajuste', editarAsistencia, async (req, res) => {
     if (!empleado_id || !fecha) return res.status(400).json({ error: 'empleado_id y fecha requeridos.' });
     const cod = (codigo && codigo !== 'auto') ? String(codigo).trim() : null;
     const not = (notas || '').trim() || null;
+
+    const prev = await query(
+      `SELECT codigo, notas FROM fac_asistencia_ajustes WHERE empleado_id=$1 AND fecha=$2`,
+      [empleado_id, fecha]);
+    const codAntes = prev.rows[0]?.codigo ?? null;
+    const cambiaIncidencia = cod !== codAntes;
+
+    // Regla: la incidencia solo se cambia explicando por qué. Cambiar solo la
+    // nota sí se permite, porque eso es precisamente documentar mejor.
+    if (cambiaIncidencia && (!not || not.length < MIN_NOTA))
+      return res.status(400).json({
+        error: `Para cambiar la incidencia hay que anotar el motivo (al menos ${MIN_NOTA} caracteres). Ej: "Presentó incapacidad IMSS folio 12345".`
+      });
+
+    // Solo se borra el registro si no queda nada que conservar. Si hay nota, la
+    // fila se mantiene aunque el código vuelva a automático: es la justificación.
     if (!cod && !not) {
-      // Si ambos vacíos, borrar el override
       await query(`DELETE FROM fac_asistencia_ajustes WHERE empleado_id=$1 AND fecha=$2`, [empleado_id, fecha]);
       return res.json({ ok: true, deleted: true });
     }
+
     await query(`
       INSERT INTO fac_asistencia_ajustes(empleado_id, fecha, codigo, notas, creado_por, actualizado_en)
       VALUES($1,$2,$3,$4,$5,NOW())
       ON CONFLICT(empleado_id, fecha) DO UPDATE
-      SET codigo=EXCLUDED.codigo, notas=EXCLUDED.notas, actualizado_en=NOW()
+      SET codigo=EXCLUDED.codigo, notas=EXCLUDED.notas, creado_por=EXCLUDED.creado_por, actualizado_en=NOW()
     `, [empleado_id, fecha, cod, not, req.usuario.id]);
+
+    if (cambiaIncidencia || (not && not !== (prev.rows[0]?.notas ?? null))) {
+      await query(`
+        INSERT INTO fac_asistencia_ajustes_hist(empleado_id, fecha, codigo_antes, codigo_despues, notas, hecho_por, hecho_por_nombre)
+        VALUES($1,$2,$3,$4,$5,$6,$7)`,
+        [empleado_id, fecha, codAntes, cod, not, req.usuario.id, req.usuario.nombre]);
+    }
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/checador/asistencia/historial?empleado_id&fecha — quién cambió qué y por qué
+router.get('/asistencia/historial', verAsistencia, async (req, res) => {
+  try {
+    const { empleado_id, fecha } = req.query;
+    if (!empleado_id || !fecha) return res.status(400).json({ error: 'empleado_id y fecha requeridos.' });
+    const r = await query(`
+      SELECT codigo_antes, codigo_despues, notas, hecho_por_nombre, creado_en
+        FROM fac_asistencia_ajustes_hist
+       WHERE empleado_id=$1 AND fecha=$2
+       ORDER BY creado_en DESC LIMIT 20`, [empleado_id, fecha]);
+    res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
