@@ -1,6 +1,12 @@
 const router = require('express').Router();
 const { query } = require('../config/db');
 const { verificarToken, requireRol } = require('../middleware/auth');
+const { permiso, NIVEL } = require('../middleware/permiso');
+
+// La Lista de Asistencia es su propio módulo: se puede dar a alguien de RH sin
+// abrirle el reloj, y capturar notas de justificación exige nivel Editar.
+const verAsistencia    = permiso('asistencia', NIVEL.VER);
+const editarAsistencia = permiso('asistencia', NIVEL.EDITAR);
 
 router.use(verificarToken);
 
@@ -388,7 +394,7 @@ router.get('/reporte', async (req, res) => {
 })();
 
 // POST /api/checador/asistencia/ajuste — insertar o actualizar override + nota
-router.post('/asistencia/ajuste', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
+router.post('/asistencia/ajuste', editarAsistencia, async (req, res) => {
   try {
     const { empleado_id, fecha, codigo, notas } = req.body;
     if (!empleado_id || !fecha) return res.status(400).json({ error: 'empleado_id y fecha requeridos.' });
@@ -418,7 +424,7 @@ router.post('/asistencia/ajuste', requireRol('admin', 'capturista', 'tesoreria',
 //   In = Incapacidad (solicitud aprobada tipo='incapacidad')
 //   D  = Dia de descanso (segun empleado)
 //   -  = Sin datos (empleado inactivo o fuera de rango)
-router.get('/asistencia', async (req, res) => {
+router.get('/asistencia', verAsistencia, async (req, res) => {
   try {
     const { desde, hasta, empleado_id, incluir_inactivos } = req.query;
     if (!desde || !hasta) return res.status(400).json({ error: 'Se requieren desde y hasta (YYYY-MM-DD).' });

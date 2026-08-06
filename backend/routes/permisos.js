@@ -21,6 +21,8 @@ const MODULOS_SEED = [
   { clave:'vacaciones',   nombre:'Vacaciones',          icono:'🌴', grupo:'Recursos Humanos',     orden:32,
     nota:'En Ver solo aparece su propia tarjeta. De Capturar en adelante ve a toda la plantilla.' },
   { clave:'checador',     nombre:'Reloj Checador',      icono:'🕐', grupo:'Recursos Humanos',     orden:33 },
+  { clave:'asistencia',   nombre:'Lista de Asistencia', icono:'📋', grupo:'Recursos Humanos',     orden:34,
+    nota:'Se puede dar sin dar el Reloj Checador. En Editar además permite capturar notas de justificación.' },
   { clave:'cajaChica',    nombre:'Caja Chica',          icono:'💵', grupo:'Tesorería',            orden:40 },
   { clave:'bancos',       nombre:'Cuentas Bancarias',   icono:'🏦', grupo:'Bancos',               orden:50 },
   { clave:'reportes',     nombre:'Reportes',            icono:'📋', grupo:'Reportes Financieros', orden:60 },
@@ -48,7 +50,7 @@ const PERFILES_SEED = [
 
   { clave:'capturista', nombre:'Capturista', color:'#0891b2', es_sistema:true,
     descripcion:'Captura facturas y apoya en Recursos Humanos.',
-    permisos: { facturas: E, empleados: E, vacaciones: C, gastos: C, dashboard: V } },
+    permisos: { facturas: E, empleados: E, vacaciones: C, gastos: C, dashboard: V, asistencia: V } },
 
   { clave:'tesoreria', nombre:'Tesorería', color:'#059669', es_sistema:true,
     descripcion:'Maneja caja chica y bancos.',
