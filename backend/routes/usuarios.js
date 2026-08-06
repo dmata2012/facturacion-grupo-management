@@ -5,7 +5,19 @@ const { verificarToken, requireRol } = require('../middleware/auth');
 const { normalizarRol } = require('./auth');
 
 // Roles válidos del sistema — cualquier otro valor deja al usuario sin permisos
-const ROLES_VALIDOS = ['admin','gerente','capturista','tesoreria','tesoreria_consulta','checador','lectura'];
+// Roles base del sistema. Los perfiles configurables se agregan encima: se
+// consultan en fac_perfiles para que un perfil creado desde la pantalla de
+// permisos sea asignable de inmediato, sin tocar este archivo.
+const ROLES_BASE = ['admin','gerente','capturista','tesoreria','tesoreria_consulta','checador','lectura'];
+const ROLES_VALIDOS = ROLES_BASE;
+
+async function rolesPermitidos() {
+  try {
+    const r = await query(`SELECT clave FROM fac_perfiles WHERE activo`);
+    const claves = r.rows.map(x => x.clave);
+    return [...new Set([...ROLES_BASE, ...claves])];
+  } catch (e) { return ROLES_BASE; }
+}
 
 // Corrección única de roles guardados con variantes ('Gerencia', 'GERENTE', 'Tesorería'…),
 // que dejaban al usuario sin permisos porque no coincidían con requireRol() ni con los PAGES_*.
@@ -62,8 +74,9 @@ router.post('/', requireRol('admin'), async (req, res) => {
     const { nombre, email, password, rol } = req.body;
     if (!nombre || !email || !password || !rol) return res.status(400).json({ error: 'Campos requeridos.' });
     const rolNorm = normalizarRol(rol);
-    if (!ROLES_VALIDOS.includes(rolNorm))
-      return res.status(400).json({ error: `Rol inválido: "${rol}". Válidos: ${ROLES_VALIDOS.join(', ')}.` });
+    const validos = await rolesPermitidos();
+    if (!validos.includes(rolNorm))
+      return res.status(400).json({ error: `Perfil inválido: "${rol}". Válidos: ${validos.join(', ')}.` });
     const hash = await bcrypt.hash(password, 10);
     const r = await query(
       `INSERT INTO fac_usuarios(nombre,email,password_hash,rol) VALUES($1,$2,$3,$4) RETURNING id,nombre,email,rol,activo`,
@@ -81,8 +94,9 @@ router.put('/:id', requireRol('admin'), async (req, res) => {
   try {
     const { nombre, email, rol, activo, password } = req.body;
     const rolNorm = normalizarRol(rol);
-    if (!ROLES_VALIDOS.includes(rolNorm))
-      return res.status(400).json({ error: `Rol inválido: "${rol}". Válidos: ${ROLES_VALIDOS.join(', ')}.` });
+    const validos = await rolesPermitidos();
+    if (!validos.includes(rolNorm))
+      return res.status(400).json({ error: `Perfil inválido: "${rol}". Válidos: ${validos.join(', ')}.` });
     if (password) {
       const hash = await bcrypt.hash(password, 10);
       await query(`UPDATE fac_usuarios SET nombre=$1,email=$2,rol=$3,activo=$4,password_hash=$5,actualizado_en=NOW() WHERE id=$6`,

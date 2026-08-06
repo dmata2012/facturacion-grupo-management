@@ -60,6 +60,7 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/reportes',  require('./routes/reportes'));
 app.use('/api/bancos',    require('./routes/bancos'));
 app.use('/api/gastos',    require('./routes/gastos'));
+app.use('/api/permisos',  require('./routes/permisos'));
 
 // ── Health check ──────────────────────────────
 app.get('/api/health', async (req, res) => {

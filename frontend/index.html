@@ -801,6 +801,34 @@ function isTesoreria()         { return ME && ME.rol === 'tesoreria'; }
 function isTesoreriaConsulta() { return ME && ME.rol === 'tesoreria_consulta'; }
 function isChecador()          { return ME && ME.rol === 'checador'; }
 
+// ══ PERMISOS POR MÓDULO ══════════════════════════════
+// Niveles acumulativos: quien edita también captura y ve, así que basta con >=.
+const NIVEL = { NINGUNO:0, VER:1, CAPTURAR:2, EDITAR:3, TODO:4 };
+const NOMBRE_NIVEL = { 0:'Sin acceso', 1:'Ver', 2:'Capturar', 3:'Editar', 4:'Administrar' };
+const COLOR_NIVEL  = { 0:'#cbd5e1', 1:'#0891b2', 2:'#0284c7', 3:'#7c3aed', 4:'#be123c' };
+
+// La matriz manda solo cuando el motor está listo. Si el rol del usuario no
+// corresponde a ningún perfil, el servidor avisa y se usa la lógica anterior,
+// para que nadie quede encerrado fuera por una configuración a medias.
+function permisosListos() { return !!(ME && ME.permisos && ME.permisos.listo); }
+
+function nivelEn(modulo) {
+  if (!permisosListos()) return null;
+  return ME.permisos.niveles[modulo] ?? 0;
+}
+
+// ¿Puede el usuario hacer algo de este nivel en este módulo?
+function puede(modulo, nivel = NIVEL.VER) {
+  const n = nivelEn(modulo);
+  if (n === null) return null;   // motor apagado: que decida el llamador
+  return n >= nivel;
+}
+
+async function cargarMisPermisos() {
+  try { ME.permisos = await api('/permisos/mis-permisos'); }
+  catch(e) { ME.permisos = { niveles:{}, listo:false }; }
+}
+
 // Páginas permitidas por rol restringido
 const PAGES_CAPTURISTA         = ['facturas', 'empleados', 'vacaciones'];
 const PAGES_TESORERIA          = ['cajaChica', 'bancos', 'vacaciones'];
@@ -832,6 +860,7 @@ async function doLogin() {
     TOKEN = data.token; ME = data.usuario;
     localStorage.setItem('fac_token', TOKEN);
     localStorage.setItem('fac_me', JSON.stringify(ME));
+    await cargarMisPermisos();
     initApp();
   } catch(e) {
     $('login-err').textContent = 'No se pudo conectar con el servidor.';
@@ -931,6 +960,10 @@ function initApp() {
     $('nav-usuarios').style.display = 'flex';
     const gAdmin = $('nav-group-admin'); if (gAdmin) gAdmin.style.display = 'block';
   }
+
+  // Si la matriz de permisos está configurada, ella decide qué se ve en el menú
+  if (permisosListos()) { aplicarMenuPorPermisos(); return; }
+
   // Capturista: ocultar todo el menú excepto Facturas y aterrizar ahí
   if (isCapturista() || isTesoreria() || isTesoreriaConsulta() || isChecador()) {
     const permitidas = isCapturista() ? PAGES_CAPTURISTA
@@ -954,6 +987,32 @@ function initApp() {
     return;
   }
   nav('dashboard');
+}
+
+// Dibuja el menú a partir de la matriz: se ve lo que tenga nivel Ver o más
+function aplicarMenuPorPermisos() {
+  document.querySelectorAll('nav a').forEach(a => {
+    const pg = a.dataset.page || a.id?.replace('nav-','');
+    if (!pg) return;
+    a.style.display = puede(pg, NIVEL.VER) ? 'flex' : 'none';
+  });
+  document.querySelectorAll('nav .nav-group').forEach(g => {
+    const visibles = [...g.querySelectorAll('a')].filter(a => a.style.display !== 'none');
+    g.style.display = visibles.length ? 'block' : 'none';
+  });
+  // Aterrizar en la primera pantalla a la que sí tenga acceso
+  const preferidas = ['dashboard','facturas','gastos','cajaChica','bancos','checador','nomina','reportes'];
+  const destino = preferidas.find(p => puede(p, NIVEL.VER))
+    || Object.keys(ME.permisos.niveles).find(k => ME.permisos.niveles[k] >= NIVEL.VER);
+  if (destino) nav(destino);
+  else $('content').innerHTML = `
+    <div class="card" style="text-align:center;padding:50px 30px">
+      <div style="font-size:52px">🔒</div>
+      <h3 style="margin:10px 0 6px;font-size:19px;font-weight:900">Tu usuario no tiene módulos asignados</h3>
+      <p style="font-size:13px;color:var(--muted);max-width:420px;margin:0 auto">
+        Pide al administrador que te dé acceso desde <strong>Usuarios y Permisos</strong>.
+      </p>
+    </div>`;
 }
 
 // Toggle sección colapsable + persistencia en localStorage
@@ -982,6 +1041,10 @@ function restaurarNavGroups() {
 }
 
 function nav(page) {
+  // Con la matriz configurada, ella manda; si no, se usan las listas por rol
+  if (permisosListos()) {
+    if (!puede(page, NIVEL.VER)) { toast('No tienes acceso a esta sección.', 'err'); return; }
+  } else {
   // Bloqueo de acceso para capturista y tesorería
   if (isCapturista() && !PAGES_CAPTURISTA.includes(page)) {
     toast('No tienes acceso a esta sección.', 'err');
@@ -999,6 +1062,7 @@ function nav(page) {
     toast('No tienes acceso a esta sección.', 'err');
     return;
   }
+  }
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
   document.querySelectorAll('nav .nav-group').forEach(g => g.classList.remove('has-active'));
   const el = $('nav-' + page);
@@ -1015,7 +1079,7 @@ function nav(page) {
     estadoCuenta:'Estado de Cuenta', clientes:'Clientes',
     receptoras:'Empresas Emisoras', nomina:'Nómina', empleados:'Empleados',
     vacaciones:'Vacaciones', checador:'Reloj Checador', cajaChica:'Caja Chica',
-    reportes:'Reportes', estadisticas:'Estadísticas', usuarios:'Usuarios',
+    reportes:'Reportes', estadisticas:'Estadísticas', usuarios:'Usuarios y Permisos',
     catalogo:'Conceptos de Desglose', bancos:'Bancos', gastos:'Gastos de Operación'
   };
   const mt = $('mt-title');
@@ -5496,7 +5560,7 @@ function toggleSidebar(force) {
 
 if (TOKEN && ME) {
   // Verificar que el token siga siendo válido antes de entrar
-  api('/auth/me').then(() => initApp()).catch(() => {
+  api('/auth/me').then(() => cargarMisPermisos()).then(() => initApp()).catch(() => {
     localStorage.removeItem('fac_token');
     localStorage.removeItem('fac_me');
     TOKEN = ''; ME = null;
@@ -14638,12 +14702,348 @@ async function eliminarMovCC(id) {
 async function usuarios() {
   if (!canAdmin()) return;
   $('content').innerHTML=`
-  <div class="ch">
-    <div class="page-title" style="margin:0">Usuarios del sistema</div>
-    <button class="btn bs" onclick="openUsuario()">+ Nuevo usuario</button>
-  </div>
-  <div class="card" id="usr-table"><p class="empty">Cargando...</p></div>`;
+    <style>
+      .pm-hero{background:linear-gradient(135deg,#1e1b4b 0%,#4c1d95 55%,#7c3aed 100%);
+        border-radius:16px;padding:22px 26px;color:#fff;margin-bottom:16px;position:relative;overflow:hidden}
+      .pm-hero::after{content:'🔐';position:absolute;right:24px;bottom:-20px;font-size:104px;opacity:.09;line-height:1}
+      .pm-hero h2{margin:0;font-size:22px;font-weight:900;letter-spacing:-.3px}
+      .pm-hero .sub{font-size:12.5px;opacity:.85;margin-top:2px}
+      .pm-leyenda{display:flex;gap:7px;flex-wrap:wrap;margin-top:16px;position:relative;z-index:1}
+      .pm-lv{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,.13);
+        border:1px solid rgba(255,255,255,.2);border-radius:9px;padding:5px 10px;font-size:10.5px;font-weight:800}
+      .pm-lv i{width:9px;height:9px;border-radius:50%;display:inline-block}
+      .pm-matriz{border-collapse:separate;border-spacing:0;width:100%;font-size:12px}
+      .pm-matriz th{position:sticky;top:0;background:#f8fafc;z-index:3;padding:9px 8px;
+        font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);text-align:center}
+      .pm-matriz th.mod{text-align:left;left:0;z-index:4;min-width:210px}
+      .pm-matriz td{padding:6px 8px;border-top:1px solid var(--border)}
+      .pm-matriz td.mod{position:sticky;left:0;background:#fff;z-index:2;font-weight:700;
+        border-right:1.5px solid var(--border)}
+      .pm-grupo td{background:var(--bg-alt);font-size:10px;font-weight:900;text-transform:uppercase;
+        letter-spacing:.8px;color:var(--muted);padding:6px 10px}
+      .pm-sel{border:1.5px solid var(--border);border-radius:8px;padding:4px 7px;font-size:11px;
+        font-weight:800;cursor:pointer;width:100%;background:#fff}
+      .pm-sel:focus{outline:none;box-shadow:0 0 0 3px rgba(124,58,237,.16)}
+      .pm-card-u{border:1.5px solid var(--border);border-radius:14px;padding:13px 15px;margin-bottom:9px;
+        background:#fff;transition:all .18s}
+      .pm-card-u:hover{border-color:#a78bfa;box-shadow:0 4px 14px rgba(124,58,237,.1)}
+      .pm-chip{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:900;
+        padding:2px 8px;border-radius:99px;background:#ede9fe;color:#5b21b6}
+    </style>
+
+    <div class="pm-hero">
+      <h2>🔐 Usuarios y Permisos</h2>
+      <div class="sub">Perfiles configurables · Excepciones por persona · Bitácora de cambios</div>
+      <div class="pm-leyenda">
+        ${[0,1,2,3,4].map(n => `<span class="pm-lv"><i style="background:${COLOR_NIVEL[n]}"></i>${n} · ${NOMBRE_NIVEL[n]}</span>`).join('')}
+      </div>
+    </div>
+
+    <div class="gt-tabs">
+      <div class="gt-tab active" onclick="showTab(this,'pm-tab-usuarios')">👤 Usuarios</div>
+      <div class="gt-tab" onclick="showTab(this,'pm-tab-perfiles');cargarPerfiles()">🎭 Perfiles y permisos</div>
+      <div class="gt-tab" onclick="showTab(this,'pm-tab-excep');cargarExcepciones()">⭐ Excepciones por persona</div>
+      <div class="gt-tab" onclick="showTab(this,'pm-tab-bitacora');cargarBitacoraPermisos()">📜 Bitácora</div>
+    </div>
+
+    <div class="tab-panel active" id="pm-tab-usuarios">
+      <div class="ch">
+        <div class="page-title" style="margin:0">Usuarios del sistema</div>
+        <button class="btn bs" onclick="openUsuario()">+ Nuevo usuario</button>
+      </div>
+      <div class="card" id="usr-table"><p class="empty">Cargando...</p></div>
+    </div>
+
+    <div class="tab-panel" id="pm-tab-perfiles"><div id="pm-perfiles"><p class="empty">Cargando…</p></div></div>
+    <div class="tab-panel" id="pm-tab-excep"><div id="pm-excep"><p class="empty">Cargando…</p></div></div>
+    <div class="tab-panel" id="pm-tab-bitacora"><div id="pm-bitacora"><p class="empty">Cargando…</p></div></div>`;
   await loadUsuarios();
+}
+
+// ══ PERFILES: matriz módulo × nivel ══════════════════
+async function cargarPerfiles() {
+  $('pm-perfiles').innerHTML = '<p class="empty">Cargando…</p>';
+  try {
+    const [perfiles, modulos] = await Promise.all([
+      api('/permisos/perfiles'), api('/permisos/modulos')
+    ]);
+    window._pmPerfiles = perfiles;
+    window._pmModulos  = modulos;
+    renderPerfiles(perfiles, modulos);
+  } catch(e) { $('pm-perfiles').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function pmSelectNivel(valor, onchange, opcionHereda) {
+  return `<select class="pm-sel" style="color:${COLOR_NIVEL[valor] || '#64748b'}" onchange="${onchange}">
+    ${opcionHereda ? `<option value="" ${valor===null?'selected':''}>— del perfil —</option>` : ''}
+    ${[0,1,2,3,4].map(n => `<option value="${n}" ${String(valor)===String(n)?'selected':''}>${n} · ${NOMBRE_NIVEL[n]}</option>`).join('')}
+  </select>`;
+}
+
+function renderPerfiles(perfiles, modulos) {
+  // Agrupar por el grupo del módulo para que la matriz se lea por departamento
+  const grupos = [];
+  modulos.forEach(m => {
+    let g = grupos.find(x => x.nombre === m.grupo);
+    if (!g) grupos.push(g = { nombre: m.grupo, mods: [] });
+    g.mods.push(m);
+  });
+
+  $('pm-perfiles').innerHTML = `
+    <div class="gt-toolbar">
+      <div style="font-size:12.5px;color:var(--muted);line-height:1.55;flex:1;min-width:260px">
+        Cada celda dice qué puede hacer ese perfil en ese módulo. Se guarda al momento de elegirlo.
+        <strong>Sin acceso</strong> hace que el módulo ni aparezca en su menú.
+      </div>
+      <button class="btn bs bsm" onclick="openPerfilNuevo()">＋ Nuevo perfil</button>
+    </div>
+
+    <div class="tscroll" style="max-height:68vh;overflow:auto"><table class="pm-matriz">
+      <thead><tr>
+        <th class="mod">Módulo</th>
+        ${perfiles.map(p => `<th style="min-width:132px">
+          <div style="color:${p.color};font-size:11.5px;font-weight:900">${p.nombre}</div>
+          <div style="font-weight:600;text-transform:none;letter-spacing:0;font-size:9.5px;color:var(--muted)">
+            ${p.n_usuarios} usuario${p.n_usuarios!=1?'s':''}
+            ${!p.es_sistema ? ` · <span style="cursor:pointer;color:var(--red)" onclick="eliminarPerfil(${p.id},'${(p.nombre||'').replace(/'/g,"\\'")}',${p.n_usuarios})">borrar</span>` : ''}
+          </div>
+        </th>`).join('')}
+      </tr></thead>
+      <tbody>
+        ${grupos.map(g => `
+          <tr class="pm-grupo"><td colspan="${perfiles.length+1}">${g.nombre}</td></tr>
+          ${g.mods.map(m => `<tr>
+            <td class="mod">${m.icono || ''} ${m.nombre}</td>
+            ${perfiles.map(p => `<td>${
+              pmSelectNivel(p.permisos[m.clave] ?? 0, `guardarPermisoPerfil(${p.id},'${m.clave}',this)`)
+            }</td>`).join('')}
+          </tr>`).join('')}
+        `).join('')}
+      </tbody>
+    </table></div>`;
+}
+
+async function guardarPermisoPerfil(perfilId, modulo, sel) {
+  const nivel = parseInt(sel.value);
+  sel.style.color = COLOR_NIVEL[nivel];
+  sel.disabled = true;
+  try {
+    await api(`/permisos/perfiles/${perfilId}/permiso`, {
+      method:'PUT', body: JSON.stringify({ modulo, nivel }) });
+    const p = (window._pmPerfiles||[]).find(x => x.id === perfilId);
+    if (p) p.permisos[modulo] = nivel;
+    toast(`${NOMBRE_NIVEL[nivel]} · guardado`);
+  } catch(e) {
+    toast(e.message, 'err');
+    cargarPerfiles();   // devolver la celda a su valor real
+  } finally { sel.disabled = false; }
+}
+
+async function openPerfilNuevo() {
+  const perfiles = window._pmPerfiles || [];
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#4c1d95,#7c3aed);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Perfiles</div>
+      <div style="font-size:20px;font-weight:900;margin-top:3px">🎭 Nuevo perfil</div>
+    </div>
+    <div class="fg" style="gap:11px">
+      <div class="fi full"><label>Nombre <span style="color:var(--red)">*</span></label>
+        <input id="pf-nombre" placeholder="Ej: Auxiliar contable, Recepción">
+      </div>
+      <div class="fi full"><label>Descripción</label>
+        <input id="pf-desc" placeholder="Para qué sirve este perfil" maxlength="200">
+      </div>
+      <div class="fi"><label>Copiar permisos de</label>
+        <select id="pf-copiar">
+          <option value="">— Empezar sin ningún acceso —</option>
+          ${perfiles.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fi"><label>Color</label>
+        <select id="pf-color">
+          ${['#7c3aed','#0891b2','#059669','#ea580c','#be123c','#64748b']
+            .map(c => `<option value="${c}">${c}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div style="font-size:11.5px;color:var(--muted);background:var(--bg-alt);border-radius:10px;
+                padding:10px 13px;margin-top:12px;line-height:1.55">
+      Copiar de un perfil parecido y luego ajustar dos o tres celdas es mucho más rápido
+      que llenar los ${(window._pmModulos||[]).length} módulos a mano.
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cancelar</button>
+      <button class="btn bs" id="pf-btn" onclick="crearPerfil()">💾 Crear perfil</button>
+    </div>`;
+  openModal('modal-gt-cats');
+}
+
+async function crearPerfil() {
+  const nombre = ($('pf-nombre').value || '').trim();
+  if (!nombre) return toast('Escribe el nombre del perfil.', 'warn');
+  const btn = $('pf-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="gt-spin"></span> Creando…';
+  try {
+    await api('/permisos/perfiles', { method:'POST', body: JSON.stringify({
+      nombre, descripcion: ($('pf-desc').value||'').trim() || null,
+      color: $('pf-color').value, copiar_de: $('pf-copiar').value || null })});
+    toast(`Perfil "${nombre}" creado.`);
+    closeModal('modal-gt-cats');
+    cargarPerfiles();
+  } catch(e) {
+    toast(e.message, 'err');
+    btn.disabled = false; btn.innerHTML = '💾 Crear perfil';
+  }
+}
+
+async function eliminarPerfil(id, nombre, nUsuarios) {
+  if (nUsuarios > 0)
+    return toast(`${nUsuarios} usuario(s) tienen el perfil "${nombre}". Cámbialos de perfil antes de eliminarlo.`, 'warn');
+  if (!await confirm2(`¿Eliminar el perfil "${nombre}"?`)) return;
+  try { await api(`/permisos/perfiles/${id}`, { method:'DELETE' });
+    toast('Perfil eliminado.'); cargarPerfiles(); }
+  catch(e) { toast(e.message, 'err'); }
+}
+
+// ══ EXCEPCIONES POR PERSONA ══════════════════════════
+async function cargarExcepciones() {
+  $('pm-excep').innerHTML = '<p class="empty">Cargando…</p>';
+  try {
+    const [us, modulos] = await Promise.all([
+      api('/permisos/usuarios'), api('/permisos/modulos')
+    ]);
+    window._pmUsuarios = us;
+    window._pmModulos  = modulos;
+    renderExcepciones(us);
+  } catch(e) { $('pm-excep').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function renderExcepciones(us) {
+  const conEx = us.filter(u => Object.keys(u.excepciones).length);
+  $('pm-excep').innerHTML = `
+    <div class="card" style="margin-bottom:14px;background:linear-gradient(135deg,#4c1d95,#7c3aed);color:#fff;
+                             display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.4px;opacity:.9">Excepciones activas</div>
+        <div style="font-size:27px;font-weight:900;line-height:1.1">${conEx.length} persona${conEx.length!=1?'s':''}</div>
+      </div>
+      <div style="font-size:12px;opacity:.92;text-align:right;max-width:390px;line-height:1.5">
+        Sirven para darle a alguien un permiso distinto al de su perfil, sin tener que
+        inventar un perfil nuevo solo para esa persona.
+      </div>
+    </div>
+
+    <div>${us.map(u => {
+      const ex = Object.keys(u.excepciones);
+      return `<div class="pm-card-u">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="min-width:0">
+            <div style="font-weight:900;font-size:14px;color:var(--dark)">${u.nombre}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:1px">
+              ${u.email} ·
+              <span class="pm-chip" style="background:${u.perfil_color||'#ede9fe'}22;color:${u.perfil_color||'#5b21b6'}">
+                ${u.perfil || u.rol}
+              </span>
+              ${ex.length ? ` · <strong style="color:#7c3aed">${ex.length} excepción${ex.length!=1?'es':''}</strong>` : ''}
+            </div>
+          </div>
+          <button class="btn bo bsm" onclick="openExcepciones(${u.id})">⭐ Ajustar permisos</button>
+        </div>
+        ${ex.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">
+          ${ex.map(k => {
+            const m = (window._pmModulos||[]).find(x => x.clave === k);
+            const n = u.excepciones[k].nivel;
+            return `<span class="pm-chip" style="background:${COLOR_NIVEL[n]}1a;color:${COLOR_NIVEL[n]}"
+                          title="${u.excepciones[k].motivo || ''}">
+              ${m?.icono||''} ${m?.nombre||k}: ${NOMBRE_NIVEL[n]}</span>`;
+          }).join('')}
+        </div>` : ''}
+      </div>`;
+    }).join('')}</div>`;
+}
+
+async function openExcepciones(usuarioId) {
+  try {
+    const d = await api(`/permisos/usuarios/${usuarioId}/efectivos`);
+    const modulos = window._pmModulos || [];
+    const nom = c => modulos.find(m => m.clave === c) || { nombre:c, icono:'', grupo:'' };
+
+    $('modal-gt-cats-body').innerHTML = `
+      <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#4c1d95,#7c3aed);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Excepciones por persona</div>
+        <div style="font-size:20px;font-weight:900;margin-top:3px">⭐ ${d.usuario.nombre}</div>
+        <div style="font-size:11.5px;opacity:.85;margin-top:3px">
+          Perfil <strong>${d.usuario.rol}</strong> — deja “del perfil” en lo que no quieras cambiar.
+        </div>
+      </div>
+      <div style="max-height:56vh;overflow:auto;margin:0 -4px;padding:0 4px">
+        <table style="width:100%;font-size:12px;border-collapse:collapse">
+          <thead><tr style="position:sticky;top:0;background:#f8fafc;z-index:2">
+            <th style="text-align:left;padding:7px;font-size:10px;text-transform:uppercase;color:var(--muted)">Módulo</th>
+            <th style="text-align:center;padding:7px;font-size:10px;text-transform:uppercase;color:var(--muted)">Su perfil</th>
+            <th style="text-align:center;padding:7px;font-size:10px;text-transform:uppercase;color:var(--muted);min-width:150px">Excepción</th>
+          </tr></thead>
+          <tbody>${d.modulos.map(m => {
+            const info = nom(m.modulo);
+            return `<tr style="border-top:1px solid var(--border)">
+              <td style="padding:6px 7px;font-weight:700">${info.icono||''} ${info.nombre}</td>
+              <td style="padding:6px 7px;text-align:center;color:${COLOR_NIVEL[m.nivel_perfil]};font-weight:800;font-size:11px">
+                ${NOMBRE_NIVEL[m.nivel_perfil]}
+              </td>
+              <td style="padding:6px 7px">
+                ${pmSelectNivel(m.excepcion, `guardarExcepcion(${usuarioId},'${m.modulo}',this)`, true)}
+              </td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>
+      <div class="form-actions">
+        <button class="btn bs" onclick="closeModal('modal-gt-cats');cargarExcepciones()">Listo</button>
+      </div>`;
+    openModal('modal-gt-cats');
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function guardarExcepcion(usuarioId, modulo, sel) {
+  const v = sel.value;
+  sel.style.color = v === '' ? '#64748b' : COLOR_NIVEL[parseInt(v)];
+  sel.disabled = true;
+  try {
+    const r = await api(`/permisos/usuarios/${usuarioId}/permiso`, {
+      method:'PUT', body: JSON.stringify({ modulo, nivel: v === '' ? null : parseInt(v) }) });
+    toast(r.quitada ? 'Excepción quitada: vuelve al permiso de su perfil.'
+                    : `Excepción guardada: ${NOMBRE_NIVEL[parseInt(v)]}.`);
+  } catch(e) { toast(e.message, 'err'); }
+  finally { sel.disabled = false; }
+}
+
+// ══ BITÁCORA ═════════════════════════════════════════
+async function cargarBitacoraPermisos() {
+  $('pm-bitacora').innerHTML = '<p class="empty">Cargando…</p>';
+  try {
+    const d = await api('/permisos/bitacora');
+    const TIPO = {
+      perfil_creado:'🎭 Perfil creado', perfil_eliminado:'🗑 Perfil eliminado',
+      perfil_permiso:'🔧 Permiso de perfil', excepcion_puesta:'⭐ Excepción puesta',
+      excepcion_quitada:'↺ Excepción quitada'
+    };
+    $('pm-bitacora').innerHTML = d.length ? `
+      <div class="tscroll" style="max-height:66vh;overflow:auto"><table>
+        <thead><tr><th>Cuándo</th><th>Qué pasó</th><th>A quién</th><th>Módulo</th><th style="text-align:center">Cambio</th><th>Lo hizo</th></tr></thead>
+        <tbody>${d.map(b => `<tr>
+          <td style="white-space:nowrap;font-size:11.5px">${new Date(b.creado_en).toLocaleString('es-MX')}</td>
+          <td style="font-weight:700;font-size:12px">${TIPO[b.tipo] || b.tipo}</td>
+          <td style="font-size:12px">${b.objetivo}</td>
+          <td style="font-size:12px;color:var(--muted)">${b.modulo_nombre || b.modulo || '—'}</td>
+          <td style="text-align:center;font-size:11px;white-space:nowrap">
+            ${b.nivel_antes !== null ? `<span style="color:${COLOR_NIVEL[b.nivel_antes]};font-weight:800">${NOMBRE_NIVEL[b.nivel_antes]}</span>` : '—'}
+            →
+            ${b.nivel_despues !== null ? `<span style="color:${COLOR_NIVEL[b.nivel_despues]};font-weight:800">${NOMBRE_NIVEL[b.nivel_despues]}</span>` : '<span style="color:var(--muted)">del perfil</span>'}
+          </td>
+          <td style="font-size:11.5px;color:var(--muted)">${b.hecho_por_nombre || '—'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>` : '<p class="empty">Todavía no se ha cambiado ningún permiso.</p>';
+  } catch(e) { $('pm-bitacora').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
 }
 
 async function loadUsuarios() {
@@ -14664,23 +15064,53 @@ async function loadUsuarios() {
   }catch(e){$('usr-table').innerHTML=`<p class="empty">${e.message}</p>`;}
 }
 
-function openUsuario(id=null) {
+async function openUsuario(id=null) {
+  // Los perfiles son configurables, así que la lista se trae de la base en vez
+  // de estar escrita a mano: un perfil nuevo aparece aquí solo.
+  let perfiles = window._pmPerfiles;
+  if (!perfiles) {
+    try { perfiles = window._pmPerfiles = await api('/permisos/perfiles'); }
+    catch(e) { perfiles = []; }
+  }
+  const opciones = perfiles.length
+    ? perfiles.map(p => `<option value="${p.clave}">${p.nombre}</option>`).join('')
+    : ['admin','gerente','capturista','tesoreria','tesoreria_consulta','checador','lectura']
+        .map(r => `<option value="${r}">${r}</option>`).join('');
+
   $('modal-usuario-body').innerHTML=`
   <h4>${id?'Editar':'Nuevo'} Usuario</h4>
   <div class="fi" style="margin-bottom:10px"><label>Nombre *</label><input id="us-nom"></div>
   <div class="fi" style="margin-bottom:10px"><label>Email *</label><input type="email" id="us-email"></div>
   <div class="fi" style="margin-bottom:10px"><label>Contraseña ${id?'(dejar vacío = no cambiar)':''}</label><input type="password" id="us-pass"></div>
-  <div class="fi" style="margin-bottom:14px"><label>Rol</label>
-    <select id="us-rol"><option>admin</option><option>gerente</option><option>capturista</option><option>tesoreria</option><option value="tesoreria_consulta">tesoreria_consulta</option><option>checador</option><option>lectura</option></select>
+  <div class="fi" style="margin-bottom:8px"><label>Perfil</label>
+    <select id="us-rol" onchange="usDescribirPerfil()">${opciones}</select>
   </div>
+  <div id="us-perfil-desc" style="font-size:11.5px;color:var(--muted);background:var(--bg-alt);
+       border-radius:10px;padding:9px 12px;margin-bottom:14px;line-height:1.5"></div>
   <div class="form-actions">
     <button class="btn bo" onclick="closeModal('modal-usuario')">Cancelar</button>
     <button class="btn bs" onclick="saveUsuario(${id||null})">Guardar</button>
   </div>`;
   if(id) api('/usuarios').then(d=>{const u=d.find(x=>x.id==id);if(!u)return;
     $('us-nom').value=u.nombre;$('us-email').value=u.email;$('us-rol').value=u.rol;
+    usDescribirPerfil();
   });
+  usDescribirPerfil();
   openModal('modal-usuario');
+}
+
+// Resumen de lo que abre el perfil elegido, para no tener que ir a la matriz
+function usDescribirPerfil() {
+  const cont = $('us-perfil-desc'); if (!cont) return;
+  const p = (window._pmPerfiles||[]).find(x => x.clave === $('us-rol')?.value);
+  if (!p) { cont.textContent = 'Los permisos de este perfil se configuran en la pestaña “Perfiles y permisos”.'; return; }
+  const mods = window._pmModulos || [];
+  const conAcceso = Object.keys(p.permisos || {}).filter(k => p.permisos[k] > 0);
+  const nombre = c => (mods.find(m => m.clave === c) || {}).nombre || c;
+  cont.innerHTML = `${p.descripcion ? `${p.descripcion}<br>` : ''}
+    <strong>${conAcceso.length}</strong> de ${mods.length || Object.keys(p.permisos||{}).length} módulos:
+    ${conAcceso.slice(0,7).map(k => `${nombre(k)} <span style="color:${COLOR_NIVEL[p.permisos[k]]};font-weight:800">(${NOMBRE_NIVEL[p.permisos[k]]})</span>`).join(', ')}${
+      conAcceso.length > 7 ? ` y ${conAcceso.length-7} más` : ''}`;
 }
 
 async function saveUsuario(id) {
