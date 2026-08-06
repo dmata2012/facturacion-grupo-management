@@ -15,6 +15,7 @@ const MODULOS_SEED = [
   { clave:'estadoCuenta', nombre:'Estado de Cuenta',    icono:'📑', grupo:'Ingresos (CxC)',       orden:12 },
   { clave:'clientes',     nombre:'Clientes',            icono:'🏢', grupo:'Ingresos (CxC)',       orden:13 },
   { clave:'gastos',       nombre:'Gastos (CxP)',        icono:'📤', grupo:'Gastos (CxP)',         orden:20 },
+  { clave:'misVacaciones',nombre:'Mis Vacaciones',      icono:'🏖', grupo:'Mi espacio',           orden:5  },
   { clave:'nomina',       nombre:'Nómina',              icono:'👥', grupo:'Recursos Humanos',     orden:30 },
   { clave:'empleados',    nombre:'Empleados',           icono:'👤', grupo:'Recursos Humanos',     orden:31 },
   { clave:'vacaciones',   nombre:'Vacaciones',          icono:'🌴', grupo:'Recursos Humanos',     orden:32 },
@@ -63,7 +64,14 @@ const PERFILES_SEED = [
   { clave:'lectura', nombre:'Solo lectura', color:'#64748b', es_sistema:true,
     descripcion:'Consulta la operación sin poder capturar ni modificar nada.',
     permisos: { dashboard: V, facturas: V, cobranza: V, estadoCuenta: V,
-                clientes: V, gastos: V, reportes: V, estadisticas: V } }
+                clientes: V, gastos: V, reportes: V, estadisticas: V } },
+
+  // Perfil para toda la plantilla: entra solo a pedir sus propias vacaciones.
+  // Deliberadamente NO lleva el módulo 'vacaciones', que muestra los saldos y
+  // solicitudes de todos; 'misVacaciones' está acotado a su propio expediente.
+  { clave:'colaborador', nombre:'Colaborador', color:'#0d9488', es_sistema:true,
+    descripcion:'Solo puede solicitar sus vacaciones y ver sus propios días. No ve información de nadie más.',
+    permisos: { misVacaciones: C } }
 ];
 
 (async () => {

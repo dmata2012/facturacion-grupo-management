@@ -66,6 +66,114 @@ function anios(fechaIngreso) {
 }
 
 // ── LISTAR EMPLEADOS CON RESUMEN VACACIONAL ──
+// ═══ AUTOSERVICIO: "MIS VACACIONES" ═════════════════
+// Todo lo de aquí se acota al expediente del usuario de la sesión. Es lo que
+// permite dar acceso a cualquier colaborador sin exponerle los saldos, sueldos
+// ni solicitudes del resto de la plantilla.
+async function miEmpleadoId(usuarioId) {
+  const r = await query(`SELECT empleado_id FROM fac_usuarios WHERE id=$1`, [usuarioId]);
+  return r.rows[0]?.empleado_id || null;
+}
+
+router.get('/mi-info', async (req, res) => {
+  try {
+    const empId = await miEmpleadoId(req.usuario.id);
+    if (!empId) return res.json({ vinculado: false });
+
+    const emp = await query(
+      `SELECT id, nombre, puesto, departamento, TO_CHAR(fecha_ingreso,'YYYY-MM-DD') AS fecha_ingreso
+         FROM fac_empleados WHERE id=$1`, [empId]);
+    if (!emp.rows.length) return res.json({ vinculado: false });
+
+    const periodos = await query(
+      `SELECT id, num_periodo, dias_correspondientes, dias_tomados,
+              (dias_correspondientes - dias_tomados) AS pendientes
+         FROM fac_vacaciones_periodos WHERE empleado_id=$1 ORDER BY num_periodo`, [empId]);
+
+    const solicitudes = await query(
+      `SELECT id, tipo, estatus,
+              TO_CHAR(fecha_solicitud,'YYYY-MM-DD') AS fecha_solicitud,
+              TO_CHAR(fecha_inicio,'YYYY-MM-DD')    AS fecha_inicio,
+              TO_CHAR(fecha_fin,'YYYY-MM-DD')       AS fecha_fin,
+              TO_CHAR(fecha_regreso,'YYYY-MM-DD')   AS fecha_regreso,
+              dias_solicitados, observaciones
+         FROM fac_vacaciones_solicitudes
+        WHERE empleado_id=$1 ORDER BY fecha_inicio DESC, id DESC LIMIT 100`, [empId]);
+
+    const disponibles = periodos.rows.reduce((a, p) => a + parseFloat(p.pendientes || 0), 0);
+    res.json({
+      vinculado: true,
+      empleado: { ...emp.rows[0], antiguedad_anios: anios(emp.rows[0].fecha_ingreso) },
+      periodos: periodos.rows,
+      solicitudes: solicitudes.rows,
+      dias_disponibles: +disponibles.toFixed(2)
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// El colaborador solicita para sí mismo. El empleado_id sale de la sesión, nunca
+// del cuerpo de la petición: así nadie puede pedir a nombre de otro.
+router.post('/mis-solicitudes', async (req, res) => {
+  try {
+    const empId = await miEmpleadoId(req.usuario.id);
+    if (!empId) return res.status(400).json({
+      error: 'Tu usuario todavía no está enlazado a un expediente de empleado. Pídele a Recursos Humanos que lo configure.' });
+
+    const { fecha_inicio, fecha_fin, fecha_regreso, dias_solicitados, observaciones, tipo } = req.body;
+    if (!fecha_inicio || !fecha_fin)
+      return res.status(400).json({ error: 'Indica desde y hasta qué día.' });
+    const dias = parseFloat(dias_solicitados) || 0;
+    if (dias <= 0) return res.status(400).json({ error: 'Los días solicitados deben ser mayor a 0.' });
+
+    // Se reutiliza el alta normal para no duplicar la lógica de reparto por
+    // periodos, pero forzando el empleado de la sesión y el estatus pendiente.
+    req.body = {
+      empleado_id: empId,
+      fecha_solicitud: new Date().toISOString().slice(0,10),
+      fecha_inicio, fecha_fin, fecha_regreso: fecha_regreso || null,
+      dias_solicitados: dias,
+      observaciones: observaciones || null,
+      tipo: tipo || 'vacaciones',
+      estatus: 'pendiente'
+    };
+    return crearSolicitud(req, res);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Cancelar la propia solicitud, solo si aún no empieza. Devuelve los días.
+router.delete('/mis-solicitudes/:id', async (req, res) => {
+  const client = await getClient();
+  try {
+    const empId = await miEmpleadoId(req.usuario.id);
+    const s = await client.query(
+      `SELECT id, empleado_id, fecha_inicio FROM fac_vacaciones_solicitudes WHERE id=$1`, [req.params.id]);
+    if (!s.rows.length) return res.status(404).json({ error: 'Solicitud no encontrada.' });
+    if (!empId || s.rows[0].empleado_id !== empId)
+      return res.status(403).json({ error: 'Esa solicitud no es tuya.' });
+
+    const inicio = new Date(s.rows[0].fecha_inicio);
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+    if (inicio <= hoy)
+      return res.status(400).json({ error: 'Ya empezó. Pídele a Recursos Humanos que la cancele.' });
+
+    await client.query('BEGIN');
+    const asig = await client.query(
+      `SELECT periodo_id, dias_aplicados FROM fac_vacaciones_solicitud_periodos WHERE solicitud_id=$1`,
+      [req.params.id]);
+    for (const a of asig.rows) {
+      await client.query(
+        `UPDATE fac_vacaciones_periodos SET dias_tomados = GREATEST(0, dias_tomados - $1), actualizado_en=NOW()
+         WHERE id = $2`, [parseFloat(a.dias_aplicados), a.periodo_id]);
+    }
+    await client.query(`DELETE FROM fac_vacaciones_solicitudes WHERE id=$1`, [req.params.id]);
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+
 router.get('/empleados', async (req, res) => {
   try {
     const r = await query(`
@@ -242,7 +350,11 @@ router.put('/empleados/:id/periodos', requireRol('admin', 'capturista'), async (
 });
 
 // ── CREAR SOLICITUD ── (cualquier usuario autenticado puede solicitar)
-router.post('/solicitudes', async (req, res) => {
+// Alta de solicitud. Se extrae a funcion con nombre porque el autoservicio la
+// reutiliza: asi el reparto de dias por periodo vive en un solo lugar.
+router.post('/solicitudes', (req, res) => crearSolicitud(req, res));
+
+async function crearSolicitud(req, res) {
   const client = await getClient();
   try {
     await client.query('BEGIN');
@@ -340,7 +452,7 @@ router.post('/solicitudes', async (req, res) => {
     await client.query('ROLLBACK');
     res.status(500).json({ error: e.message });
   } finally { client.release(); }
-});
+}
 
 // ── GET SOLICITUD ──
 router.get('/solicitudes/:id', async (req, res) => {

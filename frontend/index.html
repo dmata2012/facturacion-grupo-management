@@ -525,6 +525,7 @@ canvas{max-height:230px}
     <nav>
       <!-- Principal siempre visible sin acordeón -->
       <a href="#" onclick="nav('dashboard')" id="nav-dashboard" style="margin-top:8px"><span class="ni">📊</span> Dashboard</a>
+      <a href="#" onclick="nav('misVacaciones')" id="nav-misVacaciones"><span class="ni">🏖</span> Mis Vacaciones</a>
 
       <div class="nav-group" data-group="operacion">
         <button class="nav-group-toggle" onclick="toggleNavGroup('operacion')">
@@ -1080,12 +1081,13 @@ function nav(page) {
     receptoras:'Empresas Emisoras', nomina:'Nómina', empleados:'Empleados',
     vacaciones:'Vacaciones', checador:'Reloj Checador', cajaChica:'Caja Chica',
     reportes:'Reportes', estadisticas:'Estadísticas', usuarios:'Usuarios y Permisos',
-    catalogo:'Conceptos de Desglose', bancos:'Bancos', gastos:'Gastos de Operación'
+    catalogo:'Conceptos de Desglose', bancos:'Bancos', gastos:'Gastos (CxP)',
+    misVacaciones:'Mis Vacaciones'
   };
   const mt = $('mt-title');
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
-    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos
+    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones
   };
   if (pages[page]) pages[page]();
 }
@@ -11882,6 +11884,209 @@ async function guardarPINEmp(empId) {
 }
 
 // ══ VACACIONES ══════════════════════════════
+// ══ MIS VACACIONES (autoservicio) ════════════════════
+// Pantalla acotada al propio expediente: es la que hace posible dar acceso a
+// toda la plantilla sin exponerle los saldos ni las solicitudes de los demás.
+async function misVacaciones() {
+  $('content').innerHTML = '<p class="empty">Cargando…</p>';
+  let d;
+  try { d = await api('/vacaciones/mi-info'); }
+  catch(e) { $('content').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; return; }
+  window._mvInfo = d;
+
+  if (!d.vinculado) {
+    $('content').innerHTML = `
+      <div class="card" style="text-align:center;padding:48px 30px;max-width:520px;margin:0 auto">
+        <div style="font-size:54px">🔗</div>
+        <h3 style="margin:12px 0 8px;font-size:19px;font-weight:900">Tu usuario no está enlazado a tu expediente</h3>
+        <p style="font-size:13px;color:var(--muted);line-height:1.6">
+          Para poder mostrarte tus días y recibir tus solicitudes, el sistema necesita saber
+          cuál de los expedientes de empleado eres tú.
+        </p>
+        <p style="font-size:13px;color:var(--muted);line-height:1.6;margin-top:10px">
+          Pídele a Recursos Humanos que lo configure en
+          <strong>Usuarios y Permisos → tu usuario → ✏️</strong>.
+        </p>
+      </div>`;
+    return;
+  }
+
+  const e = d.empleado;
+  const disp = d.dias_disponibles;
+  $('content').innerHTML = `
+    <style>
+      .mv-hero{background:linear-gradient(135deg,#0f766e 0%,#0d9488 55%,#14b8a6 100%);
+        border-radius:16px;padding:24px 28px;color:#fff;margin-bottom:16px;position:relative;overflow:hidden}
+      .mv-hero::after{content:'🏖';position:absolute;right:26px;bottom:-24px;font-size:118px;opacity:.1;line-height:1}
+      .mv-dias{font-size:52px;font-weight:900;line-height:1;letter-spacing:-2px}
+      .mv-p{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 14px;
+        border:1.5px solid var(--border);border-radius:12px;margin-bottom:8px;background:#fff}
+      .mv-barra{height:7px;background:#f1f5f9;border-radius:99px;overflow:hidden;margin-top:5px;width:170px}
+      .mv-barra i{display:block;height:100%;background:linear-gradient(90deg,#14b8a6,#0d9488);border-radius:99px}
+    </style>
+
+    <div class="mv-hero">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">
+        ${e.nombre}${e.puesto ? ` · ${e.puesto}` : ''}
+      </div>
+      <div style="display:flex;align-items:flex-end;gap:14px;margin-top:8px;position:relative;z-index:1">
+        <div class="mv-dias">${disp}</div>
+        <div style="padding-bottom:7px">
+          <div style="font-size:15px;font-weight:800">día${disp!=1?'s':''} disponible${disp!=1?'s':''}</div>
+          <div style="font-size:12px;opacity:.85">${e.antiguedad_anios} año${e.antiguedad_anios!=1?'s':''} de antigüedad</div>
+        </div>
+      </div>
+      <button class="btn" onclick="openMiSolicitud()" style="margin-top:16px;position:relative;z-index:1;
+              background:#fff;color:#0f766e;font-weight:900;border:none">＋ Solicitar vacaciones</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">
+      <div class="card">
+        <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:10px">
+          Mis periodos
+        </div>
+        ${d.periodos.length ? d.periodos.map(p => {
+          const pend = parseFloat(p.pendientes), tot = parseFloat(p.dias_correspondientes);
+          return `<div class="mv-p">
+            <div>
+              <div style="font-weight:800;font-size:13px">${p.num_periodo}° periodo</div>
+              <div style="font-size:11px;color:var(--muted)">
+                ${parseFloat(p.dias_tomados)} de ${tot} días usados
+              </div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:17px;font-weight:900;color:${pend>0?'#0d9488':'var(--muted)'}">${pend}</div>
+              <div class="mv-barra"><i style="width:${tot>0?(parseFloat(p.dias_tomados)/tot*100):0}%"></i></div>
+            </div>
+          </div>`;
+        }).join('') : '<p class="empty">Todavía no tienes periodos generados. Recursos Humanos los da de alta.</p>'}
+      </div>
+
+      <div class="card">
+        <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:10px">
+          Mis solicitudes
+        </div>
+        ${d.solicitudes.length ? `<div class="tscroll" style="max-height:52vh;overflow:auto"><table style="font-size:12px">
+          <thead><tr><th>Del</th><th>Al</th><th style="text-align:center">Días</th><th>Estatus</th><th></th></tr></thead>
+          <tbody>${d.solicitudes.map(s => {
+            const futura = s.fecha_inicio > new Date().toISOString().slice(0,10);
+            return `<tr>
+              <td style="white-space:nowrap">${fmtDate(s.fecha_inicio)}</td>
+              <td style="white-space:nowrap">${fmtDate(s.fecha_fin)}</td>
+              <td style="text-align:center;font-weight:800">${s.dias_solicitados}</td>
+              <td><span class="gt-pill ${/aprob/i.test(s.estatus)?'vig':/rechaz/i.test(s.estatus)?'can':'sin'}">${s.estatus||'pendiente'}</span></td>
+              <td style="text-align:right">${futura
+                ? `<button class="btn bd bsm" style="padding:3px 7px" onclick="cancelarMiSolicitud(${s.id})" title="Cancelar">✕</button>` : ''}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>` : '<p class="empty">Aún no has solicitado vacaciones.</p>'}
+      </div>
+    </div>`;
+}
+
+function openMiSolicitud() {
+  const d = window._mvInfo;
+  const hoy = new Date().toISOString().slice(0,10);
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#0f766e,#14b8a6);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Solicitud</div>
+      <div style="font-size:20px;font-weight:900;margin-top:3px">🏖 Solicitar vacaciones</div>
+      <div style="font-size:11.5px;opacity:.88;margin-top:4px">
+        Tienes <strong>${d.dias_disponibles}</strong> día${d.dias_disponibles!=1?'s':''} disponible${d.dias_disponibles!=1?'s':''}
+      </div>
+    </div>
+    <div class="fg" style="gap:11px">
+      <div class="fi"><label>Desde <span style="color:var(--red)">*</span></label>
+        <input type="date" id="mv-ini" min="${hoy}" onchange="mvCalcularDias()">
+      </div>
+      <div class="fi"><label>Hasta <span style="color:var(--red)">*</span></label>
+        <input type="date" id="mv-fin" min="${hoy}" onchange="mvCalcularDias()">
+      </div>
+      <div class="fi"><label>Días solicitados <span style="color:var(--red)">*</span></label>
+        <input type="number" step="0.5" id="mv-dias" style="font-size:17px;font-weight:900;text-align:center;color:#0d9488">
+      </div>
+      <div class="fi"><label>Me reincorporo el</label>
+        <input type="date" id="mv-regreso">
+      </div>
+      <div class="fi full"><label>Motivo o comentarios <span style="color:var(--muted);font-weight:400;font-size:10px">(opcional)</span></label>
+        <textarea id="mv-obs" rows="2" maxlength="300"></textarea>
+      </div>
+    </div>
+    <div id="mv-aviso" style="font-size:11.5px;margin-top:10px"></div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cancelar</button>
+      <button class="btn bs" id="mv-btn" onclick="enviarMiSolicitud()">📨 Enviar solicitud</button>
+    </div>`;
+  openModal('modal-gt-cats');
+}
+
+// Cuenta los días del rango sin contar domingos, y avisa si exceden el saldo
+function mvCalcularDias() {
+  const i = $('mv-ini').value, f = $('mv-fin').value;
+  if (!i || !f || f < i) return;
+  let n = 0;
+  for (let dt = new Date(i + 'T12:00'); dt <= new Date(f + 'T12:00'); dt.setDate(dt.getDate()+1))
+    if (dt.getDay() !== 0) n++;
+  $('mv-dias').value = n;
+  // Proponer el regreso al siguiente día hábil
+  const reg = new Date(f + 'T12:00');
+  do { reg.setDate(reg.getDate()+1); } while (reg.getDay() === 0);
+  $('mv-regreso').value = reg.toISOString().slice(0,10);
+  mvValidar();
+}
+
+function mvValidar() {
+  const d = window._mvInfo;
+  const n = parseFloat($('mv-dias').value) || 0;
+  const av = $('mv-aviso');
+  if (n > d.dias_disponibles) {
+    av.innerHTML = `<div style="background:#fef2f2;border:1.5px solid #fecaca;color:#b91c1c;
+      border-radius:10px;padding:9px 12px;font-weight:700">
+      Estás pidiendo ${n} días y solo tienes ${d.dias_disponibles} disponibles.</div>`;
+    return false;
+  }
+  av.innerHTML = n > 0
+    ? `<div style="background:#f0fdfa;border:1.5px solid #99f6e4;color:#0f766e;border-radius:10px;padding:9px 12px">
+       Te quedarían <strong>${(d.dias_disponibles - n).toFixed(1)}</strong> días. Los domingos no se cuentan.</div>`
+    : '';
+  return true;
+}
+
+async function enviarMiSolicitud() {
+  const body = {
+    fecha_inicio  : $('mv-ini').value,
+    fecha_fin     : $('mv-fin').value,
+    fecha_regreso : $('mv-regreso').value || null,
+    dias_solicitados: parseFloat($('mv-dias').value) || 0,
+    observaciones : $('mv-obs').value.trim() || null
+  };
+  if (!body.fecha_inicio || !body.fecha_fin) return toast('Indica desde y hasta qué día.', 'warn');
+  if (body.fecha_fin < body.fecha_inicio)    return toast('La fecha final no puede ser antes de la inicial.', 'warn');
+  if (!(body.dias_solicitados > 0))          return toast('Los días deben ser mayor a 0.', 'warn');
+  if (!mvValidar())                          return toast('No tienes suficientes días disponibles.', 'warn');
+
+  const btn = $('mv-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="gt-spin"></span> Enviando…';
+  try {
+    await api('/vacaciones/mis-solicitudes', { method:'POST', body: JSON.stringify(body) });
+    toast('Solicitud enviada. Recursos Humanos la revisará.');
+    closeModal('modal-gt-cats');
+    misVacaciones();
+  } catch(e) {
+    toast(e.message, 'err');
+    btn.disabled = false; btn.innerHTML = '📨 Enviar solicitud';
+  }
+}
+
+async function cancelarMiSolicitud(id) {
+  if (!await confirm2('¿Cancelar esta solicitud?\nLos días vuelven a tu saldo.')) return;
+  try {
+    await api(`/vacaciones/mis-solicitudes/${id}`, { method:'DELETE' });
+    toast('Solicitud cancelada.');
+    misVacaciones();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
 async function vacaciones() {
   $('content').innerHTML = `
     <div class="page-header">
@@ -15180,13 +15385,32 @@ async function openUsuario(id=null) {
     <select id="us-rol" onchange="usDescribirPerfil()">${opciones}</select>
   </div>
   <div id="us-perfil-desc" style="font-size:11.5px;color:var(--muted);background:var(--bg-alt);
-       border-radius:10px;padding:9px 12px;margin-bottom:14px;line-height:1.5"></div>
+       border-radius:10px;padding:9px 12px;margin-bottom:12px;line-height:1.5"></div>
+  <div class="fi" style="margin-bottom:6px"><label>Expediente de empleado</label>
+    <select id="us-empleado"><option value="">— Sin enlazar —</option></select>
+  </div>
+  <div style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5">
+    Necesario para “Mis Vacaciones”: es como el sistema sabe de quién son los días
+    y a nombre de quién se registra la solicitud.
+  </div>
   <div class="form-actions">
     <button class="btn bo" onclick="closeModal('modal-usuario')">Cancelar</button>
     <button class="btn bs" onclick="saveUsuario(${id||null})">Guardar</button>
   </div>`;
+  // Lista de expedientes para poder enlazar el usuario con su empleado
+  api('/empleados').then(emps => {
+    const sel = $('us-empleado'); if (!sel) return;
+    sel.innerHTML = '<option value="">— Sin enlazar —</option>' +
+      (emps || []).filter(e => e.activo !== false)
+        .map(e => `<option value="${e.id}">${e.nombre}${e.puesto ? ' · ' + e.puesto : ''}</option>`).join('');
+    if (window._usEmpleadoId) sel.value = window._usEmpleadoId;
+  }).catch(() => {});
+
+  window._usEmpleadoId = null;
   if(id) api('/usuarios').then(d=>{const u=d.find(x=>x.id==id);if(!u)return;
     $('us-nom').value=u.nombre;$('us-email').value=u.email;$('us-rol').value=u.rol;
+    window._usEmpleadoId = u.empleado_id || '';
+    const se = $('us-empleado'); if (se && u.empleado_id) se.value = u.empleado_id;
     usDescribirPerfil();
   });
   usDescribirPerfil();
@@ -15208,7 +15432,8 @@ function usDescribirPerfil() {
 }
 
 async function saveUsuario(id) {
-  const body={nombre:$('us-nom').value,email:$('us-email').value,rol:$('us-rol').value,activo:true};
+  const body={nombre:$('us-nom').value,email:$('us-email').value,rol:$('us-rol').value,activo:true,
+              empleado_id:$('us-empleado')?.value || null};
   const pass=$('us-pass').value; if(pass) body.password=pass;
   if(!body.nombre||!body.email) return toast('Nombre y email requeridos.','err');
   if(!id&&!pass) return toast('Contraseña requerida para nuevo usuario.','err');

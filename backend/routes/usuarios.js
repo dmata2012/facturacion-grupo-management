@@ -19,6 +19,24 @@ async function rolesPermitidos() {
   } catch (e) { return ROLES_BASE; }
 }
 
+// Enlace usuario ↔ expediente de empleado. Sin esto, un colaborador que entra a
+// pedir sus vacaciones no tiene a quién referirse: el sistema sabe quién inició
+// sesión, pero no qué empleado es.
+(async () => {
+  try {
+    await query(`ALTER TABLE fac_usuarios ADD COLUMN IF NOT EXISTS empleado_id INT`);
+    // Emparejar por correo lo que se pueda, para no capturarlo uno por uno
+    const r = await query(`
+      UPDATE fac_usuarios u SET empleado_id = e.id
+      FROM fac_empleados e
+      WHERE u.empleado_id IS NULL
+        AND e.email IS NOT NULL AND TRIM(e.email) <> ''
+        AND LOWER(TRIM(e.email)) = LOWER(TRIM(u.email))
+      RETURNING u.nombre`);
+    if (r.rows.length) console.log(`✔ ${r.rows.length} usuario(s) enlazados a su expediente por correo`);
+  } catch (e) { console.warn('Enlace usuario-empleado:', e.message); }
+})();
+
 // Corrección única de roles guardados con variantes ('Gerencia', 'GERENTE', 'Tesorería'…),
 // que dejaban al usuario sin permisos porque no coincidían con requireRol() ni con los PAGES_*.
 (async () => {
@@ -63,7 +81,12 @@ router.put('/cambiar-clave', async (req, res) => {
 // GET  /api/usuarios
 router.get('/', requireRol('admin'), async (req, res) => {
   try {
-    const r = await query(`SELECT id,nombre,email,rol,activo,creado_en FROM fac_usuarios ORDER BY nombre`);
+    const r = await query(`
+      SELECT u.id, u.nombre, u.email, u.rol, u.activo, u.creado_en, u.empleado_id,
+             e.nombre AS empleado_nombre
+        FROM fac_usuarios u
+        LEFT JOIN fac_empleados e ON e.id = u.empleado_id
+       ORDER BY u.nombre`);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -71,7 +94,7 @@ router.get('/', requireRol('admin'), async (req, res) => {
 // POST /api/usuarios
 router.post('/', requireRol('admin'), async (req, res) => {
   try {
-    const { nombre, email, password, rol } = req.body;
+    const { nombre, email, password, rol, empleado_id } = req.body;
     if (!nombre || !email || !password || !rol) return res.status(400).json({ error: 'Campos requeridos.' });
     const rolNorm = normalizarRol(rol);
     const validos = await rolesPermitidos();
@@ -79,8 +102,8 @@ router.post('/', requireRol('admin'), async (req, res) => {
       return res.status(400).json({ error: `Perfil inválido: "${rol}". Válidos: ${validos.join(', ')}.` });
     const hash = await bcrypt.hash(password, 10);
     const r = await query(
-      `INSERT INTO fac_usuarios(nombre,email,password_hash,rol) VALUES($1,$2,$3,$4) RETURNING id,nombre,email,rol,activo`,
-      [nombre, email.toLowerCase(), hash, rolNorm]
+      `INSERT INTO fac_usuarios(nombre,email,password_hash,rol,empleado_id) VALUES($1,$2,$3,$4,$5) RETURNING id,nombre,email,rol,activo,empleado_id`,
+      [nombre, email.toLowerCase(), hash, rolNorm, empleado_id || null]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) {
@@ -92,18 +115,18 @@ router.post('/', requireRol('admin'), async (req, res) => {
 // PUT /api/usuarios/:id
 router.put('/:id', requireRol('admin'), async (req, res) => {
   try {
-    const { nombre, email, rol, activo, password } = req.body;
+    const { nombre, email, rol, activo, password, empleado_id } = req.body;
     const rolNorm = normalizarRol(rol);
     const validos = await rolesPermitidos();
     if (!validos.includes(rolNorm))
       return res.status(400).json({ error: `Perfil inválido: "${rol}". Válidos: ${validos.join(', ')}.` });
     if (password) {
       const hash = await bcrypt.hash(password, 10);
-      await query(`UPDATE fac_usuarios SET nombre=$1,email=$2,rol=$3,activo=$4,password_hash=$5,actualizado_en=NOW() WHERE id=$6`,
-        [nombre, email.toLowerCase(), rolNorm, activo, hash, req.params.id]);
+      await query(`UPDATE fac_usuarios SET nombre=$1,email=$2,rol=$3,activo=$4,password_hash=$5,empleado_id=$6,actualizado_en=NOW() WHERE id=$7`,
+        [nombre, email.toLowerCase(), rolNorm, activo, hash, empleado_id || null, req.params.id]);
     } else {
-      await query(`UPDATE fac_usuarios SET nombre=$1,email=$2,rol=$3,activo=$4,actualizado_en=NOW() WHERE id=$5`,
-        [nombre, email.toLowerCase(), rolNorm, activo, req.params.id]);
+      await query(`UPDATE fac_usuarios SET nombre=$1,email=$2,rol=$3,activo=$4,empleado_id=$5,actualizado_en=NOW() WHERE id=$6`,
+        [nombre, email.toLowerCase(), rolNorm, activo, empleado_id || null, req.params.id]);
     }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
