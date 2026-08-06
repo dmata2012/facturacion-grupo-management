@@ -14962,59 +14962,151 @@ function renderExcepciones(us) {
     }).join('')}</div>`;
 }
 
-async function openExcepciones(usuarioId) {
-  try {
-    const d = await api(`/permisos/usuarios/${usuarioId}/efectivos`);
-    const modulos = window._pmModulos || [];
-    const nom = c => modulos.find(m => m.clave === c) || { nombre:c, icono:'', grupo:'' };
+// La pestaña de excepciones y el botón de cada usuario abren la misma pantalla.
+// Se declara como función (no como const) para que los onclick del HTML la vean.
+function openExcepciones(usuarioId) { return openAccesosUsuario(usuarioId); }
 
-    $('modal-gt-cats-body').innerHTML = `
-      <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#4c1d95,#7c3aed);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
-        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Excepciones por persona</div>
-        <div style="font-size:20px;font-weight:900;margin-top:3px">⭐ ${d.usuario.nombre}</div>
-        <div style="font-size:11.5px;opacity:.85;margin-top:3px">
-          Perfil <strong>${d.usuario.rol}</strong> — deja “del perfil” en lo que no quieras cambiar.
-        </div>
-      </div>
-      <div style="max-height:56vh;overflow:auto;margin:0 -4px;padding:0 4px">
-        <table style="width:100%;font-size:12px;border-collapse:collapse">
-          <thead><tr style="position:sticky;top:0;background:#f8fafc;z-index:2">
-            <th style="text-align:left;padding:7px;font-size:10px;text-transform:uppercase;color:var(--muted)">Módulo</th>
-            <th style="text-align:center;padding:7px;font-size:10px;text-transform:uppercase;color:var(--muted)">Su perfil</th>
-            <th style="text-align:center;padding:7px;font-size:10px;text-transform:uppercase;color:var(--muted);min-width:150px">Excepción</th>
-          </tr></thead>
-          <tbody>${d.modulos.map(m => {
-            const info = nom(m.modulo);
-            return `<tr style="border-top:1px solid var(--border)">
-              <td style="padding:6px 7px;font-weight:700">${info.icono||''} ${info.nombre}</td>
-              <td style="padding:6px 7px;text-align:center;color:${COLOR_NIVEL[m.nivel_perfil]};font-weight:800;font-size:11px">
-                ${NOMBRE_NIVEL[m.nivel_perfil]}
-              </td>
-              <td style="padding:6px 7px">
-                ${pmSelectNivel(m.excepcion, `guardarExcepcion(${usuarioId},'${m.modulo}',this)`, true)}
-              </td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table>
-      </div>
-      <div class="form-actions">
-        <button class="btn bs" onclick="closeModal('modal-gt-cats');cargarExcepciones()">Listo</button>
-      </div>`;
+// Configuración por usuario: a qué entra y qué puede hacer ahí.
+// Se piensa desde la persona, no desde el perfil: interruptor por módulo y, si
+// está encendido, el nivel. Lo que no se toca sigue heredando del perfil.
+async function openAccesosUsuario(usuarioId) {
+  try {
+    if (!window._pmModulos) window._pmModulos = await api('/permisos/modulos');
+    const d = await api(`/permisos/usuarios/${usuarioId}/efectivos`);
+    window._pmAccesos = { usuarioId, datos: d };
+    pintarAccesosUsuario();
     openModal('modal-gt-cats');
   } catch(e) { toast(e.message, 'err'); }
 }
 
-async function guardarExcepcion(usuarioId, modulo, sel) {
-  const v = sel.value;
-  sel.style.color = v === '' ? '#64748b' : COLOR_NIVEL[parseInt(v)];
-  sel.disabled = true;
+function pintarAccesosUsuario() {
+  const { usuarioId, datos: d } = window._pmAccesos;
+  const modulos = window._pmModulos || [];
+
+  // Agrupar por departamento para que se lea como el menú lateral
+  const grupos = [];
+  modulos.forEach(m => {
+    const info = d.modulos.find(x => x.modulo === m.clave);
+    if (!info) return;
+    let g = grupos.find(x => x.nombre === m.grupo);
+    if (!g) grupos.push(g = { nombre: m.grupo, filas: [] });
+    g.filas.push({ ...info, ...m });
+  });
+
+  const entra = d.modulos.filter(m => m.efectivo > 0).length;
+  const conExcepcion = d.modulos.filter(m => m.excepcion !== null).length;
+
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 16px;padding:20px 26px;background:linear-gradient(135deg,#4c1d95,#7c3aed);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Accesos del usuario</div>
+      <div style="font-size:20px;font-weight:900;margin-top:3px">🔑 ${d.usuario.nombre}</div>
+      <div style="font-size:11.5px;opacity:.88;margin-top:4px">
+        Perfil <strong>${d.usuario.rol}</strong> · entra a <strong>${entra}</strong> de ${d.modulos.length} módulos${
+          conExcepcion ? ` · <strong>${conExcepcion}</strong> ajustado${conExcepcion!=1?'s':''} a mano` : ''}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn bo bsm" onclick="accesosTodos(${usuarioId}, ${NIVEL.VER})">☑ Dar acceso a todo (solo ver)</button>
+      <button class="btn bo bsm" onclick="accesosTodos(${usuarioId}, 0)">☐ Quitar todo</button>
+      <button class="btn bo bsm" onclick="accesosVolverAlPerfil(${usuarioId})" style="margin-left:auto">↺ Volver a su perfil</button>
+    </div>
+
+    <div style="max-height:52vh;overflow:auto;margin:0 -4px;padding:0 4px">
+      ${grupos.map(g => `
+        <div style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;
+                    color:var(--muted);margin:12px 0 6px">${g.nombre}</div>
+        ${g.filas.map(m => {
+          const on = m.efectivo > 0;
+          const propio = m.excepcion !== null;
+          return `<div style="display:flex;align-items:center;gap:11px;padding:9px 12px;margin-bottom:6px;
+                      border:1.5px solid ${propio ? '#c4b5fd' : 'var(--border)'};border-radius:11px;
+                      background:${propio ? '#faf5ff' : '#fff'}">
+            <label style="position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0;cursor:pointer">
+              <input type="checkbox" ${on ? 'checked' : ''} style="opacity:0;width:0;height:0"
+                     onchange="accesoToggle(${usuarioId},'${m.modulo}',this.checked,${m.nivel_perfil})">
+              <span style="position:absolute;inset:0;background:${on ? '#7c3aed' : '#cbd5e1'};
+                    border-radius:99px;transition:.2s"></span>
+              <span style="position:absolute;top:3px;left:${on ? '21px' : '3px'};width:16px;height:16px;
+                    background:#fff;border-radius:50%;transition:.2s;pointer-events:none"></span>
+            </label>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:800;font-size:13px;color:${on ? 'var(--dark)' : '#94a3b8'}">
+                ${m.icono || ''} ${m.nombre}
+              </div>
+              <div style="font-size:10px;color:var(--muted);margin-top:1px">
+                ${propio ? `<span style="color:#7c3aed;font-weight:800">ajustado a mano</span> · su perfil da ${NOMBRE_NIVEL[m.nivel_perfil]}`
+                         : `heredado del perfil`}
+              </div>
+            </div>
+            <div style="width:145px;flex-shrink:0;${on ? '' : 'opacity:.35;pointer-events:none'}">
+              ${pmSelectNivel(m.efectivo, `accesoNivel(${usuarioId},'${m.modulo}',this)`)}
+            </div>
+            ${propio ? `<button class="btn bo bsm" style="padding:4px 7px;font-size:10px"
+                onclick="accesoNivelDirecto(${usuarioId},'${m.modulo}',null)" title="Volver a lo que dice su perfil">↺</button>` : ''}
+          </div>`;
+        }).join('')}
+      `).join('')}
+    </div>
+
+    <div class="form-actions">
+      <button class="btn bs" onclick="closeModal('modal-gt-cats');if($('pm-excep'))cargarExcepciones();if($('usr-table'))loadUsuarios()">Listo</button>
+    </div>`;
+}
+
+// Interruptor: encender deja el nivel del perfil si ya daba acceso, o "Ver" si no
+function accesoToggle(usuarioId, modulo, encendido, nivelPerfil) {
+  const nivel = encendido ? (nivelPerfil > 0 ? nivelPerfil : NIVEL.VER) : 0;
+  accesoNivelDirecto(usuarioId, modulo, nivel);
+}
+
+function accesoNivel(usuarioId, modulo, sel) {
+  accesoNivelDirecto(usuarioId, modulo, parseInt(sel.value));
+}
+
+async function accesoNivelDirecto(usuarioId, modulo, nivel) {
   try {
-    const r = await api(`/permisos/usuarios/${usuarioId}/permiso`, {
-      method:'PUT', body: JSON.stringify({ modulo, nivel: v === '' ? null : parseInt(v) }) });
-    toast(r.quitada ? 'Excepción quitada: vuelve al permiso de su perfil.'
-                    : `Excepción guardada: ${NOMBRE_NIVEL[parseInt(v)]}.`);
+    await api(`/permisos/usuarios/${usuarioId}/permiso`, {
+      method:'PUT', body: JSON.stringify({ modulo, nivel }) });
+    // Releer para que el estado de la pantalla sea el real, no el que suponemos
+    window._pmAccesos.datos = await api(`/permisos/usuarios/${usuarioId}/efectivos`);
+    pintarAccesosUsuario();
+    toast(nivel === null ? 'Vuelve a lo que dice su perfil.'
+                         : `${NOMBRE_NIVEL[nivel]} · guardado`);
+  } catch(e) { toast(e.message, 'err'); pintarAccesosUsuario(); }
+}
+
+async function accesosTodos(usuarioId, nivel) {
+  const d = window._pmAccesos.datos;
+  const aviso = nivel === 0
+    ? '¿Quitarle el acceso a TODOS los módulos?\nNo podrá entrar a ninguna pantalla hasta que le des alguno.'
+    : '¿Darle acceso de solo lectura a TODOS los módulos?';
+  if (!await confirm2(aviso)) return;
+  try {
+    for (const m of d.modulos) {
+      await api(`/permisos/usuarios/${usuarioId}/permiso`, {
+        method:'PUT', body: JSON.stringify({ modulo: m.modulo, nivel }) });
+    }
+    window._pmAccesos.datos = await api(`/permisos/usuarios/${usuarioId}/efectivos`);
+    pintarAccesosUsuario();
+    toast(nivel === 0 ? 'Se le quitaron todos los accesos.' : 'Acceso de lectura a todo.');
   } catch(e) { toast(e.message, 'err'); }
-  finally { sel.disabled = false; }
+}
+
+async function accesosVolverAlPerfil(usuarioId) {
+  const d = window._pmAccesos.datos;
+  const n = d.modulos.filter(m => m.excepcion !== null).length;
+  if (!n) return toast('Este usuario no tiene ningún ajuste a mano: ya sigue su perfil.', 'warn');
+  if (!await confirm2(`¿Quitar los ${n} ajuste(s) a mano y dejar que herede todo de su perfil "${d.usuario.rol}"?`)) return;
+  try {
+    for (const m of d.modulos.filter(x => x.excepcion !== null)) {
+      await api(`/permisos/usuarios/${usuarioId}/permiso`, {
+        method:'PUT', body: JSON.stringify({ modulo: m.modulo, nivel: null }) });
+    }
+    window._pmAccesos.datos = await api(`/permisos/usuarios/${usuarioId}/efectivos`);
+    pintarAccesosUsuario();
+    toast('Listo: vuelve a seguir su perfil en todo.');
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 // ══ BITÁCORA ═════════════════════════════════════════
@@ -15057,8 +15149,10 @@ async function loadUsuarios() {
         <td><span class="badge b-${u.rol==='admin'?'vencida':u.rol==='gerente'?'pagada':'pendiente'}">${u.rol}</span></td>
         <td>${u.activo?'✅':'❌'}</td>
         <td>${fmtDate(u.creado_en)}</td>
-        <td><button class="btn bo bsm" onclick="openUsuario(${u.id})">✏️</button>
-            <button class="btn bd bsm" onclick="desactivarUsuario(${u.id})">✕</button></td>
+        <td style="white-space:nowrap">
+            <button class="btn bs bsm" onclick="openAccesosUsuario(${u.id})" title="Configurar a qué entra">🔑 Accesos</button>
+            <button class="btn bo bsm" onclick="openUsuario(${u.id})" title="Editar datos">✏️</button>
+            <button class="btn bd bsm" onclick="desactivarUsuario(${u.id})" title="Desactivar">✕</button></td>
       </tr>`).join('')}</tbody>
     </table></div>`:`<p class="empty">No hay usuarios.</p>`;
   }catch(e){$('usr-table').innerHTML=`<p class="empty">${e.message}</p>`;}

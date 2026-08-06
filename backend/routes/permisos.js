@@ -305,6 +305,12 @@ router.put('/usuarios/:id/permiso', requireRol('admin'), async (req, res) => {
     const u = await query(`SELECT nombre, rol FROM fac_usuarios WHERE id=$1`, [req.params.id]);
     if (!u.rows.length) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
+    // Nadie puede quitarse a sí mismo la llave de esta pantalla: sería la única
+    // acción del sistema que no se puede deshacer desde el propio sistema.
+    if (modulo === 'usuarios' && String(req.params.id) === String(req.usuario.id)
+        && nivel !== null && nivel !== undefined && nivel !== '' && parseInt(nivel) < NIVEL.TODO)
+      return res.status(400).json({ error: 'No puedes quitarte tu propio acceso a Usuarios y Permisos. Pídeselo a otro administrador.' });
+
     const antes = await query(`SELECT nivel FROM fac_usuario_permisos WHERE usuario_id=$1 AND modulo=$2`,
       [req.params.id, modulo]);
 
