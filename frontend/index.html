@@ -4984,6 +4984,7 @@ async function cargarProductividad() {
           <th style="text-align:center">Días Lab.</th>
           <th style="text-align:center">Asistidos</th>
           <th style="text-align:center">Faltas</th>
+          <th style="text-align:center">Vac/Inc</th>
           <th style="text-align:center">Hrs Esp.</th>
           <th style="text-align:center">Hrs Trab.</th>
           <th style="text-align:center">Retardos</th>
@@ -5001,6 +5002,7 @@ async function cargarProductividad() {
             <td style="text-align:center">${e.dias_laborables}</td>
             <td style="text-align:center;color:#166534;font-weight:700">${e.dias_asistidos}</td>
             <td style="text-align:center;color:${faltas > 0 ? '#dc2626' : 'var(--muted)'};font-weight:${faltas > 0 ? 700 : 400}">${faltas > 0 ? faltas : '—'}</td>
+            <td style="text-align:center;color:${(e.dias_ausencia||0) > 0 ? '#1e40af' : 'var(--muted)'}">${(e.dias_ausencia||0) > 0 ? e.dias_ausencia : '—'}</td>
             <td style="text-align:center">${e.horas_esperadas}h</td>
             <td style="text-align:center;font-weight:700">${e.horas_trabajadas}h</td>
             <td style="text-align:center;color:${e.dias_con_retardo > 0 ? '#dc2626' : 'var(--muted)'}">${e.dias_con_retardo > 0 ? e.dias_con_retardo + ' (' + fmtMin(e.total_minutos_retardo) + ')' : '—'}</td>
@@ -5020,11 +5022,12 @@ function exportarProductividadExcel() {
     alert('Primero genera el reporte de productividad.');
     return;
   }
-  const rows = [['N°','Colaborador','Puesto','Departamento','Días Laborables','Días Asistidos','Faltas','Hrs Esperadas','Hrs Trabajadas','Días c/Retardo','Min Retardo Total','Días Sin Salida','% Asistencia','% Puntualidad','% Productividad']];
+  const rows = [['N°','Colaborador','Puesto','Departamento','Días Laborables','Días Asistidos','Faltas','Vac/Inc/Perm','Hrs Esperadas','Hrs Trabajadas','Días c/Retardo','Min Retardo Total','Días Sin Salida','% Asistencia','% Puntualidad','% Productividad']];
   for (const e of d.empleados) {
     rows.push([
       e.numero_colaborador, e.nombre, e.puesto, e.departamento,
       e.dias_laborables, e.dias_asistidos, e.dias_laborables - e.dias_asistidos,
+      e.dias_ausencia || 0,
       e.horas_esperadas, e.horas_trabajadas,
       e.dias_con_retardo, e.total_minutos_retardo, e.dias_sin_salida,
       e.tasa_asistencia + '%', e.tasa_puntualidad + '%', e.indice_productividad + '%'

@@ -200,13 +200,33 @@ router.get('/productividad', async (req, res) => {
       WHERE fecha >= $1 AND fecha <= $2
     `, [desde, hasta]);
 
+    // Solicitudes aprobadas (vacaciones, incapacidades, permisos) en el periodo
+    const solicitudesResult = await query(`
+      SELECT empleado_id, fecha_inicio, fecha_fin
+      FROM fac_vacaciones_solicitudes
+      WHERE estatus = 'aprobada'
+        AND daterange(fecha_inicio, fecha_fin, '[]') && daterange($1::date, $2::date, '[]')
+    `, [desde, hasta]);
+
+    // Expandir solicitudes a un mapa empleado_id → Set<fecha_string>
+    const ausenciasByEmp = {};
+    for (const s of solicitudesResult.rows) {
+      const empId = s.empleado_id;
+      if (!ausenciasByEmp[empId]) ausenciasByEmp[empId] = new Set();
+      const fi = new Date(String(s.fecha_inicio).slice(0, 10) + 'T12:00:00Z');
+      const ff = new Date(String(s.fecha_fin).slice(0, 10) + 'T12:00:00Z');
+      for (let d = new Date(fi); d <= ff; d.setUTCDate(d.getUTCDate() + 1)) {
+        ausenciasByEmp[empId].add(d.toISOString().slice(0, 10));
+      }
+    }
+
     const recsByEmp = {};
     for (const r of registrosResult.rows) {
       if (!recsByEmp[r.empleado_id]) recsByEmp[r.empleado_id] = [];
       recsByEmp[r.empleado_id].push(r);
     }
 
-    // Construir lista de días del periodo con su día de semana (UTC)
+    // Lista de días del periodo con su día de semana (UTC)
     const diasPeriodo = [];
     const ini = new Date(desde + 'T12:00:00Z');
     const fin = new Date(hasta + 'T12:00:00Z');
@@ -218,7 +238,14 @@ router.get('/productividad', async (req, res) => {
       const diasDescanso = emp.dias_descanso
         ? emp.dias_descanso.split(',').map(Number).filter(n => !isNaN(n))
         : [0, 6];
-      const diasLaborables = diasPeriodo.filter(d => !diasDescanso.includes(d.dow)).length;
+      const ausencias = ausenciasByEmp[emp.id] || new Set();
+
+      // Días laborables = días del periodo sin descanso Y sin ausencia aprobada
+      const diasLaborablesArr = diasPeriodo.filter(
+        d => !diasDescanso.includes(d.dow) && !ausencias.has(d.date)
+      );
+      const diasLaborables = diasLaborablesArr.length;
+      const laborablesSet = new Set(diasLaborablesArr.map(d => d.date));
 
       let horasPorDia = 8;
       if (emp.hora_entrada_esperada && emp.hora_salida_esperada) {
@@ -229,12 +256,16 @@ router.get('/productividad', async (req, res) => {
       }
       const minutosEsperados = diasLaborables * horasPorDia * 60;
 
-      const recs = recsByEmp[emp.id] || [];
+      // Solo contar registros que caen en días laborables (excluye descansos y ausencias aprobadas)
+      const allRecs = recsByEmp[emp.id] || [];
+      const recs = allRecs.filter(r => laborablesSet.has(String(r.fecha).slice(0, 10)));
+
       const diasAsistidos = recs.length;
       const minutosTrabajados = recs.reduce((s, r) => s + parseInt(r.minutos_trabajados || 0), 0);
       const diasConRetardo = recs.filter(r => parseInt(r.minutos_retardo || 0) > 0).length;
       const totalMinutosRetardo = recs.reduce((s, r) => s + parseInt(r.minutos_retardo || 0), 0);
       const diasSinSalida = recs.filter(r => r.hora_entrada && !r.hora_salida).length;
+      const diasAusencia = ausencias.size;
 
       const tasaAsistencia = diasLaborables > 0 ? Math.round((diasAsistidos / diasLaborables) * 100) : 0;
       const tasaPuntualidad = diasAsistidos > 0
@@ -252,6 +283,7 @@ router.get('/productividad', async (req, res) => {
         numero_colaborador: emp.numero_colaborador || '',
         dias_laborables: diasLaborables,
         dias_asistidos: diasAsistidos,
+        dias_ausencia: diasAusencia,
         horas_esperadas: Math.round(minutosEsperados / 60 * 10) / 10,
         horas_trabajadas: Math.round(minutosTrabajados / 60 * 10) / 10,
         dias_con_retardo: diasConRetardo,
