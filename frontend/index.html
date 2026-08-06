@@ -12088,6 +12088,10 @@ async function cancelarMiSolicitud(id) {
 }
 
 async function vacaciones() {
+  // Con nivel Ver, el colaborador solo ve lo suyo. La plantilla completa —saldos,
+  // puestos y solicitudes de todos— requiere Capturar o más.
+  if (puede('vacaciones', NIVEL.CAPTURAR) === false) return misVacaciones();
+
   $('content').innerHTML = `
     <div class="page-header">
       <div class="page-header-left">
@@ -15018,7 +15022,11 @@ function renderPerfiles(perfiles, modulos) {
         ${grupos.map(g => `
           <tr class="pm-grupo"><td colspan="${perfiles.length+1}">${g.nombre}</td></tr>
           ${g.mods.map(m => `<tr>
-            <td class="mod">${m.icono || ''} ${m.nombre}</td>
+            <td class="mod">${m.icono || ''} ${m.nombre}
+              ${m.nota ? `<span title="${m.nota.replace(/"/g,'&quot;')}"
+                  style="cursor:help;color:#7c3aed;font-size:11px;margin-left:3px">ⓘ</span>
+                  <div style="font-weight:500;font-size:9.5px;color:var(--muted);line-height:1.35;
+                       max-width:200px;margin-top:2px">${m.nota}</div>` : ''}</td>
             ${perfiles.map(p => `<td>${
               pmSelectNivel(p.permisos[m.clave] ?? 0, `guardarPermisoPerfil(${p.id},'${m.clave}',this)`)
             }</td>`).join('')}
@@ -15243,6 +15251,7 @@ function pintarAccesosUsuario() {
                 ${propio ? `<span style="color:#7c3aed;font-weight:800">ajustado a mano</span> · su perfil da ${NOMBRE_NIVEL[m.nivel_perfil]}`
                          : `heredado del perfil`}
               </div>
+              ${m.nota ? `<div style="font-size:10px;color:#7c3aed;margin-top:3px;line-height:1.4">ⓘ ${m.nota}</div>` : ''}
             </div>
             <div style="width:145px;flex-shrink:0;${on ? '' : 'opacity:.35;pointer-events:none'}">
               ${pmSelectNivel(m.efectivo, `accesoNivel(${usuarioId},'${m.modulo}',this)`)}

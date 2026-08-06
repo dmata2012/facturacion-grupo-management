@@ -18,7 +18,8 @@ const MODULOS_SEED = [
   { clave:'misVacaciones',nombre:'Mis Vacaciones',      icono:'🏖', grupo:'Mi espacio',           orden:5  },
   { clave:'nomina',       nombre:'Nómina',              icono:'👥', grupo:'Recursos Humanos',     orden:30 },
   { clave:'empleados',    nombre:'Empleados',           icono:'👤', grupo:'Recursos Humanos',     orden:31 },
-  { clave:'vacaciones',   nombre:'Vacaciones',          icono:'🌴', grupo:'Recursos Humanos',     orden:32 },
+  { clave:'vacaciones',   nombre:'Vacaciones',          icono:'🌴', grupo:'Recursos Humanos',     orden:32,
+    nota:'En Ver solo aparece su propia tarjeta. De Capturar en adelante ve a toda la plantilla.' },
   { clave:'checador',     nombre:'Reloj Checador',      icono:'🕐', grupo:'Recursos Humanos',     orden:33 },
   { clave:'cajaChica',    nombre:'Caja Chica',          icono:'💵', grupo:'Tesorería',            orden:40 },
   { clave:'bancos',       nombre:'Cuentas Bancarias',   icono:'🏦', grupo:'Bancos',               orden:50 },
@@ -83,8 +84,10 @@ const PERFILES_SEED = [
         icono TEXT,
         grupo TEXT,
         orden INT DEFAULT 99,
+        nota TEXT,
         activo BOOLEAN DEFAULT TRUE
       )`);
+    await query(`ALTER TABLE fac_modulos ADD COLUMN IF NOT EXISTS nota TEXT`);
 
     await query(`
       CREATE TABLE IF NOT EXISTS fac_perfiles (
@@ -134,11 +137,11 @@ const PERFILES_SEED = [
 
     for (const m of MODULOS_SEED) {
       await query(
-        `INSERT INTO fac_modulos(clave, nombre, icono, grupo, orden) VALUES($1,$2,$3,$4,$5)
+        `INSERT INTO fac_modulos(clave, nombre, icono, grupo, orden, nota) VALUES($1,$2,$3,$4,$5,$6)
          ON CONFLICT (clave) DO UPDATE
            SET nombre=EXCLUDED.nombre, icono=EXCLUDED.icono,
-               grupo=EXCLUDED.grupo, orden=EXCLUDED.orden`,
-        [m.clave, m.nombre, m.icono, m.grupo, m.orden]);
+               grupo=EXCLUDED.grupo, orden=EXCLUDED.orden, nota=EXCLUDED.nota`,
+        [m.clave, m.nombre, m.icono, m.grupo, m.orden, m.nota || null]);
     }
 
     for (const p of PERFILES_SEED) {

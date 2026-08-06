@@ -29,6 +29,11 @@ async function distribuirDiasFIFO(client, empleadoId, diasTotales) {
   return { ok, asignaciones, resumen, faltantes: faltan };
 }
 const { verificarToken, requireRol } = require('../middleware/auth');
+const { permiso, NIVEL } = require('../middleware/permiso');
+
+// Primer modulo migrado al motor de permisos. El nivel Ver deja al colaborador
+// solo con lo suyo; para ver a toda la plantilla hace falta Capturar o mas.
+const verPlantilla = permiso('vacaciones', NIVEL.CAPTURAR);
 
 router.use(verificarToken);
 
@@ -174,7 +179,7 @@ router.delete('/mis-solicitudes/:id', async (req, res) => {
   } finally { client.release(); }
 });
 
-router.get('/empleados', async (req, res) => {
+router.get('/empleados', verPlantilla, async (req, res) => {
   try {
     const r = await query(`
       SELECT e.id, e.nombre, e.puesto, e.departamento, e.fecha_ingreso,
@@ -194,7 +199,7 @@ router.get('/empleados', async (req, res) => {
 // ── REPORTE: PERIODOS POR VENCER ──
 // Cada periodo se gana cuando se cumple ese año de antigüedad
 // Por LFT vencen 6 meses después de cumplido el año
-router.get('/por-vencer', async (req, res) => {
+router.get('/por-vencer', verPlantilla, async (req, res) => {
   try {
     const r = await query(`
       SELECT
@@ -219,7 +224,7 @@ router.get('/por-vencer', async (req, res) => {
 });
 
 // ── DETALLE DE UN EMPLEADO ──
-router.get('/empleados/:id', async (req, res) => {
+router.get('/empleados/:id', verPlantilla, async (req, res) => {
   try {
     const emp = await query(`SELECT * FROM fac_empleados WHERE id=$1`, [req.params.id]);
     if (!emp.rows.length) return res.status(404).json({ error: 'Empleado no encontrado.' });
@@ -455,7 +460,7 @@ async function crearSolicitud(req, res) {
 }
 
 // ── GET SOLICITUD ──
-router.get('/solicitudes/:id', async (req, res) => {
+router.get('/solicitudes/:id', verPlantilla, async (req, res) => {
   try {
     const r = await query(`
       SELECT s.*, e.nombre, e.puesto, e.departamento, e.fecha_ingreso
