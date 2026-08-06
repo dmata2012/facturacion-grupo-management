@@ -521,11 +521,19 @@ router.get('/asistencia', verAsistencia, async (req, res) => {
       [desde, hasta]
     );
 
-    // Ajustes/overrides manuales del rango
+    // Ajustes/overrides manuales del rango. Se trae también el código que tenía
+    // antes del último cambio, para poder mostrar de qué a qué se movió.
     const ajus = await query(
-      `SELECT empleado_id, TO_CHAR(fecha,'YYYY-MM-DD') AS fecha, codigo, notas
-       FROM fac_asistencia_ajustes
-       WHERE fecha BETWEEN $1::date AND $2::date`,
+      `SELECT a.empleado_id, TO_CHAR(a.fecha,'YYYY-MM-DD') AS fecha, a.codigo, a.notas,
+              h.codigo_antes, h.hecho_por_nombre, h.creado_en AS cambiado_en
+         FROM fac_asistencia_ajustes a
+         LEFT JOIN LATERAL (
+           SELECT codigo_antes, hecho_por_nombre, creado_en
+             FROM fac_asistencia_ajustes_hist x
+            WHERE x.empleado_id = a.empleado_id AND x.fecha = a.fecha
+            ORDER BY x.creado_en DESC LIMIT 1
+         ) h ON TRUE
+        WHERE a.fecha BETWEEN $1::date AND $2::date`,
       [desde, hasta]
     );
 
@@ -603,6 +611,12 @@ router.get('/asistencia', verAsistencia, async (req, res) => {
 
         celdas[fecha] = { c: cod, n: aj?.notas || null };
         if (conRetardo) { celdas[fecha].r = minRet; }   // minutos de retardo del día
+        // Rastro del último cambio manual: cómo estaba, quién lo movió y cuándo
+        if (aj?.notas || aj?.codigo) {
+          celdas[fecha].a  = aj.codigo_antes || null;      // código anterior
+          celdas[fecha].qp = aj.hecho_por_nombre || null;  // quién lo cambió
+          celdas[fecha].cf = aj.cambiado_en || null;       // cuándo
+        }
         if (totales[cod] !== undefined) totales[cod]++;
       });
       return {
