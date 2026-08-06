@@ -15348,12 +15348,15 @@ async function loadUsuarios() {
     const d=await api('/usuarios');
     $('usr-table').innerHTML=d.length?`
     <div class="tscroll"><table>
-      <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Activo</th><th>Creado</th><th>Acciones</th></tr></thead>
+      <thead><tr><th>Nombre</th><th>Email</th><th>Perfil</th><th>Expediente</th><th>Activo</th><th>Acciones</th></tr></thead>
       <tbody>${d.map(u=>`<tr>
         <td style="font-weight:600">${u.nombre}</td><td>${u.email}</td>
         <td><span class="badge b-${u.rol==='admin'?'vencida':u.rol==='gerente'?'pagada':'pendiente'}">${u.rol}</span></td>
+        <td>${u.empleado_id
+          ? `<span style="font-size:11.5px;color:#047857;font-weight:700">🔗 ${u.empleado_nombre||'enlazado'}</span>`
+          : `<span style="font-size:11px;color:#b45309;cursor:pointer;font-weight:700" onclick="openUsuario(${u.id})"
+                   title="Sin expediente no puede usar Mis Vacaciones">⚠ Sin enlazar</span>`}</td>
         <td>${u.activo?'✅':'❌'}</td>
-        <td>${fmtDate(u.creado_en)}</td>
         <td style="white-space:nowrap">
             <button class="btn bs bsm" onclick="openAccesosUsuario(${u.id})" title="Configurar a qué entra">🔑 Accesos</button>
             <button class="btn bo bsm" onclick="openUsuario(${u.id})" title="Editar datos">✏️</button>
@@ -15398,7 +15401,7 @@ async function openUsuario(id=null) {
     <button class="btn bs" onclick="saveUsuario(${id||null})">Guardar</button>
   </div>`;
   // Lista de expedientes para poder enlazar el usuario con su empleado
-  api('/empleados').then(emps => {
+  api('/nomina/empleados').then(emps => {
     const sel = $('us-empleado'); if (!sel) return;
     sel.innerHTML = '<option value="">— Sin enlazar —</option>' +
       (emps || []).filter(e => e.activo !== false)
