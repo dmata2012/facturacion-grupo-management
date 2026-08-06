@@ -418,7 +418,7 @@ const MIN_NOTA = 5;
 // POST /api/checador/asistencia/ajuste — insertar o actualizar override + nota
 router.post('/asistencia/ajuste', editarAsistencia, async (req, res) => {
   try {
-    const { empleado_id, fecha, codigo, notas } = req.body;
+    const { empleado_id, fecha, codigo, notas, efectivo_antes } = req.body;
     if (!empleado_id || !fecha) return res.status(400).json({ error: 'empleado_id y fecha requeridos.' });
     const cod = (codigo && codigo !== 'auto') ? String(codigo).trim() : null;
     const not = (notas || '').trim() || null;
@@ -426,8 +426,18 @@ router.post('/asistencia/ajuste', editarAsistencia, async (req, res) => {
     const prev = await query(
       `SELECT codigo, notas FROM fac_asistencia_ajustes WHERE empleado_id=$1 AND fecha=$2`,
       [empleado_id, fecha]);
-    const codAntes = prev.rows[0]?.codigo ?? null;
-    const cambiaIncidencia = cod !== codAntes;
+    const overrideAntes = prev.rows[0]?.codigo ?? null;
+
+    // Lo que cambia el registro es el ajuste manual: por eso la nota se exige
+    // comparando overrides. Poner "automático" donde ya era automático no cambia nada.
+    const cambiaIncidencia = cod !== overrideAntes;
+
+    // Pero para el historial interesa el código que la celda MOSTRABA, no el
+    // override. Si la lista decía "F" porque se calculó así, "cómo estaba" es F,
+    // no "automático". La pantalla lo manda porque es quien lo tiene a la vista.
+    const codAntes = (efectivo_antes && efectivo_antes !== 'auto')
+      ? String(efectivo_antes).trim()
+      : overrideAntes;
 
     // Regla: la incidencia solo se cambia explicando por qué. Cambiar solo la
     // nota sí se permite, porque eso es precisamente documentar mejor.

@@ -10951,7 +10951,10 @@ async function guardarAjusteAsist(empId, fecha) {
   try {
     await api('/checador/asistencia/ajuste', {
       method: 'POST',
-      body: JSON.stringify({ empleado_id: empId, fecha, codigo, notas })
+      // efectivo_antes = el código que la celda mostraba. El servidor no lo sabe:
+      // si venía calculado, en su tabla de ajustes no hay nada que consultar.
+      body: JSON.stringify({ empleado_id: empId, fecha, codigo, notas,
+                             efectivo_antes: window._acOriginal })
     });
     toast('Ajuste guardado.');
     closeModal('modal-asist-cell');
