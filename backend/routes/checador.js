@@ -181,6 +181,100 @@ router.get('/reporte', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/checador/productividad — métricas de productividad por empleado en un periodo
+router.get('/productividad', async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    if (!desde || !hasta) return res.status(400).json({ error: 'Se requieren las fechas desde y hasta.' });
+
+    const empsResult = await query(`
+      SELECT id, nombre, puesto, departamento, numero_colaborador,
+        hora_entrada_esperada, hora_salida_esperada, dias_descanso
+      FROM fac_empleados WHERE activo=TRUE ORDER BY nombre
+    `);
+
+    const registrosResult = await query(`
+      SELECT empleado_id, fecha, hora_entrada, hora_salida,
+        minutos_trabajados, minutos_retardo
+      FROM fac_reloj_checador
+      WHERE fecha >= $1 AND fecha <= $2
+    `, [desde, hasta]);
+
+    const recsByEmp = {};
+    for (const r of registrosResult.rows) {
+      if (!recsByEmp[r.empleado_id]) recsByEmp[r.empleado_id] = [];
+      recsByEmp[r.empleado_id].push(r);
+    }
+
+    // Construir lista de días del periodo con su día de semana (UTC)
+    const diasPeriodo = [];
+    const ini = new Date(desde + 'T12:00:00Z');
+    const fin = new Date(hasta + 'T12:00:00Z');
+    for (let cur = new Date(ini); cur <= fin; cur.setUTCDate(cur.getUTCDate() + 1)) {
+      diasPeriodo.push({ date: cur.toISOString().slice(0, 10), dow: cur.getUTCDay() });
+    }
+
+    const empleados = empsResult.rows.map(emp => {
+      const diasDescanso = emp.dias_descanso
+        ? emp.dias_descanso.split(',').map(Number).filter(n => !isNaN(n))
+        : [0, 6];
+      const diasLaborables = diasPeriodo.filter(d => !diasDescanso.includes(d.dow)).length;
+
+      let horasPorDia = 8;
+      if (emp.hora_entrada_esperada && emp.hora_salida_esperada) {
+        const [eh, em] = emp.hora_entrada_esperada.split(':').map(Number);
+        const [sh, sm] = emp.hora_salida_esperada.split(':').map(Number);
+        const calc = ((sh * 60 + sm) - (eh * 60 + em)) / 60;
+        if (calc > 0) horasPorDia = calc;
+      }
+      const minutosEsperados = diasLaborables * horasPorDia * 60;
+
+      const recs = recsByEmp[emp.id] || [];
+      const diasAsistidos = recs.length;
+      const minutosTrabajados = recs.reduce((s, r) => s + parseInt(r.minutos_trabajados || 0), 0);
+      const diasConRetardo = recs.filter(r => parseInt(r.minutos_retardo || 0) > 0).length;
+      const totalMinutosRetardo = recs.reduce((s, r) => s + parseInt(r.minutos_retardo || 0), 0);
+      const diasSinSalida = recs.filter(r => r.hora_entrada && !r.hora_salida).length;
+
+      const tasaAsistencia = diasLaborables > 0 ? Math.round((diasAsistidos / diasLaborables) * 100) : 0;
+      const tasaPuntualidad = diasAsistidos > 0
+        ? Math.round(((diasAsistidos - diasConRetardo) / diasAsistidos) * 100)
+        : 100;
+      const indiceProductividad = minutosEsperados > 0
+        ? Math.min(100, Math.round((minutosTrabajados / minutosEsperados) * 100))
+        : 0;
+
+      return {
+        id: emp.id,
+        nombre: emp.nombre,
+        puesto: emp.puesto || '',
+        departamento: emp.departamento || '',
+        numero_colaborador: emp.numero_colaborador || '',
+        dias_laborables: diasLaborables,
+        dias_asistidos: diasAsistidos,
+        horas_esperadas: Math.round(minutosEsperados / 60 * 10) / 10,
+        horas_trabajadas: Math.round(minutosTrabajados / 60 * 10) / 10,
+        dias_con_retardo: diasConRetardo,
+        total_minutos_retardo: totalMinutosRetardo,
+        dias_sin_salida: diasSinSalida,
+        tasa_asistencia: tasaAsistencia,
+        tasa_puntualidad: tasaPuntualidad,
+        indice_productividad: indiceProductividad
+      };
+    });
+
+    const n = empleados.length || 1;
+    const totales = {
+      empleados: empleados.length,
+      promedio_asistencia: Math.round(empleados.reduce((s, e) => s + e.tasa_asistencia, 0) / n),
+      promedio_puntualidad: Math.round(empleados.reduce((s, e) => s + e.tasa_puntualidad, 0) / n),
+      promedio_productividad: Math.round(empleados.reduce((s, e) => s + e.indice_productividad, 0) / n)
+    };
+
+    res.json({ empleados, totales });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/checador/asistencia — matriz de asistencia por rango de fechas
 // Codigos por celda:
 //   A  = Asistencia (con registro de entrada)

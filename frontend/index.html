@@ -4059,6 +4059,7 @@ async function checador() {
       <div class="tab" onclick="showTab(this,'ch-tab-hoy');cargarChecadorHoy()">📅 Registros de hoy</div>
       <div class="tab" onclick="showTab(this,'ch-tab-reporte');cargarChecadorReporte()">📊 Reporte por periodo</div>
       <div class="tab" onclick="showTab(this,'ch-tab-asistencia');inicializarAsistencia()">📋 Lista de Asistencia</div>
+      <div class="tab" onclick="showTab(this,'ch-tab-productividad')">📈 Productividad</div>
     </div>`}
 
     <!-- PESTAÑA MARCAR -->
@@ -4170,6 +4171,35 @@ async function checador() {
           <span><span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:#dc2626;color:#fff;font-weight:900;border-radius:50%;box-shadow:0 0 0 1.5px #b91c1c inset">D</span> Descanso</span>
         </div>
         <div id="asist-body"><p class="empty">Selecciona un rango para generar la lista de asistencia.</p></div>
+      </div>
+    </div>
+
+    <!-- PESTAÑA PRODUCTIVIDAD -->
+    <div class="tab-panel" id="ch-tab-productividad">
+      <div class="card">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--gray-d);display:block;margin-bottom:3px">RANGO PRESET</label>
+            <div style="display:flex;gap:4px;flex-wrap:wrap">
+              <button class="btn bo bsm" onclick="setProdPreset('semana')">📅 Esta semana</button>
+              <button class="btn bo bsm" onclick="setProdPreset('q1')">1ª quincena</button>
+              <button class="btn bo bsm" onclick="setProdPreset('q2')">2ª quincena</button>
+              <button class="btn bo bsm" onclick="setProdPreset('mes')">Este mes</button>
+              <button class="btn bo bsm" onclick="setProdPreset('mesant')">Mes anterior</button>
+            </div>
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--gray-d);display:block;margin-bottom:3px">DESDE</label>
+            <input type="date" id="prod-desde">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--gray-d);display:block;margin-bottom:3px">HASTA</label>
+            <input type="date" id="prod-hasta">
+          </div>
+          <button class="btn bs bsm" onclick="cargarProductividad()">🔍 Generar reporte</button>
+          <button class="btn bo bsm" onclick="exportarProductividadExcel()">⬇ Excel</button>
+        </div>
+        <div id="prod-body"><p class="empty">Selecciona un periodo para ver el reporte de productividad.</p></div>
       </div>
     </div>`;
 
@@ -4857,6 +4887,153 @@ async function cargarChecadorReporte() {
         </tr>`).join('')}</tbody>
       </table></div>`:'<p class="empty">Sin registros para estos filtros.</p>'}`;
   } catch(e) { $('chr-body').innerHTML = `<p class="empty">${e.message}</p>`; }
+}
+
+function setProdPreset(p) {
+  const hoy = new Date();
+  const y = hoy.getFullYear(), m = hoy.getMonth(), d = hoy.getDate();
+  const pad = n => String(n).padStart(2, '0');
+  let desde, hasta;
+  if (p === 'semana') {
+    const dw = hoy.getDay();
+    const lunes = new Date(hoy); lunes.setDate(d - (dw === 0 ? 6 : dw - 1));
+    const domingo = new Date(lunes); domingo.setDate(lunes.getDate() + 6);
+    desde = lunes.toISOString().slice(0, 10);
+    hasta = domingo.toISOString().slice(0, 10);
+  } else if (p === 'q1') {
+    desde = `${y}-${pad(m+1)}-01`;
+    hasta = `${y}-${pad(m+1)}-15`;
+  } else if (p === 'q2') {
+    const fin = new Date(y, m+1, 0).getDate();
+    desde = `${y}-${pad(m+1)}-16`;
+    hasta = `${y}-${pad(m+1)}-${pad(fin)}`;
+  } else if (p === 'mes') {
+    const fin = new Date(y, m+1, 0).getDate();
+    desde = `${y}-${pad(m+1)}-01`;
+    hasta = `${y}-${pad(m+1)}-${pad(fin)}`;
+  } else if (p === 'mesant') {
+    const finAnt = new Date(y, m, 0).getDate();
+    const mAnt = m === 0 ? 12 : m;
+    const yAnt = m === 0 ? y - 1 : y;
+    desde = `${yAnt}-${pad(mAnt)}-01`;
+    hasta = `${yAnt}-${pad(mAnt)}-${pad(finAnt)}`;
+  }
+  if ($('prod-desde')) $('prod-desde').value = desde;
+  if ($('prod-hasta')) $('prod-hasta').value = hasta;
+  cargarProductividad();
+}
+
+function _prodBarColor(v) {
+  if (v >= 90) return '#16a34a';
+  if (v >= 70) return '#d97706';
+  return '#dc2626';
+}
+
+function _prodBar(v) {
+  const c = _prodBarColor(v);
+  return `<div style="display:flex;align-items:center;gap:6px">
+    <div style="flex:1;background:#f1f5f9;border-radius:4px;height:8px;overflow:hidden;min-width:60px">
+      <div style="width:${v}%;height:100%;background:${c};border-radius:4px"></div>
+    </div>
+    <span style="color:${c};font-weight:800;font-size:13px;min-width:38px;text-align:right">${v}%</span>
+  </div>`;
+}
+
+window._prodData = null;
+
+async function cargarProductividad() {
+  const desde = $('prod-desde')?.value;
+  const hasta = $('prod-hasta')?.value;
+  if (!desde || !hasta) {
+    $('prod-body').innerHTML = '<p class="empty">Selecciona el periodo completo (desde y hasta).</p>';
+    return;
+  }
+  $('prod-body').innerHTML = '<p class="empty">Calculando productividad...</p>';
+  try {
+    const data = await api(`/checador/productividad?desde=${desde}&hasta=${hasta}`);
+    window._prodData = { ...data, desde, hasta };
+    const t = data.totales;
+    const kpiCls = v => v >= 90 ? 'success' : v >= 70 ? 'warning' : 'danger';
+    $('prod-body').innerHTML = `
+      <div class="kpi-grid" style="margin-bottom:16px">
+        <div class="kpi primary">
+          <div class="kpi-icon">👥</div>
+          <div class="label">Colaboradores</div>
+          <div class="value">${t.empleados}</div>
+        </div>
+        <div class="kpi ${kpiCls(t.promedio_asistencia)}">
+          <div class="kpi-icon">📅</div>
+          <div class="label">Asistencia promedio</div>
+          <div class="value">${t.promedio_asistencia}%</div>
+        </div>
+        <div class="kpi ${kpiCls(t.promedio_puntualidad)}">
+          <div class="kpi-icon">⏰</div>
+          <div class="label">Puntualidad promedio</div>
+          <div class="value">${t.promedio_puntualidad}%</div>
+        </div>
+        <div class="kpi ${kpiCls(t.promedio_productividad)}">
+          <div class="kpi-icon">📈</div>
+          <div class="label">Productividad promedio</div>
+          <div class="value">${t.promedio_productividad}%</div>
+        </div>
+      </div>
+      ${data.empleados.length ? `
+      <div class="tscroll"><table>
+        <thead><tr>
+          <th>N°</th><th>Colaborador</th><th>Puesto</th>
+          <th style="text-align:center">Días Lab.</th>
+          <th style="text-align:center">Asistidos</th>
+          <th style="text-align:center">Faltas</th>
+          <th style="text-align:center">Hrs Esp.</th>
+          <th style="text-align:center">Hrs Trab.</th>
+          <th style="text-align:center">Retardos</th>
+          <th style="text-align:center">Sin salida</th>
+          <th style="min-width:140px">Asistencia</th>
+          <th style="min-width:140px">Puntualidad</th>
+          <th style="min-width:140px">Productividad</th>
+        </tr></thead>
+        <tbody>${data.empleados.map(e => {
+          const faltas = e.dias_laborables - e.dias_asistidos;
+          return `<tr>
+            <td>${e.numero_colaborador || '—'}</td>
+            <td style="font-weight:600;white-space:nowrap">${e.nombre}</td>
+            <td style="font-size:11px;color:var(--muted)">${e.puesto || '—'}</td>
+            <td style="text-align:center">${e.dias_laborables}</td>
+            <td style="text-align:center;color:#166534;font-weight:700">${e.dias_asistidos}</td>
+            <td style="text-align:center;color:${faltas > 0 ? '#dc2626' : 'var(--muted)'};font-weight:${faltas > 0 ? 700 : 400}">${faltas > 0 ? faltas : '—'}</td>
+            <td style="text-align:center">${e.horas_esperadas}h</td>
+            <td style="text-align:center;font-weight:700">${e.horas_trabajadas}h</td>
+            <td style="text-align:center;color:${e.dias_con_retardo > 0 ? '#dc2626' : 'var(--muted)'}">${e.dias_con_retardo > 0 ? e.dias_con_retardo + ' (' + fmtMin(e.total_minutos_retardo) + ')' : '—'}</td>
+            <td style="text-align:center;color:${e.dias_sin_salida > 0 ? '#dc2626' : 'var(--muted)'}">${e.dias_sin_salida > 0 ? e.dias_sin_salida : '—'}</td>
+            <td>${_prodBar(e.tasa_asistencia)}</td>
+            <td>${_prodBar(e.tasa_puntualidad)}</td>
+            <td>${_prodBar(e.indice_productividad)}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>` : '<p class="empty">Sin registros para el periodo seleccionado.</p>'}`;
+  } catch(e) { $('prod-body').innerHTML = `<p class="empty">${e.message}</p>`; }
+}
+
+function exportarProductividadExcel() {
+  const d = window._prodData;
+  if (!d || !d.empleados || !d.empleados.length) {
+    alert('Primero genera el reporte de productividad.');
+    return;
+  }
+  const rows = [['N°','Colaborador','Puesto','Departamento','Días Laborables','Días Asistidos','Faltas','Hrs Esperadas','Hrs Trabajadas','Días c/Retardo','Min Retardo Total','Días Sin Salida','% Asistencia','% Puntualidad','% Productividad']];
+  for (const e of d.empleados) {
+    rows.push([
+      e.numero_colaborador, e.nombre, e.puesto, e.departamento,
+      e.dias_laborables, e.dias_asistidos, e.dias_laborables - e.dias_asistidos,
+      e.horas_esperadas, e.horas_trabajadas,
+      e.dias_con_retardo, e.total_minutos_retardo, e.dias_sin_salida,
+      e.tasa_asistencia + '%', e.tasa_puntualidad + '%', e.indice_productividad + '%'
+    ]);
+  }
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Productividad');
+  XLSX.writeFile(wb, `productividad_${d.desde}_${d.hasta}.xlsx`);
 }
 
 async function editarChecador(id) {
