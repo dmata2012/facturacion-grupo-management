@@ -157,10 +157,10 @@ const PERFILES_SEED = [
         [p.clave, p.nombre, p.descripcion, p.color]);
       const perfilId = r.rows[0].id;
 
-      // Solo se siembra la matriz la primera vez: si ya la ajustaron desde la
-      // pantalla, un reinicio del servidor no debe revertir esos cambios.
-      const ya = await query(`SELECT COUNT(*)::int AS n FROM fac_perfil_permisos WHERE perfil_id=$1`, [perfilId]);
-      if (ya.rows[0].n > 0) continue;
+      // Se recorren SIEMPRE todos los módulos, pero el ON CONFLICT DO NOTHING
+      // solo llena los que faltan. Así un módulo nuevo (agregado después de la
+      // primera siembra) queda accesible para quien corresponde, y lo que ya se
+      // ajustó a mano desde la pantalla no se revierte al reiniciar el servidor.
       for (const clave of TODOS) {
         await query(
           `INSERT INTO fac_perfil_permisos(perfil_id, modulo, nivel) VALUES($1,$2,$3)
