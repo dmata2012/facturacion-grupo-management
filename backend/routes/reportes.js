@@ -513,7 +513,7 @@ router.get('/concentrado', async (req, res) => {
           FROM fac_desglose_rh
          GROUP BY 1
       )
-      SELECT COALESCE(c.nombre,'Sin cliente') AS cliente,
+      SELECT COALESCE(NULLIF(TRIM(c.nombre_comercial),''), c.razon_social, 'Sin cliente') AS cliente,
              pm.mes,
              SUM(pm.pagado * d.comision / NULLIF(f.total,0)) AS comision,
              SUM(pm.pagado * d.otros    / NULLIF(f.total,0)) AS otros
