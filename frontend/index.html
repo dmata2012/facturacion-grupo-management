@@ -642,6 +642,7 @@ canvas{max-height:230px}
           <span class="chev"><svg><use href="#i-chevron"/></svg></span>
         </button>
         <div class="nav-group-items">
+          <a href="#" onclick="nav('concentrado')" id="nav-concentrado"><span class="ni"><svg><use href="#i-chart"/></svg></span> Concentrado Anual</a>
           <a href="#" onclick="nav('estadoCuenta')" id="nav-estadoCuenta"><span class="ni"><svg><use href="#i-doc"/></svg></span> Estado de Cuenta</a>
           <a href="#" onclick="nav('reportes')"     id="nav-reportes"><span class="ni"><svg><use href="#i-clipboard"/></svg></span> Reportes</a>
           <a href="#" onclick="nav('estadisticas')" id="nav-estadisticas"><span class="ni"><svg><use href="#i-chart"/></svg></span> Estadísticas</a>
@@ -1193,12 +1194,13 @@ function nav(page) {
     vacaciones:'Vacaciones', checador:'Reloj Checador', cajaChica:'Caja Chica',
     reportes:'Reportes', estadisticas:'Estadísticas', usuarios:'Usuarios y Permisos',
     catalogo:'Conceptos de Desglose', bancos:'Bancos', gastos:'Gastos (CxP)',
-    misVacaciones:'Mis Vacaciones', asistencia:'Lista de Asistencia'
+    misVacaciones:'Mis Vacaciones', asistencia:'Lista de Asistencia',
+    concentrado:'Concentrado Anual'
   };
   const mt = $('mt-title');
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
-    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones, asistencia
+    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones, asistencia, concentrado
   };
   if (pages[page]) pages[page]();
 }
@@ -3118,6 +3120,16 @@ function openCategoriaGasto(id, volverA) {
       <div class="fi"><label>Orden en el listado</label>
         <input type="number" id="kc-orden" value="${k?.orden ?? 99}" style="text-align:center">
       </div>
+      <div class="fi"><label>Bloque en el Concentrado</label>
+        <select id="kc-bloque">
+          <option value="operacion" ${k?.bloque!=='impuestos'?'selected':''}>Gastos de operación</option>
+          <option value="impuestos" ${k?.bloque==='impuestos'?'selected':''}>Pago de impuestos</option>
+        </select>
+      </div>
+      <div class="fi full" style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:-4px">
+        El Concentrado Anual de Dirección separa los gastos de operación de los pagos de
+        impuestos. Aquí decides en cuál de los dos bloques suman las cuentas de esta categoría.
+      </div>
       <div class="fi full"><label>Color</label>
         <div style="display:flex;gap:7px;flex-wrap:wrap" id="kc-colores">
           ${COLORES_CAT.map(c => `<div onclick="gtElegirColor('${c}')" data-color="${c}"
@@ -3145,7 +3157,8 @@ function gtElegirColor(c) {
 async function guardarCategoriaGasto(id) {
   const nombre = ($('kc-nombre').value || '').trim();
   if (!nombre) return toast('Escribe el nombre de la categoría.', 'warn');
-  const body = { nombre, color: $('kc-color').value, orden: parseInt($('kc-orden').value) || 99 };
+  const body = { nombre, color: $('kc-color').value, orden: parseInt($('kc-orden').value) || 99,
+                 bloque: $('kc-bloque')?.value || 'operacion' };
   const btn = $('kc-btn');
   btn.disabled = true; btn.innerHTML = '<span class="gt-spin"></span> Guardando…';
   // Lo que el usuario ya tenía escrito en el formulario de la cuenta de gasto:
@@ -12099,6 +12112,267 @@ async function guardarPINEmp(empId) {
 }
 
 // ══ VACACIONES ══════════════════════════════
+// ══ CONCENTRADO DE INGRESOS Y GASTOS (Dirección) ══════════════════
+// Reproduce el concentrado anual que dirección llevaba en Excel: conceptos en
+// las filas, los 12 meses en las columnas. El ingreso es solo la comisión y los
+// otros conceptos, no lo facturado: el resto de la factura es dinero de paso.
+const MESES_CON = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+async function concentrado() {
+  const y = new Date().getFullYear();
+  $('content').innerHTML = `
+    <style>
+      .cc-hero{background:linear-gradient(135deg,#0f766e 0%,#115e59 55%,#134e4a 100%);
+        border-radius:16px;padding:22px 26px;color:#fff;margin-bottom:16px;position:relative;overflow:hidden}
+      .cc-hero::after{content:'📊';position:absolute;right:24px;bottom:-22px;font-size:110px;opacity:.08;line-height:1}
+      .cc-hero h2{margin:0;font-size:22px;font-weight:900;letter-spacing:-.3px}
+      .cc-hero .sub{font-size:12.5px;opacity:.85;margin-top:2px}
+      .cc-tabla{width:100%;border-collapse:collapse;font-size:11.5px}
+      .cc-tabla th{position:sticky;top:0;background:#f8fafc;z-index:3;padding:7px 6px;
+        font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);text-align:right}
+      .cc-tabla th.concepto{text-align:left;left:0;z-index:4;min-width:250px}
+      .cc-tabla td{padding:4px 6px;text-align:right;white-space:nowrap;border-bottom:1px solid #f1f5f9}
+      .cc-tabla td.concepto{text-align:left;position:sticky;left:0;background:#fff;z-index:2;
+        border-right:1.5px solid var(--border)}
+      .cc-tabla tr:hover td{background:#f8fafc}
+      .cc-tabla tr:hover td.concepto{background:#f1f5f9}
+      .cc-sec td{background:#0f172a;color:#fff;font-weight:900;font-size:11px;
+        text-transform:uppercase;letter-spacing:1px;padding:8px 6px}
+      .cc-sec td.concepto{background:#0f172a;color:#fff}
+      .cc-sub td{background:#e2e8f0;font-weight:800}
+      .cc-sub td.concepto{background:#e2e8f0}
+      .cc-tot td{background:#134e4a;color:#fff;font-weight:900;font-size:12px;padding:8px 6px}
+      .cc-tot td.concepto{background:#134e4a;color:#fff}
+      .cc-util td{background:#0f766e;color:#fff;font-weight:900;font-size:13px;padding:10px 6px}
+      .cc-util td.concepto{background:#0f766e;color:#fff}
+      .cc-neg{color:#fca5a5}
+      .cc-num{font-variant-numeric:tabular-nums}
+      .cc-cero{color:#cbd5e1}
+      .cc-tot-col{background:#f0fdfa;font-weight:900;color:#0f766e}
+    </style>
+
+    <div class="cc-hero">
+      <h2>Concentrado de Ingresos y Gastos</h2>
+      <div class="sub">Efectivamente cobrados y pagados · Matriz anual por concepto</div>
+    </div>
+
+    <div class="gt-toolbar">
+      <label style="font-size:11px;font-weight:700;color:var(--gray-d)">AÑO</label>
+      <select id="cc-anio" class="gt-filtro" onchange="cargarConcentrado()">
+        ${[y+1,y,y-1,y-2,y-3].map(a=>`<option value="${a}" ${a===y?'selected':''}>${a}</option>`).join('')}
+      </select>
+      <label style="font-size:11px;font-weight:700;color:var(--gray-d);margin-left:8px">GASTOS POR</label>
+      <select id="cc-base" class="gt-filtro" onchange="cargarConcentrado()">
+        <option value="devengado">Fecha del gasto</option>
+        <option value="pagado">Fecha en que se pagó</option>
+      </select>
+      <div style="display:flex;gap:6px;margin-left:auto">
+        <button class="btn bo bsm" onclick="exportarConcentradoExcel()">⬇ Excel</button>
+        <button class="btn bo bsm" onclick="imprimirConcentrado()">🖨 Imprimir</button>
+      </div>
+    </div>
+    <div id="cc-body"><p class="empty">Cargando…</p></div>`;
+  cargarConcentrado();
+}
+
+async function cargarConcentrado() {
+  const anio = $('cc-anio').value, base = $('cc-base').value;
+  $('cc-body').innerHTML = '<p class="empty">Cargando…</p>';
+  try {
+    const d = await api(`/reportes/concentrado?anio=${anio}&base_gasto=${base}`);
+    window._ccData = d;
+    renderConcentrado(d);
+  } catch(e) { $('cc-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+// Las celdas en cero se atenúan: con 12 columnas, un tablero lleno de "0.00"
+// esconde justamente los meses donde sí hubo movimiento.
+function ccNum(v, clase) {
+  const n = parseFloat(v) || 0;
+  if (!n) return `<td class="cc-num cc-cero ${clase||''}">–</td>`;
+  return `<td class="cc-num ${clase||''}${n<0?' cc-neg':''}">${fmt(n)}</td>`;
+}
+
+function renderConcentrado(d) {
+  const fila = (nombre, meses, total, clase, sangria) => `
+    <tr class="${clase||''}">
+      <td class="concepto"${sangria?' style="padding-left:26px"':''}>${nombre}</td>
+      ${meses.map(v => ccNum(v)).join('')}
+      ${ccNum(total, 'cc-tot-col')}
+    </tr>`;
+
+  let html = '';
+
+  // ── INGRESOS ──
+  html += `<tr class="cc-sec"><td class="concepto">Ingresos efectivamente cobrados</td>
+           ${MESES_CON.map(()=>'<td></td>').join('')}<td></td></tr>`;
+  d.ingresos.grupos.forEach(g => {
+    html += fila(g.titulo, g.meses, g.total, 'cc-sub');
+    g.filas.forEach(f => { html += fila(f.nombre, f.meses, f.total, '', true); });
+    if (!g.filas.length)
+      html += `<tr><td class="concepto" style="padding-left:26px;color:var(--muted);font-style:italic">Sin movimientos en ${d.anio}</td>${MESES_CON.map(()=>'<td></td>').join('')}<td></td></tr>`;
+  });
+  html += fila('TOTAL DE INGRESOS', d.ingresos.meses, d.ingresos.total, 'cc-tot');
+
+  // ── GASTOS ──
+  d.gastos.bloques.forEach(b => {
+    html += `<tr class="cc-sec"><td class="concepto">${b.titulo}</td>
+             ${MESES_CON.map(()=>'<td></td>').join('')}<td></td></tr>`;
+    b.filas.forEach((f, i) => {
+      html += `<tr>
+        <td class="concepto"><span style="color:var(--muted);display:inline-block;width:22px">${i+1}</span>${f.nombre}</td>
+        ${f.meses.map(v => ccNum(v)).join('')}
+        ${ccNum(f.total, 'cc-tot-col')}
+      </tr>`;
+    });
+    if (!b.filas.length) {
+      const aviso = b.clave === 'impuestos' && !d.categorias_impuestos
+        ? 'Ninguna categoría está marcada como impuestos. Márcala en Gastos → Catálogo → ✏️ de la categoría.'
+        : `Sin movimientos en ${d.anio}`;
+      html += `<tr><td class="concepto" style="padding-left:26px;color:var(--muted);font-style:italic">${aviso}</td>${MESES_CON.map(()=>'<td></td>').join('')}<td></td></tr>`;
+    }
+    html += fila(`TOTAL ${b.titulo}`, b.meses, b.total, 'cc-sub');
+  });
+  html += fila('TOTAL DE GASTOS', d.gastos.meses, d.gastos.total, 'cc-tot');
+  html += fila('UTILIDAD', d.utilidad.meses, d.utilidad.total, 'cc-util');
+
+  const neg = d.utilidad.meses.filter(v => v < 0).length;
+  $('cc-body').innerHTML = `
+    <div class="gt-cards" style="margin-bottom:14px">
+      <div class="gt-card viva"><div class="ic">📥</div>
+        <div class="l">Ingresos cobrados</div><div class="v">${fmt(d.ingresos.total)}</div>
+        <div class="s">Comisiones y otros conceptos</div></div>
+      <div class="gt-card total"><div class="ic">📤</div>
+        <div class="l">Gastos</div><div class="v">${fmt(d.gastos.total)}</div>
+        <div class="s">${d.base_gasto === 'pagado' ? 'Por fecha de pago' : 'Por fecha del gasto'}</div></div>
+      <div class="gt-card ${d.utilidad.total >= 0 ? 'viva' : 'cancel'}"><div class="ic">${d.utilidad.total >= 0 ? '📈' : '📉'}</div>
+        <div class="l">Utilidad del año</div><div class="v">${fmt(d.utilidad.total)}</div>
+        <div class="s">${neg ? `${neg} mes${neg!=1?'es':''} en números rojos` : 'Todos los meses en positivo'}</div></div>
+      <div class="gt-card total"><div class="ic">％</div>
+        <div class="l">Margen</div>
+        <div class="v">${d.ingresos.total > 0 ? (d.utilidad.total / d.ingresos.total * 100).toFixed(1) + '%' : '—'}</div>
+        <div class="s">Utilidad sobre ingresos</div></div>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="tscroll" style="max-height:70vh;overflow:auto">
+        <table class="cc-tabla">
+          <thead><tr>
+            <th class="concepto">Concepto</th>
+            ${MESES_CON.map(m => `<th style="min-width:82px">${m}</th>`).join('')}
+            <th style="min-width:96px;background:#f0fdfa;color:#0f766e">Totales</th>
+          </tr></thead>
+          <tbody>${html}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px;font-size:11.5px;color:var(--muted);line-height:1.6">
+      <strong>Cómo se calcula.</strong> El ingreso no es lo facturado: de cada factura solo se
+      toman los conceptos de <strong>Comisiones</strong> y <strong>Otros</strong> del desglose,
+      porque el resto (sueldos, IMSS, ISN) es dinero que pasa por la empresa y no le pertenece.
+      Se reconocen por <strong>fecha de pago</strong>, y un abono parcial aporta comisión en la
+      misma proporción que cubre de la factura.
+      ${d.base_gasto === 'pagado'
+        ? ' Los gastos cuentan solo si están liquidados, en el mes en que se pagaron.'
+        : ' Los gastos cuentan por la fecha del gasto, se hayan pagado o no.'}
+    </div>`;
+}
+
+function exportarConcentradoExcel() {
+  const d = window._ccData;
+  if (!d) return toast('No hay datos para exportar.', 'warn');
+  if (typeof XLSX === 'undefined') return toast('Librería XLSX no disponible.', 'err');
+
+  const aoa = [
+    ['GRUPO MANAGEMENT'],
+    [`CONCENTRADO DE GASTOS E INGRESOS EFECTIVAMENTE PAGADOS DE ENERO A DICIEMBRE ${d.anio}`],
+    [`Generado: ${new Date().toLocaleString('es-MX')}`], [],
+    ['CONCEPTO', ...MESES_CON.map(m => m.toUpperCase()), 'TOTALES']
+  ];
+  const push = (nombre, meses, total) => aoa.push([nombre, ...meses.map(v => parseFloat(v)||0), parseFloat(total)||0]);
+
+  aoa.push(['INGRESOS EFECTIVAMENTE COBRADOS']);
+  d.ingresos.grupos.forEach(g => {
+    push(g.titulo, g.meses, g.total);
+    g.filas.forEach(f => push('   ' + f.nombre, f.meses, f.total));
+  });
+  push('TOTAL DE INGRESOS', d.ingresos.meses, d.ingresos.total);
+  aoa.push([]);
+  d.gastos.bloques.forEach(b => {
+    aoa.push([b.titulo]);
+    b.filas.forEach((f, i) => push(`${i+1}. ${f.nombre}`, f.meses, f.total));
+    push(`TOTAL ${b.titulo}`, b.meses, b.total);
+    aoa.push([]);
+  });
+  push('TOTAL DE GASTOS', d.gastos.meses, d.gastos.total);
+  push('UTILIDAD', d.utilidad.meses, d.utilidad.total);
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:44}, ...MESES_CON.map(()=>({wch:14})), {wch:16}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, `Concentrado ${d.anio}`);
+  XLSX.writeFile(wb, `Concentrado_${d.anio}.xlsx`);
+}
+
+function imprimirConcentrado() {
+  const d = window._ccData;
+  if (!d) return toast('No hay datos para imprimir.', 'warn');
+  const n = v => (parseFloat(v)||0) ? fmt(v) : '–';
+  const fila = (nombre, meses, total, clase, sangria) => `
+    <tr class="${clase||''}">
+      <td class="c"${sangria?' style="padding-left:14px"':''}>${nombre}</td>
+      ${meses.map(v=>`<td>${n(v)}</td>`).join('')}<td class="tt">${n(total)}</td>
+    </tr>`;
+
+  let filas = `<tr class="sec"><td class="c" colspan="14">INGRESOS EFECTIVAMENTE COBRADOS</td></tr>`;
+  d.ingresos.grupos.forEach(g => {
+    filas += fila(g.titulo, g.meses, g.total, 'sub');
+    g.filas.forEach(f => { filas += fila(f.nombre, f.meses, f.total, '', true); });
+  });
+  filas += fila('TOTAL DE INGRESOS', d.ingresos.meses, d.ingresos.total, 'tot');
+  d.gastos.bloques.forEach(b => {
+    filas += `<tr class="sec"><td class="c" colspan="14">${b.titulo}</td></tr>`;
+    b.filas.forEach((f,i) => { filas += fila(`${i+1}. ${f.nombre}`, f.meses, f.total, '', true); });
+    filas += fila(`TOTAL ${b.titulo}`, b.meses, b.total, 'sub');
+  });
+  filas += fila('TOTAL DE GASTOS', d.gastos.meses, d.gastos.total, 'tot');
+  filas += fila('UTILIDAD', d.utilidad.meses, d.utilidad.total, 'util');
+
+  const w = window.open('', '_blank');
+  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+    <title>Concentrado ${d.anio} — Grupo Management</title>
+    <style>
+      @page{size:landscape;margin:10mm}
+      body{font-family:'Segoe UI',Arial,sans-serif;font-size:8px;margin:0;color:#111}
+      h1{font-size:13px;letter-spacing:3px;text-align:center;margin:0 0 2px}
+      h2{font-size:9.5px;text-align:center;margin:0 0 10px;font-weight:700}
+      table{width:100%;border-collapse:collapse}
+      th{background:#eef2f7;padding:4px 3px;font-size:7.5px;text-transform:uppercase;
+         text-align:right;border-bottom:1.5px solid #111}
+      th.c{text-align:left}
+      td{padding:2.5px 3px;text-align:right;border-bottom:.5px solid #e5e7eb;white-space:nowrap}
+      td.c{text-align:left}
+      .sec td{background:#111;color:#fff;font-weight:800;letter-spacing:1px;padding:4px}
+      .sub td{background:#e5e7eb;font-weight:800}
+      .tot td{background:#374151;color:#fff;font-weight:800}
+      .util td{background:#0f766e;color:#fff;font-weight:800;font-size:9px}
+      .tt{font-weight:800}
+      .pie{margin-top:8px;font-size:7px;color:#666;text-align:right}
+    </style></head><body>
+    <h1>G R U P O   M A N A G E M E N T</h1>
+    <h2>CONCENTRADO DE GASTOS E INGRESOS EFECTIVAMENTE PAGADOS DE ENERO A DICIEMBRE ${d.anio}</h2>
+    <table>
+      <thead><tr><th class="c">Concepto</th>
+        ${MESES_CON.map(m=>`<th>${m.toUpperCase()}</th>`).join('')}<th>TOTALES</th></tr></thead>
+      <tbody>${filas}</tbody>
+    </table>
+    <div class="pie">Impreso el ${new Date().toLocaleString('es-MX')}</div>
+    </body></html>`);
+  w.document.close();
+  setTimeout(() => { w.focus(); w.print(); }, 350);
+}
+
 // ══ MIS VACACIONES (autoservicio) ════════════════════
 // Pantalla acotada al propio expediente: es la que hace posible dar acceso a
 // toda la plantilla sin exponerle los saldos ni las solicitudes de los demás.

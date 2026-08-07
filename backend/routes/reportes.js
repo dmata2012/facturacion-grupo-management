@@ -7,7 +7,7 @@ router.use(verificarToken);
 // Los reportes son solo para admin, con una excepción: el Estado de Cuenta
 // también lo consulta gerencia (es una vista de saldos por cliente, no un reporte
 // operativo). Si en el futuro se abren más reportes a gerente, agregarlos aquí.
-const RUTAS_GERENCIA = ['/estado-cuenta'];
+const RUTAS_GERENCIA = ['/estado-cuenta', '/concentrado'];
 router.use((req, res, next) => {
   const roles = RUTAS_GERENCIA.includes(req.path) ? ['admin','gerente'] : ['admin'];
   return requireRol(...roles)(req, res, next);
@@ -474,6 +474,132 @@ router.get('/cliente/:id', async (req, res) => {
 
     if (!cliente.rows.length) return res.status(404).json({ error: 'Cliente no encontrado.' });
     res.json({ cliente: cliente.rows[0], mensual: mensual.rows, rh: rh.rows, historial: historial.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══ CONCENTRADO DE INGRESOS Y GASTOS ═══════════════════════════════
+// Matriz concepto × mes del año, en el formato que dirección ya usaba en Excel.
+//
+// El ingreso NO es lo facturado: el grupo factura la nómina completa del cliente
+// (sueldos, IMSS, ISN…) pero de eso solo le pertenece la comisión. El resto es
+// dinero de paso. Por eso el bloque de ingresos toma únicamente los conceptos de
+// desglose de Comisiones y Otros.
+//
+// base=cobrado (predeterminado): los ingresos se reconocen cuando entran, por
+// fecha de pago, que es lo que significa "efectivamente cobrado".
+router.get('/concentrado', async (req, res) => {
+  try {
+    const anio = parseInt(req.query.anio) || new Date().getFullYear();
+    const baseGasto = req.query.base_gasto === 'pagado' ? 'pagado' : 'devengado';
+    const vacio = () => Array(12).fill(0);
+
+    // ── INGRESOS: la parte cobrada que corresponde a comisión y a otros ──
+    // Un pago cubre una porción de la factura, así que se reparte en la misma
+    // proporción que el desglose. Sin esto, un abono parcial contaría comisión
+    // completa y el mes saldría inflado.
+    const ing = await query(`
+      WITH pagos_mes AS (
+        SELECT p.factura_id,
+               EXTRACT(MONTH FROM p.fecha_pago)::int AS mes,
+               SUM(p.monto) AS pagado
+          FROM fac_pagos p
+         WHERE EXTRACT(YEAR FROM p.fecha_pago) = $1
+         GROUP BY 1, 2
+      ),
+      desg AS (
+        SELECT factura_id,
+               COALESCE(SUM(monto) FILTER (WHERE UPPER(concepto) LIKE '%COMISI%'),0) AS comision,
+               COALESCE(SUM(monto) FILTER (WHERE UPPER(concepto) LIKE '%OTRO%'),0)   AS otros
+          FROM fac_desglose_rh
+         GROUP BY 1
+      )
+      SELECT COALESCE(c.nombre,'Sin cliente') AS cliente,
+             pm.mes,
+             SUM(pm.pagado * d.comision / NULLIF(f.total,0)) AS comision,
+             SUM(pm.pagado * d.otros    / NULLIF(f.total,0)) AS otros
+        FROM pagos_mes pm
+        JOIN fac_facturas f ON f.id = pm.factura_id
+        LEFT JOIN fac_clientes c ON c.id = f.cliente_id
+        JOIN desg d ON d.factura_id = pm.factura_id
+       GROUP BY 1, 2
+    `, [anio]);
+
+    const armaGrupo = (titulo, campo) => {
+      const porCliente = {};
+      ing.rows.forEach(r => {
+        const v = parseFloat(r[campo]) || 0;
+        if (!v) return;
+        const f = porCliente[r.cliente] || (porCliente[r.cliente] = { nombre: r.cliente, meses: vacio(), total: 0 });
+        f.meses[r.mes - 1] += v;
+        f.total += v;
+      });
+      const filas = Object.values(porCliente).sort((a, b) => b.total - a.total);
+      const meses = vacio();
+      filas.forEach(f => f.meses.forEach((v, i) => { meses[i] += v; }));
+      return { titulo, filas, meses, total: meses.reduce((a, b) => a + b, 0) };
+    };
+    const grupos = [armaGrupo('COMISIONES', 'comision'), armaGrupo('OTROS INGRESOS', 'otros')];
+    const mesesIng = vacio();
+    grupos.forEach(g => g.meses.forEach((v, i) => { mesesIng[i] += v; }));
+
+    // ── GASTOS: por concepto, separados en bloques según su categoría ──
+    // Con base "pagado" solo cuenta lo liquidado y en el mes en que se pagó; el
+    // gasto sin fecha de pago simplemente no aparece.
+    const campoFecha = baseGasto === 'pagado' ? 'g.fecha_pago' : 'g.fecha';
+    const filtroPago = baseGasto === 'pagado'
+      ? 'AND g.fecha_pago IS NOT NULL AND COALESCE(g.pagado,0) > 0' : '';
+    const montoCol = baseGasto === 'pagado' ? 'LEAST(COALESCE(g.pagado,0), g.monto)' : 'g.monto';
+
+    const gas = await query(`
+      SELECT COALESCE(k.bloque,'operacion')          AS bloque,
+             COALESCE(c.nombre,'Sin clasificar')     AS concepto,
+             COALESCE(c.orden, 999)                  AS orden,
+             COALESCE(k.nombre,'Sin categoría')      AS categoria,
+             EXTRACT(MONTH FROM ${campoFecha})::int  AS mes,
+             SUM(${montoCol})                        AS monto
+        FROM fac_gastos g
+        LEFT JOIN fac_gastos_conceptos  c ON c.id = g.concepto_id
+        LEFT JOIN fac_gastos_categorias k ON k.id = c.categoria_id
+       WHERE EXTRACT(YEAR FROM ${campoFecha}) = $1 ${filtroPago}
+       GROUP BY 1, 2, 3, 4, 5
+    `, [anio]);
+
+    const armaBloque = (titulo, clave) => {
+      const porConcepto = {};
+      gas.rows.filter(r => r.bloque === clave).forEach(r => {
+        const v = parseFloat(r.monto) || 0;
+        const f = porConcepto[r.concepto] ||
+          (porConcepto[r.concepto] = { nombre: r.concepto, categoria: r.categoria, orden: r.orden, meses: vacio(), total: 0 });
+        f.meses[r.mes - 1] += v;
+        f.total += v;
+      });
+      const filas = Object.values(porConcepto).sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre));
+      const meses = vacio();
+      filas.forEach(f => f.meses.forEach((v, i) => { meses[i] += v; }));
+      return { titulo, clave, filas, meses, total: meses.reduce((a, b) => a + b, 0) };
+    };
+    const bloques = [
+      armaBloque('GASTOS DE OPERACIÓN', 'operacion'),
+      armaBloque('GASTOS DE PAGO DE IMPUESTOS', 'impuestos')
+    ];
+    const mesesGas = vacio();
+    bloques.forEach(b => b.meses.forEach((v, i) => { mesesGas[i] += v; }));
+
+    const utilidad = mesesIng.map((v, i) => v - mesesGas[i]);
+
+    // Cuántas categorías están marcadas como impuestos: si son cero, la pantalla
+    // explica que el bloque sale vacío porque falta clasificarlas, no por falta
+    // de datos.
+    const catImp = await query(
+      `SELECT COUNT(*)::int AS n FROM fac_gastos_categorias WHERE bloque='impuestos' AND activa`);
+
+    res.json({
+      anio, base_gasto: baseGasto,
+      ingresos: { grupos, meses: mesesIng, total: mesesIng.reduce((a, b) => a + b, 0) },
+      gastos:   { bloques, meses: mesesGas, total: mesesGas.reduce((a, b) => a + b, 0) },
+      utilidad: { meses: utilidad, total: utilidad.reduce((a, b) => a + b, 0) },
+      categorias_impuestos: catImp.rows[0].n
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

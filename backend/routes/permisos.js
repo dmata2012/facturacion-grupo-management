@@ -12,6 +12,8 @@ const MODULOS_SEED = [
   { clave:'dashboard',    nombre:'Dashboard',           icono:'📊', grupo:'Principal',            orden:1  },
   { clave:'facturas',     nombre:'Facturas',            icono:'🧾', grupo:'Ingresos (CxC)',       orden:10 },
   { clave:'cobranza',     nombre:'Cobranza',            icono:'💰', grupo:'Ingresos (CxC)',       orden:11 },
+  { clave:'concentrado',  nombre:'Concentrado Anual',   icono:'📊', grupo:'Dirección',            orden:5,
+    nota:'Ingresos cobrados contra gastos, mes a mes. Solo toma comisiones y otros conceptos como ingreso.' },
   { clave:'estadoCuenta', nombre:'Estado de Cuenta',    icono:'📑', grupo:'Dirección',            orden:6  },
   { clave:'clientes',     nombre:'Clientes',            icono:'🏢', grupo:'Ingresos (CxC)',       orden:13 },
   { clave:'gastos',       nombre:'Gastos (CxP)',        icono:'📤', grupo:'Gastos (CxP)',         orden:20 },

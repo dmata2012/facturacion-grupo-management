@@ -139,6 +139,14 @@ const CATEGORIAS_SEED = [
         creado_en TIMESTAMP DEFAULT NOW()
       )`);
     await query(`ALTER TABLE fac_gastos_conceptos ADD COLUMN IF NOT EXISTS categoria_id INT REFERENCES fac_gastos_categorias(id) ON DELETE SET NULL`);
+    // Bloque del concentrado directivo: el reporte separa los gastos de operación
+    // de los pagos de impuestos, y esa separación se define por categoría.
+    await query(`ALTER TABLE fac_gastos_categorias ADD COLUMN IF NOT EXISTS bloque TEXT DEFAULT 'operacion'`);
+    await query(`UPDATE fac_gastos_categorias SET bloque='operacion' WHERE bloque IS NULL`);
+    await query(
+      `INSERT INTO fac_gastos_categorias(nombre, color, orden, bloque)
+       VALUES('Impuestos y Contribuciones','#b91c1c',90,'impuestos')
+       ON CONFLICT (nombre) DO NOTHING`);
 
     // El concepto pasa a ser opcional: un gasto importado por XML llega sin clasificar
     await query(`ALTER TABLE fac_gastos ALTER COLUMN concepto_id DROP NOT NULL`);
@@ -253,12 +261,13 @@ router.get('/categorias', async (req, res) => {
 
 router.post('/categorias', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
   try {
-    const { nombre, color, orden } = req.body;
+    const { nombre, color, orden, bloque } = req.body;
     if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Nombre requerido.' });
     const r = await query(
-      `INSERT INTO fac_gastos_categorias(nombre, color, orden) VALUES($1,$2,$3)
+      `INSERT INTO fac_gastos_categorias(nombre, color, orden, bloque) VALUES($1,$2,$3,$4)
        ON CONFLICT (nombre) DO UPDATE SET activa=TRUE, color=EXCLUDED.color RETURNING *`,
-      [nombre.trim(), color || '#d97706', parseInt(orden) || 99]
+      [nombre.trim(), color || '#d97706', parseInt(orden) || 99,
+       ['operacion','impuestos'].includes(bloque) ? bloque : 'operacion']
     );
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -266,11 +275,13 @@ router.post('/categorias', requireRol('admin', 'capturista', 'tesoreria', 'geren
 
 router.put('/categorias/:id', requireRol('admin', 'gerente', 'tesoreria', 'capturista'), async (req, res) => {
   try {
-    const { nombre, color, orden } = req.body;
+    const { nombre, color, orden, bloque } = req.body;
     if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Nombre requerido.' });
     await query(
-      `UPDATE fac_gastos_categorias SET nombre=$1, color=$2, orden=$3 WHERE id=$4`,
-      [nombre.trim(), color || '#d97706', parseInt(orden) || 99, req.params.id]
+      `UPDATE fac_gastos_categorias SET nombre=$1, color=$2, orden=$3,
+              bloque = COALESCE($4, bloque) WHERE id=$5`,
+      [nombre.trim(), color || '#d97706', parseInt(orden) || 99,
+       ['operacion','impuestos'].includes(bloque) ? bloque : null, req.params.id]
     );
     res.json({ ok: true });
   } catch (e) {
