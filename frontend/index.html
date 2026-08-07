@@ -527,6 +527,19 @@ canvas{max-height:230px}
       <a href="#" onclick="nav('dashboard')" id="nav-dashboard" style="margin-top:8px"><span class="ni">📊</span> Dashboard</a>
       <a href="#" onclick="nav('misVacaciones')" id="nav-misVacaciones"><span class="ni">🏖</span> Mis Vacaciones</a>
 
+      <div class="nav-group" data-group="direccion">
+        <button class="nav-group-toggle" onclick="toggleNavGroup('direccion')">
+          <span class="nav-group-label"><span class="nav-group-icon">🎯</span> Dirección</span>
+          <span class="chev">▶</span>
+        </button>
+        <div class="nav-group-items">
+          <a href="#" onclick="nav('estadoCuenta')" id="nav-estadoCuenta"><span class="ni">📑</span> Estado de Cuenta</a>
+          <a href="#" onclick="nav('reportes')"     id="nav-reportes"><span class="ni">📋</span> Reportes</a>
+          <a href="#" onclick="nav('estadisticas')" id="nav-estadisticas"><span class="ni">📈</span> Estadísticas</a>
+        </div>
+      </div>
+
+
       <div class="nav-group" data-group="operacion">
         <button class="nav-group-toggle" onclick="toggleNavGroup('operacion')">
           <span class="nav-group-label"><span class="nav-group-icon">📥</span> Ingresos (CxC)</span>
@@ -584,18 +597,6 @@ canvas{max-height:230px}
         </button>
         <div class="nav-group-items">
           <a href="#" onclick="nav('bancos')" id="nav-bancos"><span class="ni">🏦</span> Cuentas Bancarias</a>
-        </div>
-      </div>
-
-      <div class="nav-group" data-group="direccion">
-        <button class="nav-group-toggle" onclick="toggleNavGroup('direccion')">
-          <span class="nav-group-label"><span class="nav-group-icon">🎯</span> Dirección</span>
-          <span class="chev">▶</span>
-        </button>
-        <div class="nav-group-items">
-          <a href="#" onclick="nav('estadoCuenta')" id="nav-estadoCuenta"><span class="ni">📑</span> Estado de Cuenta</a>
-          <a href="#" onclick="nav('reportes')"     id="nav-reportes"><span class="ni">📋</span> Reportes</a>
-          <a href="#" onclick="nav('estadisticas')" id="nav-estadisticas"><span class="ni">📈</span> Estadísticas</a>
         </div>
       </div>
 
