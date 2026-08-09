@@ -4,6 +4,23 @@ const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
 
+// ── ACUERDOS (%) ──────────────────────────────
+// Porcentaje pactado con el cliente. Si no se captura nada se asume 16%.
+const ACUERDOS_DEFAULT = 16;
+
+(async () => {
+  try {
+    await query(`ALTER TABLE fac_clientes ADD COLUMN IF NOT EXISTS acuerdos NUMERIC(5,2) NOT NULL DEFAULT ${ACUERDOS_DEFAULT}`);
+  } catch (e) { console.warn('Migración acuerdos:', e.message); }
+})();
+
+// Vacío / inválido → 16. Un 0 capturado a propósito sí se respeta.
+function normalizarAcuerdos(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return ACUERDOS_DEFAULT;
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : ACUERDOS_DEFAULT;
+}
+
 // GET /api/clientes
 router.get('/', async (req, res) => {
   try {
@@ -53,7 +70,7 @@ router.post('/', requireRol('admin', 'capturista'), async (req, res) => {
   try {
     const {
       rfc, razon_social, nombre_comercial, contacto, email, telefono,
-      direccion, ciudad, notas, comision,
+      direccion, ciudad, notas, comision, acuerdos,
       contacto_admin, contacto_pagos, whatsapp,
       dias_credito, condiciones_pago, ejecutivo_cuenta,
       aplica_desglose
@@ -62,13 +79,14 @@ router.post('/', requireRol('admin', 'capturista'), async (req, res) => {
     const r = await query(
       `INSERT INTO fac_clientes(
          rfc,razon_social,nombre_comercial,contacto,email,telefono,
-         direccion,ciudad,notas,comision,
+         direccion,ciudad,notas,comision,acuerdos,
          contacto_admin,contacto_pagos,whatsapp,
          dias_credito,condiciones_pago,ejecutivo_cuenta,aplica_desglose
-       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
       [
         rfc.toUpperCase(), razon_social, nombre_comercial, contacto,
         email, telefono, direccion, ciudad, notas, parseFloat(comision)||0,
+        normalizarAcuerdos(acuerdos),
         contacto_admin||null, contacto_pagos||null, whatsapp||null,
         parseInt(dias_credito)||0, condiciones_pago||null, ejecutivo_cuenta||null,
         aplica_desglose !== false
@@ -86,7 +104,7 @@ router.put('/:id', requireRol('admin', 'capturista'), async (req, res) => {
   try {
     const {
       rfc, razon_social, nombre_comercial, contacto, email, telefono,
-      direccion, ciudad, activo, notas, comision,
+      direccion, ciudad, activo, notas, comision, acuerdos,
       contacto_admin, contacto_pagos, whatsapp,
       dias_credito, condiciones_pago, ejecutivo_cuenta,
       aplica_desglose
@@ -95,14 +113,16 @@ router.put('/:id', requireRol('admin', 'capturista'), async (req, res) => {
       `UPDATE fac_clientes SET
          rfc=$1, razon_social=$2, nombre_comercial=$3, contacto=$4, email=$5,
          telefono=$6, direccion=$7, ciudad=$8, activo=$9, notas=$10, comision=$11,
-         contacto_admin=$12, contacto_pagos=$13, whatsapp=$14,
-         dias_credito=$15, condiciones_pago=$16, ejecutivo_cuenta=$17,
-         aplica_desglose=$18,
+         acuerdos=$12,
+         contacto_admin=$13, contacto_pagos=$14, whatsapp=$15,
+         dias_credito=$16, condiciones_pago=$17, ejecutivo_cuenta=$18,
+         aplica_desglose=$19,
          actualizado_en=NOW()
-       WHERE id=$19`,
+       WHERE id=$20`,
       [
         rfc?.toUpperCase(), razon_social, nombre_comercial, contacto,
         email, telefono, direccion, ciudad, activo, notas, parseFloat(comision)||0,
+        normalizarAcuerdos(acuerdos),
         contacto_admin||null, contacto_pagos||null, whatsapp||null,
         parseInt(dias_credito)||0, condiciones_pago||null, ejecutivo_cuenta||null,
         aplica_desglose !== false,

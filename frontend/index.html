@@ -7551,7 +7551,7 @@ async function loadClientes() {
     const d = await api(url);
     $('cl-table').innerHTML = d.length ? `
     <div class="tscroll"><table>
-      <thead><tr><th>RFC</th><th>Razón social</th><th>Ciudad</th><th>Ejecutivo</th><th>Días cred.</th><th>Comisión</th><th>Facturas</th><th>Facturado</th><th>Cobrado</th><th>Estatus</th><th>Acciones</th></tr></thead>
+      <thead><tr><th>RFC</th><th>Razón social</th><th>Ciudad</th><th>Ejecutivo</th><th>Días cred.</th><th>Comisión</th><th>Acuerdos</th><th>Facturas</th><th>Facturado</th><th>Cobrado</th><th>Estatus</th><th>Acciones</th></tr></thead>
       <tbody>${d.map(c=>`<tr>
         <td style="font-weight:600">${c.rfc}</td>
         <td>${c.razon_social}${c.nombre_comercial?`<br><span style="color:var(--muted);font-size:11px">${c.nombre_comercial}</span>`:''}</td>
@@ -7559,6 +7559,7 @@ async function loadClientes() {
         <td style="font-size:11px">${c.ejecutivo_cuenta||'—'}</td>
         <td style="text-align:center">${parseInt(c.dias_credito||0)>0?`<span class="badge b-parcial">${c.dias_credito}d</span>`:'<span style="color:var(--muted)">—</span>'}</td>
         <td style="text-align:center">${parseFloat(c.comision||0)>0?`<span class="badge b-parcial">${parseFloat(c.comision).toFixed(2)}%</span>`:'<span style="color:var(--muted)">—</span>'}</td>
+        <td style="text-align:center">${c.acuerdos!=null?`<span class="badge b-pagada">${parseFloat(c.acuerdos).toFixed(2)}%</span>`:'<span style="color:var(--muted)">—</span>'}</td>
         <td>${c.total_facturas||0}</td>
         <td>${fmt(c.total_facturado)}</td>
         <td style="color:var(--success)">${fmt(c.total_cobrado)}</td>
@@ -7600,6 +7601,7 @@ function openCliente(id=null, rfcPre='') {
     ${sec('💼 Condiciones Comerciales')}
     <div class="fi"><label>Días de crédito</label><input type="number" id="cc-dias" min="0" step="1" placeholder="0" value="0"></div>
     <div class="fi"><label>Comisión (%)</label><input type="number" id="cc-comision" min="0" max="100" step="0.01" placeholder="0.00"></div>
+    <div class="fi"><label>Acuerdos (%)</label><input type="number" id="cc-acuerdos" min="0" max="100" step="0.01" placeholder="16.00" value="16"></div>
     <div class="fi"><label>Condiciones de pago</label><input id="cc-condpago" placeholder="Ej: 30 días neto, anticipo 50%"></div>
     <div class="fi"><label>Ejecutivo de cuenta</label><input id="cc-ejecutivo" placeholder="Nombre del ejecutivo asignado"></div>
 
@@ -7636,6 +7638,7 @@ async function loadClienteEdit(id) {
     $('cc-tel').value       = c.telefono          || '';
     $('cc-ciudad').value    = c.ciudad            || '';
     $('cc-comision').value  = c.comision          || '';
+    $('cc-acuerdos').value  = c.acuerdos          ?? 16;
     $('cc-dir').value       = c.direccion         || '';
     $('cc-notas').value     = c.notas             || '';
     $('cc-cadmin').value    = c.contacto_admin    || '';
@@ -7658,6 +7661,7 @@ async function saveCliente(id) {
     telefono:         $('cc-tel').value.trim(),
     ciudad:           $('cc-ciudad').value.trim(),
     comision:         $('cc-comision').value,
+    acuerdos:         $('cc-acuerdos').value,
     direccion:        $('cc-dir').value.trim(),
     notas:            $('cc-notas').value.trim(),
     contacto_admin:   $('cc-cadmin').value.trim(),
