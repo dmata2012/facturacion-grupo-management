@@ -12129,8 +12129,30 @@ async function concentrado() {
       .cc-hero{background:linear-gradient(135deg,#0f766e 0%,#115e59 55%,#134e4a 100%);
         border-radius:16px;padding:22px 26px;color:#fff;margin-bottom:16px;position:relative;overflow:hidden}
       .cc-hero::after{content:'📊';position:absolute;right:24px;bottom:-22px;font-size:110px;opacity:.08;line-height:1}
-      .cc-hero h2{margin:0;font-size:22px;font-weight:900;letter-spacing:-.3px}
-      .cc-hero .sub{font-size:12.5px;opacity:.85;margin-top:2px}
+      .cc-hero{padding:16px 20px}
+      .cc-hero::after{font-size:88px;right:16px;bottom:-18px}
+      .cc-hero h2{margin:0;font-size:18px;font-weight:900;letter-spacing:-.3px}
+      .cc-hero .sub{font-size:11px;opacity:.8;margin-top:1px}
+      .cc-hero-t{display:flex;justify-content:space-between;align-items:center;
+        gap:14px;flex-wrap:wrap;position:relative;z-index:1}
+      .cc-ctrl{display:flex;gap:6px;align-items:center}
+      .cc-ctrl select,.cc-ctrl button{
+        background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);
+        color:#fff;border-radius:8px;padding:6px 10px;font-size:11.5px;font-weight:700;
+        cursor:pointer;font-family:inherit}
+      .cc-ctrl select option{color:#111}
+      .cc-ctrl button{padding:6px 11px;font-size:13px}
+      .cc-ctrl select:hover,.cc-ctrl button:hover{background:rgba(255,255,255,.24)}
+      /* Indicadores en una sola franja: la matriz de 12 meses necesita el alto */
+      .cc-kpis{display:flex;flex-wrap:wrap;gap:0;margin-top:14px;position:relative;z-index:1;
+        background:rgba(0,0,0,.16);border-radius:11px;overflow:hidden}
+      .cc-kpi{flex:1;min-width:132px;padding:9px 14px;border-right:1px solid rgba(255,255,255,.12)}
+      .cc-kpi:last-child{border-right:none}
+      .cc-kpi .l{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.9px;opacity:.72}
+      .cc-kpi .v{font-size:17px;font-weight:900;line-height:1.15;margin-top:1px;letter-spacing:-.4px}
+      .cc-kpi .s{font-size:9.5px;opacity:.7;margin-top:1px}
+      .cc-kpi.mal .v{color:#fecaca}
+      .cc-kpi.bien .v{color:#a7f3d0}
       .cc-tabla{width:100%;border-collapse:collapse;font-size:11.5px}
       .cc-tabla th{position:sticky;top:0;background:#f8fafc;z-index:3;padding:7px 6px;
         font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);text-align:right}
@@ -12156,24 +12178,24 @@ async function concentrado() {
     </style>
 
     <div class="cc-hero">
-      <h2>Concentrado de Ingresos y Gastos</h2>
-      <div class="sub">Efectivamente cobrados y pagados · Matriz anual por concepto</div>
-    </div>
-
-    <div class="gt-toolbar">
-      <label style="font-size:11px;font-weight:700;color:var(--gray-d)">AÑO</label>
-      <select id="cc-anio" class="gt-filtro" onchange="cargarConcentrado()">
-        ${[y+1,y,y-1,y-2,y-3].map(a=>`<option value="${a}" ${a===y?'selected':''}>${a}</option>`).join('')}
-      </select>
-      <label style="font-size:11px;font-weight:700;color:var(--gray-d);margin-left:8px">GASTOS POR</label>
-      <select id="cc-base" class="gt-filtro" onchange="cargarConcentrado()">
-        <option value="devengado">Fecha del gasto</option>
-        <option value="pagado">Fecha en que se pagó</option>
-      </select>
-      <div style="display:flex;gap:6px;margin-left:auto">
-        <button class="btn bo bsm" onclick="exportarConcentradoExcel()">⬇ Excel</button>
-        <button class="btn bo bsm" onclick="imprimirConcentrado()">🖨 Imprimir</button>
+      <div class="cc-hero-t">
+        <div>
+          <h2>Concentrado de Ingresos y Gastos</h2>
+          <div class="sub">Efectivamente cobrados · Matriz anual por concepto</div>
+        </div>
+        <div class="cc-ctrl">
+          <select id="cc-anio" onchange="cargarConcentrado()" title="Año">
+            ${[y+1,y,y-1,y-2,y-3].map(a=>`<option value="${a}" ${a===y?'selected':''}>${a}</option>`).join('')}
+          </select>
+          <select id="cc-base" onchange="cargarConcentrado()" title="Cómo se fechan los gastos">
+            <option value="devengado">Por fecha del gasto</option>
+            <option value="pagado">Por fecha de pago</option>
+          </select>
+          <button onclick="exportarConcentradoExcel()" title="Descargar Excel">⬇</button>
+          <button onclick="imprimirConcentrado()" title="Imprimir">🖨</button>
+        </div>
       </div>
+      <div class="cc-kpis" id="cc-kpis"></div>
     </div>
     <div id="cc-body"><p class="empty">Cargando…</p></div>`;
   cargarConcentrado();
@@ -12241,25 +12263,26 @@ function renderConcentrado(d) {
   html += fila('UTILIDAD', d.utilidad.meses, d.utilidad.total, 'cc-util');
 
   const neg = d.utilidad.meses.filter(v => v < 0).length;
-  $('cc-body').innerHTML = `
-    <div class="gt-cards" style="margin-bottom:14px">
-      <div class="gt-card viva"><div class="ic">📥</div>
-        <div class="l">Ingresos cobrados</div><div class="v">${fmt(d.ingresos.total)}</div>
-        <div class="s">Comisiones y otros conceptos</div></div>
-      <div class="gt-card total"><div class="ic">📤</div>
-        <div class="l">Gastos</div><div class="v">${fmt(d.gastos.total)}</div>
-        <div class="s">${d.base_gasto === 'pagado' ? 'Por fecha de pago' : 'Por fecha del gasto'}</div></div>
-      <div class="gt-card ${d.utilidad.total >= 0 ? 'viva' : 'cancel'}"><div class="ic">${d.utilidad.total >= 0 ? '📈' : '📉'}</div>
-        <div class="l">Utilidad del año</div><div class="v">${fmt(d.utilidad.total)}</div>
-        <div class="s">${neg ? `${neg} mes${neg!=1?'es':''} en números rojos` : 'Todos los meses en positivo'}</div></div>
-      <div class="gt-card total"><div class="ic">％</div>
-        <div class="l">Margen</div>
-        <div class="v">${d.ingresos.total > 0 ? (d.utilidad.total / d.ingresos.total * 100).toFixed(1) + '%' : '—'}</div>
-        <div class="s">Utilidad sobre ingresos</div></div>
-    </div>
+  const buena = d.utilidad.total >= 0;
+  const kp = $('cc-kpis');
+  if (kp) kp.innerHTML = `
+    <div class="cc-kpi">
+      <div class="l">Ingresos cobrados</div><div class="v">${fmt(d.ingresos.total)}</div>
+      <div class="s">Comisiones y otros</div></div>
+    <div class="cc-kpi">
+      <div class="l">Gastos</div><div class="v">${fmt(d.gastos.total)}</div>
+      <div class="s">${d.base_gasto === 'pagado' ? 'Por fecha de pago' : 'Por fecha del gasto'}</div></div>
+    <div class="cc-kpi ${buena ? 'bien' : 'mal'}">
+      <div class="l">Utilidad ${d.anio}</div><div class="v">${fmt(d.utilidad.total)}</div>
+      <div class="s">${neg ? `${neg} mes${neg!=1?'es':''} en rojo` : 'Todos en positivo'}</div></div>
+    <div class="cc-kpi ${buena ? 'bien' : 'mal'}">
+      <div class="l">Margen</div>
+      <div class="v">${d.ingresos.total > 0 ? (d.utilidad.total / d.ingresos.total * 100).toFixed(1) + '%' : '—'}</div>
+      <div class="s">Sobre ingresos</div></div>`;
 
-    <div class="card" style="padding:0;overflow:hidden">
-      <div class="tscroll" style="max-height:70vh;overflow:auto">
+  $('cc-body').innerHTML = `
+    <div class="card" style="padding:0;overflow:hidden;margin-top:14px">
+      <div class="tscroll" style="max-height:calc(100vh - 250px);overflow:auto">
         <table class="cc-tabla">
           <thead><tr>
             <th class="concepto">Concepto</th>
@@ -12271,8 +12294,9 @@ function renderConcentrado(d) {
       </div>
     </div>
 
-    <div class="card" style="margin-top:12px;font-size:11.5px;color:var(--muted);line-height:1.6">
-      <strong>Cómo se calcula.</strong> El ingreso no es lo facturado: de cada factura solo se
+    <details class="card" style="margin-top:10px;font-size:11.5px;color:var(--muted);line-height:1.6;padding:10px 14px">
+      <summary style="cursor:pointer;font-weight:800;color:var(--dark);font-size:11.5px">Cómo se calcula este reporte</summary>
+      <div style="margin-top:7px">El ingreso no es lo facturado: de cada factura solo se
       toman los conceptos de <strong>Comisiones</strong> y <strong>Otros</strong> del desglose,
       porque el resto (sueldos, IMSS, ISN) es dinero que pasa por la empresa y no le pertenece.
       Se reconocen por <strong>fecha de pago</strong>, y un abono parcial aporta comisión en la
@@ -12280,7 +12304,8 @@ function renderConcentrado(d) {
       ${d.base_gasto === 'pagado'
         ? ' Los gastos cuentan solo si están liquidados, en el mes en que se pagaron.'
         : ' Los gastos cuentan por la fecha del gasto, se hayan pagado o no.'}
-    </div>`;
+      </div>
+    </details>`;
 }
 
 function exportarConcentradoExcel() {
