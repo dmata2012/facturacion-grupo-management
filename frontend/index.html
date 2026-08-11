@@ -12314,10 +12314,11 @@ function renderSF(r) {
 // ── Captura ──
 async function openIngresoSF(id) {
   await sfCargarTipos();
-  let clientes = window._sfClientes;
-  if (!clientes) {
-    try { clientes = window._sfClientes = await api('/clientes'); } catch(e) { clientes = []; }
-  }
+  // Se recarga cada vez, sin cache: guardar la lista en memoria hacia que un
+  // cliente dado de alta despues de abrir el modal la primera vez no apareciera
+  // nunca hasta recargar la pagina.
+  let clientes = [];
+  try { clientes = await api('/clientes'); } catch(e) { clientes = []; }
   const lista = Array.isArray(clientes) ? clientes : (clientes.clientes || []);
 
   let g = { cliente_id:'', tipo_id:'', fecha_cobro:new Date().toISOString().slice(0,10),
@@ -12327,7 +12328,18 @@ async function openIngresoSF(id) {
     if (enLista) g = { ...g, ...enLista };
   }
   const sv = v => (v == null ? '' : String(v)).replace(/"/g,'&quot;');
-  const nom = c => (c.nombre_comercial && c.nombre_comercial.trim()) || c.razon_social;
+  const nom = c => (c.nombre_comercial && c.nombre_comercial.trim()) || c.razon_social || '';
+  // El servidor ordena por razon social pero aqui se muestra el nombre comercial.
+  // Sin reordenar, un cliente listado como "ROBERTO CORONA" aparecia bajo la C de
+  // "CORONA ..." y no se encontraba al buscarlo por la R.
+  lista.sort((a, b) => nom(a).localeCompare(nom(b), 'es', { sensitivity: 'base' }));
+  // Cuando los dos nombres difieren se muestran ambos, para poder ubicarlo por
+  // cualquiera de los dos.
+  const etiqueta = c => {
+    const n = nom(c), r = (c.razon_social || '').trim();
+    const dif = r && r.toUpperCase() !== n.toUpperCase();
+    return n + (dif ? ' \u00b7 ' + r : '') + (c.rfc ? ' \u00b7 ' + c.rfc : '');
+  };
 
   $('modal-gt-cats-body').innerHTML = `
     <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#155e75,#0891b2);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
@@ -12338,10 +12350,16 @@ async function openIngresoSF(id) {
       </div>
     </div>
     <div class="fg" style="gap:11px">
-      <div class="fi full"><label>Cliente <span style="color:var(--red)">*</span></label>
+      <div class="fi full">
+        <label style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+          Cliente <span style="color:var(--red)">*</span>
+          <span style="font-weight:600;font-size:9.5px;color:var(--muted);text-transform:none;letter-spacing:0">
+            ${lista.length} en el catálogo
+          </span>
+        </label>
         <select id="sf-cliente">
           <option value="">— Seleccionar cliente —</option>
-          ${lista.map(c => `<option value="${c.id}" ${String(g.cliente_id)===String(c.id)?'selected':''}>${nom(c)}${c.rfc?` · ${c.rfc}`:''}</option>`).join('')}
+          ${lista.map(c => `<option value="${c.id}" ${String(g.cliente_id)===String(c.id)?'selected':''}>${etiqueta(c)}</option>`).join('')}
         </select>
       </div>
       <div class="fi"><label>Tipo de ingreso <span style="color:var(--red)">*</span></label>
