@@ -659,6 +659,7 @@ canvas{max-height:230px}
           <a href="#" onclick="nav('facturas')"    id="nav-facturas"><span class="ni"><svg><use href="#i-invoice"/></svg></span> Facturas</a>
           <a href="#" onclick="nav('cobranza')"    id="nav-cobranza"><span class="ni"><svg><use href="#i-cash"/></svg></span> Cobranza</a>
           <a href="#" onclick="nav('clientes')"    id="nav-clientes"><span class="ni"><svg><use href="#i-building"/></svg></span> Clientes</a>
+          <a href="#" onclick="nav('otrosIngresos')" id="nav-otrosIngresos"><span class="ni"><svg><use href="#i-cash"/></svg></span> Otros Ingresos S/F</a>
         </div>
       </div>
 
@@ -1195,12 +1196,12 @@ function nav(page) {
     reportes:'Reportes', estadisticas:'Estadísticas', usuarios:'Usuarios y Permisos',
     catalogo:'Conceptos de Desglose', bancos:'Bancos', gastos:'Gastos (CxP)',
     misVacaciones:'Mis Vacaciones', asistencia:'Lista de Asistencia',
-    concentrado:'Concentrado Anual'
+    concentrado:'Concentrado Anual', otrosIngresos:'Otros Ingresos S/F'
   };
   const mt = $('mt-title');
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
-    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones, asistencia, concentrado
+    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones, asistencia, concentrado, otrosIngresos
   };
   if (pages[page]) pages[page]();
 }
@@ -12116,6 +12117,406 @@ async function guardarPINEmp(empId) {
 }
 
 // ══ VACACIONES ══════════════════════════════
+// ══ OTROS INGRESOS S/F (sin factura) ══════════════════════════════
+// Cobros por servicio que no generan CFDI. Siempre de contado: el registro es el
+// cobro, por eso no hay saldo ni fecha de vencimiento en ninguna parte.
+const FORMAS_PAGO_SF = ['transferencia','efectivo','cheque','tarjeta','deposito','otro'];
+
+async function otrosIngresos() {
+  const hoy = new Date(), y = hoy.getFullYear(), m = String(hoy.getMonth()+1).padStart(2,'0');
+  const finMes = new Date(y, hoy.getMonth()+1, 0).toISOString().slice(0,10);
+  $('content').innerHTML = `
+    <style>
+      .sf-hero{background:linear-gradient(135deg,#155e75 0%,#0e7490 55%,#0891b2 100%);
+        border-radius:16px;padding:16px 20px;color:#fff;margin-bottom:14px;position:relative;overflow:hidden}
+      .sf-hero::after{content:'💵';position:absolute;right:18px;bottom:-18px;font-size:88px;opacity:.09;line-height:1}
+      .sf-hero-t{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;position:relative;z-index:1}
+      .sf-hero h2{margin:0;font-size:18px;font-weight:900;letter-spacing:-.3px}
+      .sf-hero .sub{font-size:11px;opacity:.8;margin-top:1px}
+      .sf-kpis{display:flex;flex-wrap:wrap;margin-top:14px;position:relative;z-index:1;
+        background:rgba(0,0,0,.16);border-radius:11px;overflow:hidden}
+      .sf-kpi{flex:1;min-width:130px;padding:9px 14px;border-right:1px solid rgba(255,255,255,.12)}
+      .sf-kpi:last-child{border-right:none}
+      .sf-kpi .l{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.9px;opacity:.72}
+      .sf-kpi .v{font-size:17px;font-weight:900;line-height:1.15;margin-top:1px;letter-spacing:-.4px}
+      .sf-kpi .s{font-size:9.5px;opacity:.7;margin-top:1px}
+      .sf-tool{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+      .sf-f{border:1.5px solid var(--border);border-radius:10px;padding:8px 11px;
+        font-size:12.5px;font-weight:700;background:#fff;color:#475569}
+      .sf-f:focus{outline:none;border-color:#0891b2;box-shadow:0 0 0 3px rgba(8,145,178,.13)}
+      .sf-buscar{flex:1;min-width:190px;display:flex;align-items:center;gap:8px;background:#fff;
+        border:1.5px solid var(--border);border-radius:10px;padding:8px 12px}
+      .sf-buscar input{flex:1;border:none;outline:none;font-size:13px;background:none;color:var(--dark)}
+      .sf-pill{display:inline-flex;align-items:center;gap:4px;font-size:9.5px;font-weight:900;
+        padding:2px 9px;border-radius:99px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
+    </style>
+
+    <div class="sf-hero">
+      <div class="sf-hero-t">
+        <div>
+          <h2>Otros Ingresos S/F</h2>
+          <div class="sub">Cobros por servicio sin factura · Siempre de contado</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn bo bsm" onclick="openTiposSF()" style="background:rgba(255,255,255,.14);
+                  border-color:rgba(255,255,255,.22);color:#fff">⚙️ Tipos</button>
+          <button class="btn bo bsm" onclick="exportarSFExcel()" style="background:rgba(255,255,255,.14);
+                  border-color:rgba(255,255,255,.22);color:#fff">⬇ Excel</button>
+          ${canWrite()||canFacturar()?`<button class="btn bsm" onclick="openIngresoSF()"
+                  style="background:#fff;color:#0e7490;font-weight:900;border:none">＋ Registrar cobro</button>`:''}
+        </div>
+      </div>
+      <div class="sf-kpis" id="sf-kpis"></div>
+    </div>
+
+    <div class="sf-tool">
+      <div class="sf-buscar">
+        <span style="color:#94a3b8;font-size:14px">🔍</span>
+        <input id="sf-buscar" placeholder="Buscar por cliente, RFC, referencia o nota…" oninput="filtrarSF()">
+      </div>
+      <select id="sf-tipo" class="sf-f" onchange="cargarSF()"><option value="">Todos los tipos</option></select>
+      <input type="date" id="sf-desde" value="${y}-${m}-01" onchange="cargarSF()" class="sf-f">
+      <input type="date" id="sf-hasta" value="${finMes}" onchange="cargarSF()" class="sf-f">
+      <button class="btn bo bsm" onclick="sfPreset('mes')">Este mes</button>
+      <button class="btn bo bsm" onclick="sfPreset('anio')">Este año</button>
+    </div>
+    <div id="sf-body"><p class="empty">Cargando…</p></div>`;
+
+  await sfCargarTipos();
+  cargarSF();
+}
+
+async function sfCargarTipos(forzar) {
+  if (!forzar && window._sfTipos) return;
+  try { window._sfTipos = await api('/ingresos-sf/tipos'); }
+  catch(e) { window._sfTipos = []; }
+  const sel = $('sf-tipo');
+  if (sel) sel.innerHTML = '<option value="">Todos los tipos</option>' +
+    window._sfTipos.map(t => `<option value="${t.id}">${t.nombre}</option>`).join('');
+}
+
+function sfPreset(tipo) {
+  const hoy = new Date(), y = hoy.getFullYear(), pad = n => String(n).padStart(2,'0');
+  if (tipo === 'mes') {
+    $('sf-desde').value = `${y}-${pad(hoy.getMonth()+1)}-01`;
+    $('sf-hasta').value = new Date(y, hoy.getMonth()+1, 0).toISOString().slice(0,10);
+  } else {
+    $('sf-desde').value = `${y}-01-01`;
+    $('sf-hasta').value = `${y}-12-31`;
+  }
+  cargarSF();
+}
+
+let _sfBuscarTO = null;
+function filtrarSF() { clearTimeout(_sfBuscarTO); _sfBuscarTO = setTimeout(cargarSF, 250); }
+
+async function cargarSF() {
+  const p = [];
+  const d = $('sf-desde')?.value, h = $('sf-hasta')?.value;
+  const t = $('sf-tipo')?.value, b = ($('sf-buscar')?.value || '').trim();
+  if (d) p.push(`desde=${d}`);
+  if (h) p.push(`hasta=${h}`);
+  if (t) p.push(`tipo_id=${t}`);
+  if (b) p.push(`buscar=${encodeURIComponent(b)}`);
+  $('sf-body').innerHTML = '<p class="empty">Cargando…</p>';
+  try {
+    const r = await api(`/ingresos-sf${p.length?'?'+p.join('&'):''}`);
+    window._sfData = r;
+    renderSF(r);
+  } catch(e) { $('sf-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function renderSF(r) {
+  const t = r.totales;
+  const kp = $('sf-kpis');
+  if (kp) {
+    const prom = t.n > 0 ? parseFloat(t.total) / t.n : 0;
+    const mayor = r.por_tipo[0];
+    kp.innerHTML = `
+      <div class="sf-kpi"><div class="l">Cobrado en el período</div>
+        <div class="v">${fmt(t.total)}</div>
+        <div class="s">${t.n} cobro${t.n!=1?'s':''} · ${t.clientes} cliente${t.clientes!=1?'s':''}</div></div>
+      <div class="sf-kpi"><div class="l">Cobro promedio</div>
+        <div class="v">${fmt(prom)}</div><div class="s">Por registro</div></div>
+      <div class="sf-kpi"><div class="l">${mayor ? mayor.tipo : 'Mayor tipo'}</div>
+        <div class="v">${mayor ? fmt(mayor.total) : '—'}</div>
+        <div class="s">${mayor ? `${mayor.n} cobro${mayor.n!=1?'s':''}` : 'Sin datos'}</div></div>
+      <div class="sf-kpi"><div class="l">Mayor cliente</div>
+        <div class="v" style="font-size:14px">${r.por_cliente[0] ? fmt(r.por_cliente[0].total) : '—'}</div>
+        <div class="s">${r.por_cliente[0] ? String(r.por_cliente[0].cliente).slice(0,24) : 'Sin datos'}</div></div>`;
+  }
+
+  if (!r.ingresos.length) {
+    $('sf-body').innerHTML = `
+      <div style="background:linear-gradient(160deg,#ecfeff,#cffafe);border:2px dashed #67e8f9;
+                  border-radius:18px;padding:44px 30px;text-align:center">
+        <div style="font-size:56px;margin-bottom:10px">💵</div>
+        <h3 style="margin:0 0 6px;font-size:19px;font-weight:900;color:#155e75">Sin cobros en este período</h3>
+        <p style="font-size:13px;color:#164e63;max-width:460px;margin:0 auto 18px;line-height:1.55">
+          Aquí se registran los cobros por servicio que no generan factura.
+          Suman al Concentrado de Dirección como ingreso, separados de lo facturado.
+        </p>
+        ${canWrite()||canFacturar()?`<button class="btn bs" onclick="openIngresoSF()">＋ Registrar el primer cobro</button>`:''}
+      </div>`;
+    return;
+  }
+
+  const maxT = Math.max(...r.por_tipo.map(x => parseFloat(x.total)));
+  $('sf-body').innerHTML = `
+    <div class="card" style="margin-bottom:12px;display:grid;
+         grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px">
+      ${r.por_tipo.map(x => {
+        const pct = maxT > 0 ? parseFloat(x.total)/maxT*100 : 0;
+        const pctTot = parseFloat(t.total) > 0 ? parseFloat(x.total)/parseFloat(t.total)*100 : 0;
+        return `<div>
+          <div style="display:flex;justify-content:space-between;gap:8px;font-size:11.5px">
+            <span style="font-weight:800;color:${x.color}">${x.tipo}</span>
+            <span style="font-weight:900">${fmt(x.total)}</span>
+          </div>
+          <div style="height:6px;background:#f1f5f9;border-radius:99px;overflow:hidden;margin-top:3px">
+            <i style="display:block;height:100%;width:${pct}%;background:${x.color};border-radius:99px"></i>
+          </div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">
+            ${x.n} cobro${x.n!=1?'s':''} · ${pctTot.toFixed(1)}% del total</div>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <div class="tscroll"><table>
+      <thead><tr>
+        <th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Forma de pago</th>
+        <th>Referencia</th><th style="text-align:right">Monto</th><th></th>
+      </tr></thead>
+      <tbody>${r.ingresos.map(g => `<tr>
+        <td style="white-space:nowrap">${fmtDate(g.fecha_cobro)}</td>
+        <td>
+          <div style="font-weight:700">${g.cliente}</div>
+          ${g.notas ? `<div style="font-size:10.5px;color:var(--muted);max-width:280px;
+            overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(g.notas||'').replace(/"/g,'&quot;')}">${g.notas}</div>` : ''}
+        </td>
+        <td><span class="sf-pill" style="background:${g.tipo_color||'#e2e8f0'}1f;color:${g.tipo_color||'#64748b'}">${g.tipo||'Sin tipo'}</span></td>
+        <td style="font-size:11.5px;color:var(--muted);text-transform:capitalize">${g.forma_pago||'—'}</td>
+        <td style="font-family:monospace;font-size:11px;color:var(--muted)">${g.referencia||'—'}</td>
+        <td style="text-align:right;font-weight:900;color:#0e7490;white-space:nowrap">${fmt(g.monto)}</td>
+        <td style="white-space:nowrap;text-align:right">
+          ${canWrite()||canFacturar()?`<button class="btn bg bsm" style="padding:4px 8px" onclick="openIngresoSF(${g.id})" title="Editar">✏️</button>`:''}
+          ${canAdmin()||canFacturar()?`<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarIngresoSF(${g.id})" title="Eliminar">🗑</button>`:''}
+        </td>
+      </tr>`).join('')}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--dark);background:var(--bg-alt);font-weight:900">
+        <td colspan="5" style="padding:10px;text-align:right">TOTAL DEL PERÍODO:</td>
+        <td style="text-align:right;padding:10px;color:#0e7490">${fmt(t.total)}</td>
+        <td></td>
+      </tr></tfoot>
+    </table></div>`;
+}
+
+// ── Captura ──
+async function openIngresoSF(id) {
+  await sfCargarTipos();
+  let clientes = window._sfClientes;
+  if (!clientes) {
+    try { clientes = window._sfClientes = await api('/clientes'); } catch(e) { clientes = []; }
+  }
+  const lista = Array.isArray(clientes) ? clientes : (clientes.clientes || []);
+
+  let g = { cliente_id:'', tipo_id:'', fecha_cobro:new Date().toISOString().slice(0,10),
+            monto:'', forma_pago:'transferencia', referencia:'', notas:'' };
+  if (id) {
+    const enLista = (window._sfData?.ingresos || []).find(x => x.id === id);
+    if (enLista) g = { ...g, ...enLista };
+  }
+  const sv = v => (v == null ? '' : String(v)).replace(/"/g,'&quot;');
+  const nom = c => (c.nombre_comercial && c.nombre_comercial.trim()) || c.razon_social;
+
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#155e75,#0891b2);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">${id?'Editar':'Nuevo'} cobro sin factura</div>
+      <div style="font-size:20px;font-weight:900;margin-top:3px">💵 Otros Ingresos S/F</div>
+      <div style="font-size:11.5px;opacity:.85;margin-top:4px">
+        Se registra cuando el dinero ya entró. No genera factura ni saldo por cobrar.
+      </div>
+    </div>
+    <div class="fg" style="gap:11px">
+      <div class="fi full"><label>Cliente <span style="color:var(--red)">*</span></label>
+        <select id="sf-cliente">
+          <option value="">— Seleccionar cliente —</option>
+          ${lista.map(c => `<option value="${c.id}" ${String(g.cliente_id)===String(c.id)?'selected':''}>${nom(c)}${c.rfc?` · ${c.rfc}`:''}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fi"><label>Tipo de ingreso <span style="color:var(--red)">*</span></label>
+        <select id="sf-f-tipo">
+          <option value="">— Seleccionar —</option>
+          ${(window._sfTipos||[]).map(t => `<option value="${t.id}" ${String(g.tipo_id)===String(t.id)?'selected':''}>${t.nombre}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fi"><label>Fecha de cobro <span style="color:var(--red)">*</span></label>
+        <input type="date" id="sf-fecha" value="${sv(g.fecha_cobro).slice(0,10)}">
+      </div>
+      <div class="fi"><label>Monto <span style="color:var(--red)">*</span></label>
+        <div style="position:relative">
+          <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#0e7490;font-weight:900;font-size:17px;pointer-events:none">$</span>
+          <input type="number" step="0.01" id="sf-monto" value="${g.monto||''}" placeholder="0.00"
+                 style="padding-left:28px;font-size:18px;font-weight:900;text-align:right;color:#0e7490">
+        </div>
+      </div>
+      <div class="fi"><label>Forma de pago</label>
+        <select id="sf-forma">
+          ${FORMAS_PAGO_SF.map(f => `<option value="${f}" ${g.forma_pago===f?'selected':''}>${f.charAt(0).toUpperCase()+f.slice(1)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fi full"><label>Referencia <span style="color:var(--muted);font-weight:400;font-size:10px">(SPEI, folio de depósito)</span></label>
+        <input id="sf-ref" value="${sv(g.referencia)}" style="font-family:monospace">
+      </div>
+      <div class="fi full"><label>Notas <span style="color:var(--muted);font-weight:400;font-size:10px">(opcional)</span></label>
+        <textarea id="sf-notas" rows="2" maxlength="400">${g.notas||''}</textarea>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cancelar</button>
+      <button class="btn bs" id="sf-btn" onclick="guardarIngresoSF(${id||'null'})">💾 ${id?'Guardar cambios':'Registrar cobro'}</button>
+    </div>`;
+  openModal('modal-gt-cats');
+}
+
+async function guardarIngresoSF(id) {
+  const body = {
+    cliente_id : $('sf-cliente').value,
+    tipo_id    : $('sf-f-tipo').value,
+    fecha_cobro: $('sf-fecha').value,
+    monto      : parseFloat($('sf-monto').value) || 0,
+    forma_pago : $('sf-forma').value,
+    referencia : $('sf-ref').value.trim(),
+    notas      : $('sf-notas').value.trim()
+  };
+  if (!body.cliente_id)   return toast('Selecciona el cliente.', 'warn');
+  if (!body.tipo_id)      return toast('Selecciona el tipo de ingreso.', 'warn');
+  if (!body.fecha_cobro)  return toast('Captura la fecha de cobro.', 'warn');
+  if (!(body.monto > 0))  return toast('El monto debe ser mayor a 0.', 'warn');
+
+  const btn = $('sf-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="gt-spin"></span> Guardando…';
+  try {
+    if (id) await api(`/ingresos-sf/${id}`, { method:'PUT',  body: JSON.stringify(body) });
+    else    await api('/ingresos-sf',       { method:'POST', body: JSON.stringify(body) });
+    toast(id ? 'Cobro actualizado.' : 'Cobro registrado.');
+    closeModal('modal-gt-cats');
+    cargarSF();
+  } catch(e) {
+    toast(e.message, 'err');
+    btn.disabled = false; btn.innerHTML = id ? '💾 Guardar cambios' : '💾 Registrar cobro';
+  }
+}
+
+async function eliminarIngresoSF(id) {
+  if (!await confirm2('¿Eliminar este cobro?\nDejará de sumar en el Concentrado.')) return;
+  try { await api(`/ingresos-sf/${id}`, { method:'DELETE' }); toast('Cobro eliminado.'); cargarSF(); }
+  catch(e) { toast(e.message, 'err'); }
+}
+
+// ── Catálogo de tipos ──
+async function openTiposSF() {
+  await sfCargarTipos(true);
+  const ts = window._sfTipos || [];
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#155e75,#0891b2);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Otros Ingresos S/F</div>
+      <div style="font-size:20px;font-weight:900;margin-top:3px">⚙️ Tipos de ingreso</div>
+      <div style="font-size:11.5px;opacity:.85;margin-top:4px">
+        El Concentrado dibuja un renglón por cada tipo. Agrega los que necesites.
+      </div>
+    </div>
+    ${ts.length ? `<div style="max-height:44vh;overflow:auto;margin:0 -4px;padding:0 4px">
+      ${ts.map(t => `<div style="display:flex;align-items:center;gap:11px;padding:10px 12px;margin-bottom:7px;
+            border:1.5px solid var(--border);border-radius:11px;background:#fff">
+        <div style="width:13px;height:13px;border-radius:50%;background:${t.color};flex-shrink:0"></div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:800;font-size:13.5px">${t.nombre}</div>
+          <div style="font-size:11px;color:${t.n_registros ? 'var(--muted)' : '#16a34a'};margin-top:1px">
+            ${t.n_registros ? `${t.n_registros} cobro${t.n_registros!=1?'s':''} registrado${t.n_registros!=1?'s':''}` : 'Sin usar — se puede eliminar'}
+          </div>
+        </div>
+        <button class="btn bo bsm" style="padding:5px 10px" onclick="renombrarTipoSF(${t.id},'${(t.nombre||'').replace(/'/g,"\\'")}')">✏️</button>
+        <button class="btn ${t.n_registros?'bo':'bd'} bsm" style="padding:5px 10px${t.n_registros?';opacity:.45':''}"
+                onclick="eliminarTipoSF(${t.id},'${(t.nombre||'').replace(/'/g,"\\'")}',${t.n_registros})"
+                title="${t.n_registros?'Tiene cobros: se desactivará':'Eliminar'}">🗑</button>
+      </div>`).join('')}
+    </div>` : '<p class="empty">Todavía no hay tipos.</p>'}
+    <div class="card" style="margin-top:10px;background:var(--bg-alt);display:grid;
+         grid-template-columns:1fr 90px auto;gap:8px;align-items:end">
+      <div class="fi" style="margin:0"><label style="font-size:10px">Nuevo tipo</label>
+        <input id="sft-nombre" placeholder="Ej: Recuperaciones" onkeydown="if(event.key==='Enter')crearTipoSF()">
+      </div>
+      <div class="fi" style="margin:0"><label style="font-size:10px">Orden</label>
+        <input type="number" id="sft-orden" value="99" style="text-align:center">
+      </div>
+      <button class="btn bs bsm" onclick="crearTipoSF()" style="height:37px">+ Agregar</button>
+    </div>
+    <div class="form-actions">
+      <button class="btn bs" onclick="closeModal('modal-gt-cats');cargarSF()">Listo</button>
+    </div>`;
+  openModal('modal-gt-cats');
+}
+
+async function crearTipoSF() {
+  const nombre = ($('sft-nombre').value || '').trim();
+  if (!nombre) return toast('Escribe el nombre del tipo.', 'warn');
+  try {
+    await api('/ingresos-sf/tipos', { method:'POST', body: JSON.stringify({
+      nombre, orden: parseInt($('sft-orden').value) || 99 }) });
+    toast(`Tipo "${nombre}" agregado.`);
+    openTiposSF();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function renombrarTipoSF(id, actual) {
+  const nombre = window.prompt('Nombre del tipo:', actual);
+  if (nombre == null || !nombre.trim()) return;
+  try {
+    await api(`/ingresos-sf/tipos/${id}`, { method:'PUT', body: JSON.stringify({ nombre }) });
+    toast('Tipo actualizado.');
+    openTiposSF();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function eliminarTipoSF(id, nombre, n) {
+  const msg = n > 0
+    ? `"${nombre}" tiene ${n} cobro(s) registrado(s).\nNo se elimina, pero se puede desactivar para que deje de aparecer al capturar. ¿Continuar?`
+    : `¿Eliminar el tipo "${nombre}"?`;
+  if (!await confirm2(msg)) return;
+  try {
+    const r = await api(`/ingresos-sf/tipos/${id}`, { method:'DELETE' });
+    toast(r.desactivado ? 'Tipo desactivado.' : 'Tipo eliminado.');
+    openTiposSF();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+function exportarSFExcel() {
+  const r = window._sfData;
+  if (!r || !r.ingresos.length) return toast('No hay cobros para exportar.', 'warn');
+  if (typeof XLSX === 'undefined') return toast('Librería XLSX no disponible.', 'err');
+  const aoa = [['OTROS INGRESOS SIN FACTURA — GRUPO MANAGEMENT'],
+               [`Período: ${fmtDate($('sf-desde').value)} al ${fmtDate($('sf-hasta').value)}`],
+               [`Generado: ${new Date().toLocaleString('es-MX')}`], [],
+               ['Fecha de cobro','Cliente','RFC','Tipo','Forma de pago','Referencia','Monto','Notas','Capturó']];
+  r.ingresos.forEach(g => aoa.push([
+    g.fecha_cobro, g.cliente, g.rfc||'', g.tipo||'', g.forma_pago||'',
+    g.referencia||'', parseFloat(g.monto), g.notas||'', g.capturado_por||''
+  ]));
+  aoa.push([]);
+  aoa.push(['','','','','','TOTAL:', parseFloat(r.totales.total)]);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:14},{wch:34},{wch:14},{wch:18},{wch:14},{wch:18},{wch:15},{wch:36},{wch:18}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Ingresos S-F');
+  const aoaT = [['Tipo','Cobros','Total']];
+  r.por_tipo.forEach(x => aoaT.push([x.tipo, x.n, parseFloat(x.total)]));
+  const wsT = XLSX.utils.aoa_to_sheet(aoaT);
+  wsT['!cols'] = [{wch:24},{wch:10},{wch:16}];
+  XLSX.utils.book_append_sheet(wb, wsT, 'Por tipo');
+  XLSX.writeFile(wb, `Otros_ingresos_SF_${$('sf-desde').value}_a_${$('sf-hasta').value}.xlsx`);
+}
+
 // ══ CONCENTRADO DE INGRESOS Y GASTOS (Dirección) ══════════════════
 // Reproduce el concentrado anual que dirección llevaba en Excel: conceptos en
 // las filas, los 12 meses en las columnas. El ingreso es solo la comisión y los
@@ -12167,6 +12568,12 @@ async function concentrado() {
       .cc-sec td.concepto{background:#0f172a;color:#fff}
       .cc-sub td{background:#e2e8f0;font-weight:800}
       .cc-sub td.concepto{background:#e2e8f0}
+      /* Origen del ingreso: facturado contra no facturado */
+      .cc-org td{background:#334155;color:#fff;font-weight:800;font-size:10.5px;
+        text-transform:uppercase;letter-spacing:.9px;padding:6px}
+      .cc-org td.concepto{background:#334155;color:#fff;padding-left:14px}
+      .cc-sub2 td{background:#cbd5e1;font-weight:900}
+      .cc-sub2 td.concepto{background:#cbd5e1;padding-left:14px}
       .cc-tot td{background:#134e4a;color:#fff;font-weight:900;font-size:12px;padding:8px 6px}
       .cc-tot td.concepto{background:#134e4a;color:#fff}
       .cc-util td{background:#0f766e;color:#fff;font-weight:900;font-size:13px;padding:10px 6px}
@@ -12230,14 +12637,39 @@ function renderConcentrado(d) {
   let html = '';
 
   // ── INGRESOS ──
+  // Se separan por origen a proposito: el total es lo que le interesa a
+  // direccion, pero quien concilie contra facturacion tiene que ver de inmediato
+  // que la diferencia ES el bloque no facturado, y no un descuadre.
   html += `<tr class="cc-sec"><td class="concepto">Ingresos efectivamente cobrados</td>
            ${MESES_CON.map(()=>'<td></td>').join('')}<td></td></tr>`;
-  d.ingresos.grupos.forEach(g => {
-    html += fila(g.titulo, g.meses, g.total, 'cc-sub');
-    g.filas.forEach(f => { html += fila(f.nombre, f.meses, f.total, '', true); });
-    if (!g.filas.length)
-      html += `<tr><td class="concepto" style="padding-left:26px;color:var(--muted);font-style:italic">Sin movimientos en ${d.anio}</td>${MESES_CON.map(()=>'<td></td>').join('')}<td></td></tr>`;
-  });
+
+  const bloqueIng = (rotulo, bloque, vacioMsg) => {
+    if (!bloque) return '';
+    let h = `<tr class="cc-org"><td class="concepto">${rotulo}</td>
+             ${MESES_CON.map(()=>'<td></td>').join('')}<td></td></tr>`;
+    (bloque.grupos || []).forEach(g => {
+      h += fila(g.titulo, g.meses, g.total, 'cc-sub');
+      g.filas.forEach(f => { h += fila(f.nombre, f.meses, f.total, '', true); });
+      if (!g.filas.length)
+        h += `<tr><td class="concepto" style="padding-left:26px;color:var(--muted);font-style:italic">Sin movimientos en ${d.anio}</td>${MESES_CON.map(()=>'<td></td>').join('')}<td></td></tr>`;
+    });
+    if (!(bloque.grupos || []).length)
+      h += `<tr><td class="concepto" style="padding-left:26px;color:var(--muted);font-style:italic">${vacioMsg}</td>${MESES_CON.map(()=>'<td></td>').join('')}<td></td></tr>`;
+    h += fila(`Subtotal ${rotulo.toLowerCase()}`, bloque.meses, bloque.total, 'cc-sub2');
+    return h;
+  };
+
+  if (d.ingresos.facturado || d.ingresos.no_facturado) {
+    html += bloqueIng('FACTURADO', d.ingresos.facturado, `Sin cobros facturados en ${d.anio}`);
+    html += bloqueIng('NO FACTURADO', d.ingresos.no_facturado,
+      'Sin cobros sin factura. Se capturan en Ingresos (CxC) → Otros Ingresos S/F.');
+  } else {
+    // Respuesta de una version anterior del backend: se dibuja plano
+    d.ingresos.grupos.forEach(g => {
+      html += fila(g.titulo, g.meses, g.total, 'cc-sub');
+      g.filas.forEach(f => { html += fila(f.nombre, f.meses, f.total, '', true); });
+    });
+  }
   html += fila('TOTAL DE INGRESOS', d.ingresos.meses, d.ingresos.total, 'cc-tot');
 
   // ── GASTOS ──
@@ -12268,7 +12700,9 @@ function renderConcentrado(d) {
   if (kp) kp.innerHTML = `
     <div class="cc-kpi">
       <div class="l">Ingresos cobrados</div><div class="v">${fmt(d.ingresos.total)}</div>
-      <div class="s">Comisiones y otros</div></div>
+      <div class="s">${d.ingresos.no_facturado && d.ingresos.no_facturado.total > 0
+        ? `${fmt(d.ingresos.no_facturado.total)} sin factura`
+        : 'Comisiones y otros'}</div></div>
     <div class="cc-kpi">
       <div class="l">Gastos</div><div class="v">${fmt(d.gastos.total)}</div>
       <div class="s">${d.base_gasto === 'pagado' ? 'Por fecha de pago' : 'Por fecha del gasto'}</div></div>
@@ -12322,10 +12756,24 @@ function exportarConcentradoExcel() {
   const push = (nombre, meses, total) => aoa.push([nombre, ...meses.map(v => parseFloat(v)||0), parseFloat(total)||0]);
 
   aoa.push(['INGRESOS EFECTIVAMENTE COBRADOS']);
-  d.ingresos.grupos.forEach(g => {
-    push(g.titulo, g.meses, g.total);
-    g.filas.forEach(f => push('   ' + f.nombre, f.meses, f.total));
-  });
+  const bloqueXls = (rotulo, bloque) => {
+    if (!bloque) return;
+    aoa.push([rotulo]);
+    (bloque.grupos || []).forEach(g => {
+      push('  ' + g.titulo, g.meses, g.total);
+      g.filas.forEach(f => push('     ' + f.nombre, f.meses, f.total));
+    });
+    push('  Subtotal ' + rotulo.toLowerCase(), bloque.meses, bloque.total);
+  };
+  if (d.ingresos.facturado || d.ingresos.no_facturado) {
+    bloqueXls('FACTURADO', d.ingresos.facturado);
+    bloqueXls('NO FACTURADO', d.ingresos.no_facturado);
+  } else {
+    d.ingresos.grupos.forEach(g => {
+      push(g.titulo, g.meses, g.total);
+      g.filas.forEach(f => push('   ' + f.nombre, f.meses, f.total));
+    });
+  }
   push('TOTAL DE INGRESOS', d.ingresos.meses, d.ingresos.total);
   aoa.push([]);
   d.gastos.bloques.forEach(b => {

@@ -378,7 +378,9 @@ router.get('/estado-cuenta', async (req, res) => {
   try {
     const { buscar, solo_saldo } = req.query;
     const params = [];
-    let whereCli = 'WHERE c.activo = TRUE';
+    // Los clientes que solo tienen ingreso sin factura no se persiguen por
+    // cobranza: sin esto saldrian aqui con cero facturas y saldo cero.
+    let whereCli = 'WHERE c.activo = TRUE AND COALESCE(c.solo_sf, FALSE) = FALSE';
     if (buscar) {
       params.push(`%${buscar}%`);
       whereCli += ` AND (c.razon_social ILIKE $${params.length} OR c.rfc ILIKE $${params.length} OR c.nombre_comercial ILIKE $${params.length})`;
@@ -524,6 +526,26 @@ router.get('/concentrado', async (req, res) => {
        GROUP BY 1, 2
     `, [anio]);
 
+    // ── INGRESOS SIN FACTURA ──
+    // Fuente independiente: no hay comprobante que desglosar ni pago parcial que
+    // prorratear, el monto cobrado es el ingreso. La tabla puede no existir
+    // todavia si el modulo aun no se ha desplegado, por eso el try.
+    let sinFactura = [];
+    try {
+      const isf = await query(`
+        SELECT COALESCE(t.nombre,'Sin tipo') AS tipo,
+               COALESCE(NULLIF(TRIM(c.nombre_comercial),''), c.razon_social) AS cliente,
+               EXTRACT(MONTH FROM i.fecha_cobro)::int AS mes,
+               SUM(i.monto) AS monto
+          FROM fac_ingresos_sf i
+          JOIN fac_clientes c ON c.id = i.cliente_id
+          LEFT JOIN fac_ingresos_sf_tipos t ON t.id = i.tipo_id
+         WHERE EXTRACT(YEAR FROM i.fecha_cobro) = $1
+         GROUP BY 1, 2, 3
+      `, [anio]);
+      sinFactura = isf.rows;
+    } catch (e) { sinFactura = []; }
+
     const armaGrupo = (titulo, campo) => {
       const porCliente = {};
       ing.rows.forEach(r => {
@@ -538,9 +560,33 @@ router.get('/concentrado', async (req, res) => {
       filas.forEach(f => f.meses.forEach((v, i) => { meses[i] += v; }));
       return { titulo, filas, meses, total: meses.reduce((a, b) => a + b, 0) };
     };
-    const grupos = [armaGrupo('COMISIONES', 'comision'), armaGrupo('OTROS INGRESOS', 'otros')];
-    const mesesIng = vacio();
-    grupos.forEach(g => g.meses.forEach((v, i) => { mesesIng[i] += v; }));
+    const facturados = [armaGrupo('COMISIONES', 'comision'), armaGrupo('OTROS INGRESOS', 'otros')];
+
+    // Un grupo por tipo del catalogo, con su desglose por cliente
+    const porTipo = {};
+    sinFactura.forEach(r => {
+      const g = porTipo[r.tipo] || (porTipo[r.tipo] = {});
+      const f = g[r.cliente] || (g[r.cliente] = { nombre: r.cliente, meses: vacio(), total: 0 });
+      const v = parseFloat(r.monto) || 0;
+      f.meses[r.mes - 1] += v;
+      f.total += v;
+    });
+    const noFacturados = Object.keys(porTipo).map(tipo => {
+      const filas = Object.values(porTipo[tipo]).sort((a, b) => b.total - a.total);
+      const meses = vacio();
+      filas.forEach(f => f.meses.forEach((v, i) => { meses[i] += v; }));
+      return { titulo: tipo.toUpperCase(), filas, meses, total: meses.reduce((a, b) => a + b, 0) };
+    }).sort((a, b) => b.total - a.total);
+
+    const suma = arr => {
+      const m = vacio();
+      arr.forEach(g => g.meses.forEach((v, i) => { m[i] += v; }));
+      return m;
+    };
+    const mesesFac = suma(facturados);
+    const mesesSF  = suma(noFacturados);
+    const mesesIng = mesesFac.map((v, i) => v + mesesSF[i]);
+    const grupos = [...facturados, ...noFacturados];
 
     // ── GASTOS: por concepto, separados en bloques según su categoría ──
     // Con base "pagado" solo cuenta lo liquidado y en el mes en que se pagó; el
@@ -595,7 +641,12 @@ router.get('/concentrado', async (req, res) => {
 
     res.json({
       anio, base_gasto: baseGasto,
-      ingresos: { grupos, meses: mesesIng, total: mesesIng.reduce((a, b) => a + b, 0) },
+      ingresos: {
+        grupos,
+        facturado:    { grupos: facturados,    meses: mesesFac, total: mesesFac.reduce((a, b) => a + b, 0) },
+        no_facturado: { grupos: noFacturados,  meses: mesesSF,  total: mesesSF.reduce((a, b) => a + b, 0) },
+        meses: mesesIng, total: mesesIng.reduce((a, b) => a + b, 0)
+      },
       gastos:   { bloques, meses: mesesGas, total: mesesGas.reduce((a, b) => a + b, 0) },
       utilidad: { meses: utilidad, total: utilidad.reduce((a, b) => a + b, 0) },
       categorias_impuestos: catImp.rows[0].n

@@ -16,6 +16,8 @@ const MODULOS_SEED = [
     nota:'Ingresos cobrados contra gastos, mes a mes. Solo toma comisiones y otros conceptos como ingreso.' },
   { clave:'estadoCuenta', nombre:'Estado de Cuenta',    icono:'📑', grupo:'Dirección',            orden:6  },
   { clave:'clientes',     nombre:'Clientes',            icono:'🏢', grupo:'Ingresos (CxC)',       orden:13 },
+  { clave:'otrosIngresos',nombre:'Otros Ingresos S/F',  icono:'💵', grupo:'Ingresos (CxC)',       orden:14,
+    nota:'Cobros por servicio que no generan factura. Suman al Concentrado como ingreso no facturado.' },
   { clave:'gastos',       nombre:'Gastos (CxP)',        icono:'📤', grupo:'Gastos (CxP)',         orden:20 },
   { clave:'misVacaciones',nombre:'Mis Vacaciones',      icono:'🏖', grupo:'Mi espacio',           orden:5  },
   { clave:'nomina',       nombre:'Nómina',              icono:'👥', grupo:'Recursos Humanos',     orden:30 },
