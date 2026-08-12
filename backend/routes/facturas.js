@@ -92,6 +92,8 @@ router.get('/', async (req, res) => {
           WHERE f.estatus != 'cancelada' AND COALESCE(c.aplica_desglose,TRUE)),0)   AS facturado_con_desglose,
         COUNT(f.id) FILTER (
           WHERE f.estatus != 'cancelada' AND c.aplica_desglose = FALSE)::int        AS facturas_sin_desglose,
+        COUNT(DISTINCT f.cliente_id) FILTER (
+          WHERE f.estatus != 'cancelada' AND c.aplica_desglose = FALSE)::int        AS clientes_sin_desglose,
         COALESCE(SUM(COALESCE(sub_p.cobrado,0)) FILTER (WHERE f.estatus != 'cancelada'),0) AS cobrado,
         COALESCE(SUM(f.total - COALESCE(sub_p.cobrado,0))
                  FILTER (WHERE f.estatus NOT IN ('cancelada','pagada')),0)  AS saldo
