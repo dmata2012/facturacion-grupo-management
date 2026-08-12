@@ -10972,7 +10972,7 @@ function renderAsistencia(d) {
                 <td style="padding:5px 8px;font-weight:700">${n.nombre}</td>
                 <td style="padding:5px 8px;text-align:center;white-space:nowrap"${
                   n.quien ? ` title="Cambiado por ${n.quien}${n.cuando ? ' · ' + new Date(n.cuando).toLocaleString('es-MX') : ''}"` : ''}>
-                  ${n.antes ? cell(n.antes) : '<span style="color:#94a3b8;font-size:10px">automático</span>'}
+                  ${n.antes ? cell(n.antes) : '<span style="color:#94a3b8;font-size:10px">sin dato</span>'}
                   <span style="color:#94a3b8;margin:0 3px">→</span>
                   ${cell(n.codigo)}
                 </td>
@@ -11188,7 +11188,7 @@ function imprimirAsistencia() {
             <td>${fmtDate(n.fecha)}</td>
             <td>${n.nombre}</td>
             <td style="text-align:center;white-space:nowrap">${
-              n.antes ? pin(n.antes) : '<span style="color:#888;font-size:8.5px">auto</span>'} → ${pin(n.codigo)}</td>
+              n.antes ? pin(n.antes) : '<span style="color:#888;font-size:8.5px">—</span>'} → ${pin(n.codigo)}</td>
             <td>${(n.nota||'').replace(/</g,'&lt;')}${
               n.quien ? `<div style="font-size:8px;color:#888">${n.quien}</div>` : ''}</td>
           </tr>`;
@@ -11323,7 +11323,7 @@ function exportarAsistenciaExcel() {
     d.dias.forEach(f => {
       const c = e.celdas[f];
       if (typeof c === 'object' && c?.n)
-        notasAoa.push([e.nombre, fmtDate(f), c.a || 'automático', c.c, c.n,
+        notasAoa.push([e.nombre, fmtDate(f), c.a || '', c.c, c.n,
                        c.qp || '', c.cf ? new Date(c.cf).toLocaleString('es-MX') : '']);
     });
   });

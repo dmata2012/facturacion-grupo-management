@@ -622,14 +622,18 @@ router.get('/asistencia', verAsistencia, async (req, res) => {
         const reg = regByEmpDia[e.id]?.[fecha];
         const aj  = ajusByEmpDia[e.id]?.[fecha];
         const esFutura = fecha > hoyISO;
-        let cod;
-        // Prioridad: override manual > registro > solicitud > descanso > (falta o pendiente si futura)
-        if (aj && aj.codigo) cod = aj.codigo;
-        else if (reg && reg.hora_entrada) cod = 'A';
-        else if (sol) cod = codigoTipoSolicitud[sol] || 'V';
-        else if (descanso.includes(dow)) cod = 'D';
-        else if (esFutura) cod = '';   // fecha futura sin registro: no es falta
-        else cod = 'F';
+        // Lo que el sistema calcula por sí solo, sin considerar ajustes manuales.
+        // Se guarda aparte para poder decir de qué se corrigió una celda sin
+        // depender del historial: así también aplica a los ajustes viejos.
+        let codAuto;
+        if (reg && reg.hora_entrada) codAuto = 'A';
+        else if (sol) codAuto = codigoTipoSolicitud[sol] || 'V';
+        else if (descanso.includes(dow)) codAuto = 'D';
+        else if (esFutura) codAuto = '';   // fecha futura sin registro: no es falta
+        else codAuto = 'F';
+
+        // Prioridad: override manual > lo calculado
+        const cod = (aj && aj.codigo) ? aj.codigo : codAuto;
 
         // Retardo: solo aplica si asistió. Ya viene descontada la tolerancia
         // del colaborador desde el registro de entrada.
@@ -639,11 +643,16 @@ router.get('/asistencia', verAsistencia, async (req, res) => {
 
         celdas[fecha] = { c: cod, n: aj?.notas || null };
         if (conRetardo) { celdas[fecha].r = minRet; }   // minutos de retardo del día
-        // Rastro del último cambio manual: cómo estaba, quién lo movió y cuándo
+        // Rastro del cambio manual. "Cómo estaba" es el código que el sistema
+        // había calculado, no la etiqueta "automático": es lo que hace falta
+        // para entender de qué se corrigió la celda. Se prefiere el del
+        // historial —que registra el estado real al momento del cambio— y se cae
+        // al calculado, que siempre existe aunque el ajuste sea anterior al
+        // historial o los registros hayan cambiado después.
         if (aj?.notas || aj?.codigo) {
-          celdas[fecha].a  = aj.codigo_antes || null;      // código anterior
-          celdas[fecha].qp = aj.hecho_por_nombre || null;  // quién lo cambió
-          celdas[fecha].cf = aj.cambiado_en || null;       // cuándo
+          celdas[fecha].a  = aj.codigo_antes || codAuto || null;  // cómo estaba
+          celdas[fecha].qp = aj.hecho_por_nombre || null;         // quién lo cambió
+          celdas[fecha].cf = aj.cambiado_en || null;              // cuándo
         }
         if (totales[cod] !== undefined) totales[cod]++;
       });
