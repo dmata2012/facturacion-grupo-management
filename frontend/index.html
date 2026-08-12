@@ -6168,7 +6168,13 @@ async function loadFacturas() {
         <td style="text-align:right;font-weight:700;white-space:nowrap">${fmt(f.total)}</td>
         <td style="color:var(--success)">${fmt(f.cobrado)}</td>
         <td style="color:${parseFloat(f.saldo)>0?'var(--danger)':'var(--success)'};font-weight:600">${fmt(f.saldo)}</td>
-        <td>${(f.cliente_aplica_desglose === false)
+        <td>${
+          // Una factura cancelada se muestra como cancelada aunque su desglose
+          // estuviera cuadrado: el sello CUADRADA tapaba ese dato y hacia parecer
+          // que seguia vigente.
+          f.estatus === 'cancelada'
+            ? badgeEstatus(f.estatus)
+            : (f.cliente_aplica_desglose === false)
           ? badgeEstatus(f.estatus) + ' <span style="display:inline-flex;align-items:center;gap:3px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:20px;padding:2px 8px;color:#6b7280;font-size:10.5px;font-weight:700;margin-left:4px" title="Cliente no requiere desglose">✕ Sin desglose</span>'
           : (f.desglose_validado
               ? '<span title="Desglose cuadrado — factura bloqueada" style="display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:20px;padding:3px 10px;color:#166534;font-size:12px;font-weight:800">✔ CUADRADA</span>'
@@ -6185,7 +6191,11 @@ async function loadFacturas() {
           ${canFacturar() && !f.desglose_validado ? `<button class="btn bo bsm" onclick="editFactura(${f.id})" title="Editar factura">✏️</button>` : ''}
           ${(f.cliente_aplica_desglose !== false) ? `<button class="btn bg bsm" onclick="openRH(${f.id})" title="Ver/editar desglose">Desg</button>` : ''}
           <button class="btn bsuc bsm" onclick="openPago(${f.id})" title="Registrar pago">💲</button>
-          ${canFacturar()&&f.estatus!=='cancelada'?`<button class="btn bd bsm" onclick="cancelarFactura(${f.id},${!!f.desglose_validado})" title="${f.desglose_validado?'Cancelar factura (está cuadrada — pedirá confirmación)':'Cancelar factura'}">✕</button>`:''}
+          ${f.estatus === 'cancelada'
+            ? '<span style="color:var(--muted);font-size:10.5px;font-style:italic" title="Esta factura ya está cancelada">ya cancelada</span>'
+            : canFacturar()
+              ? `<button class="btn bd bsm" onclick="cancelarFactura(${f.id},${!!f.desglose_validado})" title="${f.desglose_validado?'Cancelar factura (está cuadrada — pedirá confirmación)':'Cancelar factura'}">✕</button>`
+              : `<span style="color:#b45309;font-size:10.5px;font-style:italic" title="Tu perfil (${(ME&&ME.rol)||'—'}) no tiene permiso de cancelar facturas. Lo pueden hacer admin, gerente, capturista y tesorería.">sin permiso de cancelar</span>`}
           ${canAdmin()&&!f.desglose_validado?`<button class="btn bd bsm" onclick="eliminarFactura(${f.id})" title="Eliminar factura" style="background:#fff0f0;border-color:#ffd7d7">🗑️</button>`:''}
           ${f.desglose_validado?`<span title="Desglose cuadrado: no se puede editar ni eliminar. Cancelar sí está permitido, con confirmación." style="color:var(--muted);font-size:11px;font-style:italic">🔒 sin edición</span>`:''}
         </td>
