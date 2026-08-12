@@ -547,6 +547,24 @@ router.get('/asistencia', verAsistencia, async (req, res) => {
       [desde, hasta]
     );
 
+    // Quincenas de nomina que se cruzan con el rango consultado. Sus incidencias
+    // generales se imprimen al pie de la lista: es informacion del periodo, no de
+    // una celda, y hoy se capturaba en Nomina sin llegar nunca a este reporte.
+    let quincenas = [];
+    try {
+      const qz = await query(`
+        SELECT quincena,
+               TO_CHAR(fecha_inicio,'YYYY-MM-DD') AS fecha_inicio,
+               TO_CHAR(fecha_fin,'YYYY-MM-DD')    AS fecha_fin,
+               estatus, notas
+          FROM fac_nomina_quincenas
+         WHERE fecha_inicio <= $2::date AND fecha_fin >= $1::date
+           AND NULLIF(TRIM(notas),'') IS NOT NULL
+         ORDER BY fecha_inicio
+      `, [desde, hasta]);
+      quincenas = qz.rows;
+    } catch (e) { quincenas = []; }
+
     // Generar lista de dias
     const dias = [];
     const d0 = new Date(desde+'T12:00:00');
@@ -641,7 +659,7 @@ router.get('/asistencia', verAsistencia, async (req, res) => {
       };
     });
 
-    res.json({ desde, hasta, dias, empleados: matriz });
+    res.json({ desde, hasta, dias, empleados: matriz, incidencias_nomina: quincenas });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

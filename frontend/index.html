@@ -10931,6 +10931,22 @@ function renderAsistencia(d) {
   });
   notas.sort((a,b) => a.fecha.localeCompare(b.fecha) || a.nombre.localeCompare(b.nombre));
 
+  // Incidencias generales de la quincena, capturadas en Nomina
+  const inci = d.incidencias_nomina || [];
+  if (inci.length) {
+    html += `
+      <div id="asist-inci-print" style="margin-top:20px">
+        <div style="font-size:13px;font-weight:900;color:#111;border-top:2px solid #111;padding-top:10px;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">📋 Incidencias generales de nómina</div>
+        ${inci.map(q => `<div style="border:1.5px solid #e5e7eb;border-radius:9px;padding:10px 13px;margin-bottom:8px;background:#f9fafb">
+          <div style="font-size:11px;font-weight:800;color:#374151;margin-bottom:4px">
+            Quincena ${q.quincena} · ${fmtDate(q.fecha_inicio)} al ${fmtDate(q.fecha_fin)}
+            ${q.estatus === 'cerrada' ? '<span style="color:#166534"> · cerrada</span>' : ''}
+          </div>
+          <div style="font-size:12px;color:#111;white-space:pre-wrap;line-height:1.5">${(q.notas||'').replace(/</g,'&lt;')}</div>
+        </div>`).join('')}
+      </div>`;
+  }
+
   if (notas.length) {
     html += `
       <div id="asist-notas-print" style="margin-top:20px;page-break-before:auto">
@@ -11148,6 +11164,16 @@ function imprimirAsistencia() {
     if (typeof c === 'object' && c?.n) notas.push({ nombre:e.nombre, fecha:f, codigo:c.c, nota:c.n });
   }));
   notas.sort((a,b) => a.fecha.localeCompare(b.fecha) || a.nombre.localeCompare(b.nombre));
+  const inci = d.incidencias_nomina || [];
+  const inciHtml = inci.length ? `
+    <div class="notas">
+      <div class="notas-titulo">📋 Incidencias generales de nómina</div>
+      ${inci.map(q => `<div class="inci">
+        <div class="inci-t">Quincena ${q.quincena} · ${fmtDate(q.fecha_inicio)} al ${fmtDate(q.fecha_fin)}</div>
+        <div class="inci-x">${(q.notas||'').replace(/</g,'&lt;')}</div>
+      </div>`).join('')}
+    </div>` : '';
+
   const notasHtml = notas.length ? `
     <div class="notas">
       <div class="notas-titulo">📝 Notas y justificaciones (${notas.length})</div>
@@ -11192,7 +11218,10 @@ function imprimirAsistencia() {
   .chip { display:inline-block; min-width:16px; padding:1px 3px; border-radius:3px; font-weight:900; font-size:8px }
   .chip.circle { border-radius:50%; width:16px; height:16px; line-height:14px; padding:0; text-align:center }
   .notas { margin-top:12px; page-break-inside:avoid }
-  .notas-titulo { font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:1px; border-top:1.5px solid #111; padding-top:6px; margin-bottom:5px }
+  .inci { border:.5px solid #ccc; border-radius:4px; padding:4px 6px; margin-bottom:4px; background:#fafafa }
+      .inci-t { font-size:7.5px; font-weight:800; color:#333; margin-bottom:2px }
+      .inci-x { font-size:8px; color:#111; white-space:pre-wrap; line-height:1.4 }
+      .notas-titulo { font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:1px; border-top:1.5px solid #111; padding-top:6px; margin-bottom:5px }
   table.tbl-notas { width:100%; border-collapse:collapse; font-size:9px }
   table.tbl-notas th, table.tbl-notas td { border:.5px solid #cbd5e1; padding:3px 5px; text-align:left }
   table.tbl-notas thead th { background:#f1f5f9; font-weight:800 }
@@ -11240,6 +11269,7 @@ function imprimirAsistencia() {
     </tr></thead>
     <tbody>${filas}</tbody>
   </table>
+  ${inciHtml}
   ${notasHtml}
   <div class="foot">Sistema de Facturación · Grupo Management</div>
   <script>window.addEventListener('load', () => setTimeout(() => window.print(), 400));<\/script>
