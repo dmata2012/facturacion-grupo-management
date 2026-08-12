@@ -480,6 +480,8 @@ canvas{max-height:230px}
   #modal-vac-print { position: absolute; inset: 0; background: #fff !important; padding: 20px !important; }
   #modal-vac-print .form-actions, #modal-vac-print .btn { display: none !important; }
   .sidebar, .sidebar-backdrop, .mobile-topbar { display: none !important; }
+  /* Avisos de configuración: ayudan en pantalla, estorban en la hoja */
+  .no-print { display: none !important; }
 }
 
 /* ══ MOBILE TOGGLE / HAMBURGER ═══════════════════════════════════ */
@@ -5346,6 +5348,15 @@ function renderReporteACobrar(r) {
         <div style="font-size:15px;font-weight:900;letter-spacing:1px;color:#111">CHEQUES A COBRAR:</div>
         <div style="font-size:13px;font-weight:800;color:#111">${fechaTxt}</div>
       </div>
+
+      ${(r.cuentas_sin_empresa || []).length ? `
+      <div class="no-print" style="background:#fffbeb;border:1.5px solid #fbbf24;border-radius:9px;
+           padding:10px 14px;margin-bottom:16px;font-size:12px;color:#78350f;line-height:1.55">
+        <strong>⚠ Falta asignar la empresa</strong> en ${r.cuentas_sin_empresa.length === 1 ? 'esta cuenta' : 'estas cuentas'}:
+        ${r.cuentas_sin_empresa.map(c => `<strong>${c}</strong>`).join(', ')}.
+        Mientras tanto se usa el titular de la cuenta.
+        Se configura en <em>Bancos → Cuentas Bancarias → ✏️ de la cuenta → campo Empresa</em>.
+      </div>` : ''}
 
       ${r.grupos.map((g, i) => {
         const col = colores[i % colores.length];

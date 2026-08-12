@@ -730,6 +730,7 @@ router.get('/cheques/reporte-a-cobrar', async (req, res) => {
       SELECT c.id, c.no_cheque, TO_CHAR(c.fecha_emision,'YYYY-MM-DD') AS fecha_emision, c.monto, c.concepto, c.estatus,
         b.nombre_completo AS beneficiario_nombre,
         cu.banco, cu.alias AS cuenta_alias, cu.numero_cuenta, cu.moneda,
+        cu.titular, cu.empresa_id,
         e.nombre AS empresa_nombre
       FROM fac_bancos_cheques c
       LEFT JOIN fac_bancos_beneficiarios b ON b.id = c.beneficiario_id
@@ -739,12 +740,28 @@ router.get('/cheques/reporte-a-cobrar', async (req, res) => {
       ORDER BY cu.banco, e.nombre, c.no_cheque
     `, params);
 
-    // Agrupar por banco+empresa
+    // Agrupar por banco + empresa.
+    // La empresa se configura en la cuenta bancaria, no en la chequera. Cuando la
+    // cuenta no la tiene asignada se usa su titular, que es la razón social y
+    // sirve igual para identificar de quién salen los cheques; "Sin empresa"
+    // queda solo si la cuenta no tiene ni una cosa ni la otra.
+    const rotulo = ch => ch.empresa_nombre
+      || (ch.titular && ch.titular.trim())
+      || (ch.cuenta_alias && ch.cuenta_alias.trim())
+      || 'Sin empresa';
+
     const grupos = {};
     let importeTotal = 0;
+    const cuentasSinEmpresa = new Set();
     for (const ch of r.rows) {
-      const key = `${ch.banco}||${ch.empresa_nombre||'SIN EMPRESA'}`;
-      if (!grupos[key]) grupos[key] = { banco: ch.banco, empresa: ch.empresa_nombre||'SIN EMPRESA', cheques: [], subtotal: 0 };
+      const emp = rotulo(ch);
+      if (!ch.empresa_id) cuentasSinEmpresa.add(`${ch.banco} · ${emp}`);
+      const key = `${ch.banco}||${emp}`;
+      if (!grupos[key]) grupos[key] = {
+        banco: ch.banco, empresa: emp,
+        empresa_asignada: !!ch.empresa_id,   // para avisar que falta configurarla
+        cheques: [], subtotal: 0
+      };
       grupos[key].cheques.push(ch);
       grupos[key].subtotal += parseFloat(ch.monto);
       importeTotal += parseFloat(ch.monto);
@@ -755,7 +772,8 @@ router.get('/cheques/reporte-a-cobrar', async (req, res) => {
       hasta: hasta || null,
       grupos: Object.values(grupos),
       importe_total: importeTotal,
-      total_cheques: r.rows.length
+      total_cheques: r.rows.length,
+      cuentas_sin_empresa: [...cuentasSinEmpresa]
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
