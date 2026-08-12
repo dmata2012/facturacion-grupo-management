@@ -17,16 +17,26 @@ router.get('/', async (req, res) => {
       // porque son montos históricos reales, no saldos pendientes.
       query(`
         SELECT
-          COALESCE(SUM(f.total) FILTER (WHERE f.estatus != 'cancelada'),0)              AS facturado,
-          COALESCE(SUM(p.monto),0)                                                       AS cobrado,
+          COALESCE(SUM(f.total)     FILTER (WHERE f.estatus != 'cancelada'),0)           AS facturado,
+          COALESCE(SUM(pg.cobrado)  FILTER (WHERE f.estatus != 'cancelada'),0)           AS cobrado,
+          COALESCE(SUM(pg.cobrado)  FILTER (WHERE f.estatus  = 'cancelada'),0)           AS cobrado_canceladas,
           COALESCE(SUM(f.total) FILTER (WHERE f.estatus NOT IN ('cancelada','pagada') AND COALESCE(c.aplica_desglose,TRUE)),0)
-            - COALESCE(SUM(p.monto) FILTER (WHERE f.estatus NOT IN ('cancelada','pagada') AND COALESCE(c.aplica_desglose,TRUE)),0) AS por_cobrar,
+            - COALESCE(SUM(pg.cobrado) FILTER (WHERE f.estatus NOT IN ('cancelada','pagada') AND COALESCE(c.aplica_desglose,TRUE)),0) AS por_cobrar,
           COALESCE(SUM(f.total) FILTER (WHERE f.estatus='vencida' AND COALESCE(c.aplica_desglose,TRUE)),0)
-            - COALESCE(SUM(p.monto) FILTER (WHERE f.estatus='vencida' AND COALESCE(c.aplica_desglose,TRUE)),0) AS vencido,
+            - COALESCE(SUM(pg.cobrado) FILTER (WHERE f.estatus='vencida' AND COALESCE(c.aplica_desglose,TRUE)),0) AS vencido,
           COUNT(f.id) FILTER (WHERE f.estatus != 'cancelada')::int                       AS total_facturas,
+          COUNT(f.id) FILTER (WHERE f.estatus != 'cancelada'
+                                AND COALESCE(pg.cobrado,0) > f.total + 0.01)::int        AS facturas_sobrepagadas,
+          COALESCE(SUM(GREATEST(COALESCE(pg.cobrado,0) - f.total, 0))
+                   FILTER (WHERE f.estatus != 'cancelada'),0)                            AS sobrepago,
           COUNT(DISTINCT f.cliente_id) FILTER (WHERE f.estatus != 'cancelada')::int      AS clientes_activos
         FROM fac_facturas f
-        LEFT JOIN fac_pagos p ON p.factura_id = f.id
+        -- Los pagos se agregan por factura ANTES de unir: con el LEFT JOIN directo
+        -- una factura con tres pagos aparecia tres veces y su total se sumaba tres
+        -- veces en facturado y en el conteo de facturas.
+        LEFT JOIN (
+          SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
+        ) pg ON pg.factura_id = f.id
         LEFT JOIN fac_clientes c ON c.id = f.cliente_id
         WHERE EXTRACT(YEAR FROM f.fecha_emision) = $1
       `, [año]),
@@ -42,10 +52,13 @@ router.get('/', async (req, res) => {
       // Facturado mensual vs cobrado
       query(`
         SELECT EXTRACT(MONTH FROM f.fecha_emision)::int AS mes,
-          COALESCE(SUM(f.total) FILTER (WHERE f.estatus != 'cancelada'),0) AS facturado,
-          COALESCE(SUM(p.monto),0) AS cobrado
+          COALESCE(SUM(f.total),0)         AS facturado,
+          COALESCE(SUM(pg.cobrado),0)      AS cobrado
         FROM fac_facturas f
-        LEFT JOIN fac_pagos p ON p.factura_id=f.id AND EXTRACT(YEAR FROM p.fecha_pago)=$1
+        LEFT JOIN (
+          SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos
+           WHERE EXTRACT(YEAR FROM fecha_pago)=$1 GROUP BY factura_id
+        ) pg ON pg.factura_id = f.id
         WHERE EXTRACT(YEAR FROM f.fecha_emision)=$1 AND f.estatus != 'cancelada'
         GROUP BY mes ORDER BY mes
       `, [año]),
@@ -53,11 +66,13 @@ router.get('/', async (req, res) => {
       // Top 5 clientes por facturación
       query(`
         SELECT c.razon_social,
-          COALESCE(SUM(f.total) FILTER (WHERE f.estatus != 'cancelada'),0) AS facturado,
-          COALESCE(SUM(p.monto),0) AS cobrado
+          COALESCE(SUM(f.total),0)    AS facturado,
+          COALESCE(SUM(pg.cobrado),0) AS cobrado
         FROM fac_clientes c
         JOIN fac_facturas f ON f.cliente_id=c.id
-        LEFT JOIN fac_pagos p ON p.factura_id=f.id
+        LEFT JOIN (
+          SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
+        ) pg ON pg.factura_id = f.id
         WHERE EXTRACT(YEAR FROM f.fecha_emision)=$1 AND f.estatus != 'cancelada'
         GROUP BY c.id ORDER BY facturado DESC LIMIT 5
       `, [año]),

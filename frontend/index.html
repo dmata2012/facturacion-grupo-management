@@ -5757,7 +5757,25 @@ async function dashboard() {
         <div class="label">Total Cobrado</div>
         <div class="value">${fmt(k.cobrado)}</div>
         <div class="sub"><span class="trend-up">↑ ${cobradoPct}%</span> de lo facturado</div>
-        <div class="progress-bar" style="margin-top:10px"><div class="progress-fill" style="width:${cobradoPct}%;background:linear-gradient(90deg,#16a34a,#4ade80)"></div></div>
+        <div class="progress-bar" style="margin-top:10px"><div class="progress-fill" style="width:${Math.min(100, cobradoPct)}%;background:linear-gradient(90deg,#16a34a,#4ade80)"></div></div>
+        ${(() => {
+          // Cobrar mas de lo facturado tiene explicaciones concretas; se nombran
+          // en vez de dejar al usuario adivinando por que pasa del 100%.
+          if (parseFloat(k.cobrado) <= parseFloat(k.facturado)) return '';
+          const causas = [];
+          if (parseFloat(k.sobrepago) > 0)
+            causas.push(`${fmt(k.sobrepago)} de pagos que exceden el total de su factura`);
+          const dif = parseFloat(k.cobrado) - parseFloat(k.facturado);
+          const otro = dif - (parseFloat(k.sobrepago) || 0);
+          if (otro > 1)
+            causas.push(`${fmt(otro)} de facturas de otros años o ajustes`);
+          return `<div style="margin-top:8px;font-size:10.5px;color:#78350f;background:#fffbeb;
+                       border:1px solid #fcd34d;border-radius:8px;padding:6px 9px;line-height:1.45"
+                       title="El cobrado incluye pagos aplicados a facturas ${año}; si un pago excede el total de su factura o corresponde a otro periodo, la relación pasa del 100%.">
+            Supera el 100%: ${causas.join(' y ') || 'hay pagos que no corresponden a lo facturado en el año'}.
+            ${k.facturas_sobrepagadas ? `<br>${k.facturas_sobrepagadas} factura${k.facturas_sobrepagadas!=1?'s':''} con pago de más.` : ''}
+          </div>`;
+        })()}
       </div>
       <div class="kpi warning" id="dkpi-porcobrar" onclick="cargarDetalleDash('por_cobrar')" style="cursor:pointer" title="Ver facturas pendientes">
         <div class="kpi-icon">⏳</div>
