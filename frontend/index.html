@@ -6156,14 +6156,16 @@ async function loadFacturas() {
     const d = await api(url);
     $('fac-table').innerHTML = d.data.length ? `
     <div class="tscroll"><table>
-      <thead><tr><th>Folio</th><th>Emisora</th><th>Cliente</th><th>Fecha</th><th>Vence</th><th>Total</th><th>Cobrado</th><th>Saldo</th><th>Estatus</th><th>Estatus SAT</th><th>Acciones</th></tr></thead>
+      <thead><tr><th>Folio</th><th>Emisora</th><th>Cliente</th><th>Fecha</th><th>Vence</th><th style="text-align:right">Subtotal</th><th style="text-align:right">IVA</th><th style="text-align:right">Total</th><th>Cobrado</th><th>Saldo</th><th>Estatus</th><th>Estatus SAT</th><th>Acciones</th></tr></thead>
       <tbody>${d.data.map(f=>`<tr>
         <td><a href="#" onclick="detalleFactura(${f.id})" style="color:var(--red);font-weight:600">${f.folio||'#'+f.id}</a></td>
         <td style="font-size:11px;font-weight:600" title="${f.emisora_razon_social||''}">${f.emisora_nombre_comercial||f.emisora_razon_social||'<span style="color:var(--muted)">—</span>'}</td>
         <td>${f.razon_social||'<span style="color:var(--muted)">Sin cliente</span>'}</td>
         <td>${fmtDate(f.fecha_emision)}</td>
         <td>${f.fecha_vencimiento?fmtDate(f.fecha_vencimiento):'—'}</td>
-        <td style="font-weight:600">${fmt(f.total)}</td>
+        <td style="text-align:right;color:var(--muted);white-space:nowrap">${fmt(f.subtotal)}</td>
+        <td style="text-align:right;color:var(--muted);white-space:nowrap">${fmt(f.iva)}</td>
+        <td style="text-align:right;font-weight:700;white-space:nowrap">${fmt(f.total)}</td>
         <td style="color:var(--success)">${fmt(f.cobrado)}</td>
         <td style="color:${parseFloat(f.saldo)>0?'var(--danger)':'var(--success)'};font-weight:600">${fmt(f.saldo)}</td>
         <td>${(f.cliente_aplica_desglose === false)
