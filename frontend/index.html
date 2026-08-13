@@ -12096,7 +12096,14 @@ async function openConfigPINs() {
 // ── Selector desplegable de ubicaciones por colaborador ──
 function _lblUbi(setAsig, ubis) {
   const n = setAsig.size;
-  if (n === 0) return '🌐 Cualquier ubicación';
+  // Sin asignaciones NO significa "checa desde donde sea": el sistema valida
+  // contra todas las ubicaciones registradas. Si no hay ninguna dada de alta y la
+  // validacion por GPS esta activa, nadie puede marcar, y eso hay que avisarlo.
+  if (n === 0) {
+    const total = (ubis || []).length;
+    if (!total) return '⚠ Sin ubicaciones dadas de alta';
+    return `🌐 Cualquiera de las ${total}`;
+  }
   if (n === 1) {
     const u = ubis.find(x => setAsig.has(x.id));
     return `📍 ${u ? u.nombre : '1 ubicación'}`;

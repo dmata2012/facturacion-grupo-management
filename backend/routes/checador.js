@@ -191,6 +191,33 @@ async function ubicacionCercana(lat, lng, empleadoId) {
   return mejor;
 }
 
+// Explica POR QUÉ no se pudo validar la ubicación. Sin esto, "estás fuera del
+// área" no distingue entre estar a 30 metros del radio, no tener ninguna
+// ubicación registrada en el sistema, o tener asignada una sucursal equivocada.
+async function porQueFueraDeUbicacion(lat, lng, empleadoId) {
+  const asignadas = await query(
+    `SELECT u.* FROM fac_checador_ubicaciones u
+     JOIN fac_empleado_ubicaciones eu ON eu.ubicacion_id = u.id
+     WHERE u.activo = TRUE AND eu.empleado_id = $1`, [empleadoId]);
+  const todas = await query(`SELECT * FROM fac_checador_ubicaciones WHERE activo = TRUE`);
+
+  if (!todas.rows.length)
+    return 'No hay ninguna ubicación registrada en el sistema. Pide a Recursos Humanos que dé de alta la ubicación de trabajo, o que desactive la validación por GPS.';
+
+  const evaluadas = asignadas.rows.length ? asignadas.rows : todas.rows;
+  let cerca = null;
+  for (const u of evaluadas) {
+    const d = distanciaMetros(lat, lng, parseFloat(u.latitud), parseFloat(u.longitud));
+    if (!cerca || d < cerca.d) cerca = { d, nombre: u.nombre, radio: u.radio_metros };
+  }
+
+  const alcance = asignadas.rows.length
+    ? `Solo puedes marcar en ${asignadas.rows.length === 1 ? 'la ubicación que tienes asignada' : `tus ${asignadas.rows.length} ubicaciones asignadas`}.`
+    : 'No tienes ubicaciones asignadas, así que se validó contra todas las registradas.';
+
+  return `Estás a ${Math.round(cerca.d)} m de "${cerca.nombre}", que admite hasta ${cerca.radio} m. ${alcance}`;
+}
+
 // GET /api/checador/empleados/:id/ubicaciones — obtener ubicaciones asignadas
 async function _getEmpUbicaciones(empId) {
   const r = await query(
@@ -967,7 +994,8 @@ router.post('/entrada', async (req, res) => {
       ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng), empleado_id);
       if (!ubiInfo) {
         return res.status(403).json({
-          error: 'Estás fuera del área autorizada de trabajo. Solo puedes marcar entrada dentro de una ubicación registrada.'
+          error: 'No puedes marcar entrada desde aquí. ' +
+                 await porQueFueraDeUbicacion(parseFloat(lat), parseFloat(lng), empleado_id)
         });
       }
     } else if (lat != null && lng != null) {
@@ -1096,7 +1124,8 @@ router.post('/salida', async (req, res) => {
       ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng), empleado_id);
       if (!ubiInfo) {
         return res.status(403).json({
-          error: 'Estás fuera del área autorizada de trabajo. Solo puedes marcar salida dentro de una ubicación registrada.'
+          error: 'No puedes marcar salida desde aquí. ' +
+                 await porQueFueraDeUbicacion(parseFloat(lat), parseFloat(lng), empleado_id)
         });
       }
     } else if (lat != null && lng != null) {
