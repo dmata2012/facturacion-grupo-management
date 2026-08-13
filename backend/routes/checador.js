@@ -191,6 +191,17 @@ async function ubicacionCercana(lat, lng, empleadoId) {
   return mejor;
 }
 
+// Permiso individual para marcar fuera de las ubicaciones autorizadas, y marca en
+// el registro de cuando se ejercio. Pensado para quien trabaja en campo; el
+// registro queda señalado para que no se confunda con una asistencia normal.
+(async () => {
+  try {
+    await query(`ALTER TABLE fac_empleados ADD COLUMN IF NOT EXISTS checa_fuera_ubicacion BOOLEAN DEFAULT FALSE`);
+    await query(`ALTER TABLE fac_reloj_checador ADD COLUMN IF NOT EXISTS fuera_ubicacion_entr BOOLEAN DEFAULT FALSE`);
+    await query(`ALTER TABLE fac_reloj_checador ADD COLUMN IF NOT EXISTS fuera_ubicacion_sal  BOOLEAN DEFAULT FALSE`);
+  } catch (e) { console.warn('Migración fuera de ubicación:', e.message); }
+})();
+
 // Explica POR QUÉ no se pudo validar la ubicación. Sin esto, "estás fuera del
 // área" no distingue entre estar a 30 metros del radio, no tener ninguna
 // ubicación registrada en el sistema, o tener asignada una sucursal equivocada.
@@ -217,6 +228,16 @@ async function porQueFueraDeUbicacion(lat, lng, empleadoId) {
 
   return `Estás a ${Math.round(cerca.d)} m de "${cerca.nombre}", que admite hasta ${cerca.radio} m. ${alcance}`;
 }
+
+// PATCH /api/checador/empleados/:id/fuera-ubicacion — permitir marcar fuera del área
+router.patch('/empleados/:id/fuera-ubicacion',
+  requireRol('admin', 'gerente', 'capturista'), async (req, res) => {
+  try {
+    await query(`UPDATE fac_empleados SET checa_fuera_ubicacion=$1 WHERE id=$2`,
+      [req.body.permitir === true, req.params.id]);
+    res.json({ ok: true, permitir: req.body.permitir === true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // GET /api/checador/empleados/:id/ubicaciones — obtener ubicaciones asignadas
 async function _getEmpUbicaciones(empId) {
@@ -332,6 +353,8 @@ router.get('/hoy', async (req, res) => {
         us.nombre AS ubicacion_salida,
         (r.foto_entrada IS NOT NULL) AS tiene_foto_entrada,
         (r.foto_salida  IS NOT NULL) AS tiene_foto_salida,
+        COALESCE(r.fuera_ubicacion_entr, FALSE) AS fuera_ubicacion_entr,
+        COALESCE(r.fuera_ubicacion_sal,  FALSE) AS fuera_ubicacion_sal,
         e.nombre, e.puesto, e.departamento, e.numero_colaborador, e.hora_entrada_esperada
       FROM fac_reloj_checador r
       JOIN fac_empleados e ON e.id = r.empleado_id
@@ -987,16 +1010,25 @@ router.post('/entrada', async (req, res) => {
     // Validar ubicación si está activada
     const validarUbi = await validarUbicacionRequerida();
     let ubiInfo = null;
+    let fueraUbicacion = false;
     if (validarUbi) {
       if (lat == null || lng == null) {
         return res.status(400).json({ error: 'Ubicación requerida. Autoriza el acceso al GPS en tu navegador.' });
       }
       ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng), empleado_id);
       if (!ubiInfo) {
-        return res.status(403).json({
-          error: 'No puedes marcar entrada desde aquí. ' +
-                 await porQueFueraDeUbicacion(parseFloat(lat), parseFloat(lng), empleado_id)
-        });
+        // Quien trabaja en campo puede tener autorizado marcar fuera del area.
+        // Se permite, pero el registro queda señalado.
+        const permiso = await query(
+          `SELECT COALESCE(checa_fuera_ubicacion, FALSE) AS puede FROM fac_empleados WHERE id=$1`,
+          [empleado_id]);
+        if (!permiso.rows[0]?.puede) {
+          return res.status(403).json({
+            error: 'No puedes marcar entrada desde aquí. ' +
+                   await porQueFueraDeUbicacion(parseFloat(lat), parseFloat(lng), empleado_id)
+          });
+        }
+        fueraUbicacion = true;
       }
     } else if (lat != null && lng != null) {
       // Guardar ubicación aunque no sea obligatoria
@@ -1082,13 +1114,15 @@ router.post('/entrada', async (req, res) => {
     } else {
       await query(
         `INSERT INTO fac_reloj_checador(empleado_id, fecha, hora_entrada, minutos_retardo, notas,
-           lat_entrada, lng_entrada, ubicacion_id_entr, distancia_entr_mts, foto_entrada, creado_por)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+           lat_entrada, lng_entrada, ubicacion_id_entr, distancia_entr_mts, foto_entrada,
+           fuera_ubicacion_entr, creado_por)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [empleado_id, hoy, horaAhora, minutosRetardo, notas||null,
          lat != null ? parseFloat(lat) : null,
          lng != null ? parseFloat(lng) : null,
          ubiInfo?.id || null, ubiInfo?.distancia ?? null,
          fotoOk,
+         fueraUbicacion,
          req.usuario.id]
       );
     }
@@ -1117,16 +1151,23 @@ router.post('/salida', async (req, res) => {
     // Validar ubicación si está activada
     const validarUbi = await validarUbicacionRequerida();
     let ubiInfo = null;
+    let fueraUbicacion = false;
     if (validarUbi) {
       if (lat == null || lng == null) {
         return res.status(400).json({ error: 'Ubicación requerida. Autoriza el acceso al GPS en tu navegador.' });
       }
       ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng), empleado_id);
       if (!ubiInfo) {
-        return res.status(403).json({
-          error: 'No puedes marcar salida desde aquí. ' +
-                 await porQueFueraDeUbicacion(parseFloat(lat), parseFloat(lng), empleado_id)
-        });
+        const permiso = await query(
+          `SELECT COALESCE(checa_fuera_ubicacion, FALSE) AS puede FROM fac_empleados WHERE id=$1`,
+          [empleado_id]);
+        if (!permiso.rows[0]?.puede) {
+          return res.status(403).json({
+            error: 'No puedes marcar salida desde aquí. ' +
+                   await porQueFueraDeUbicacion(parseFloat(lat), parseFloat(lng), empleado_id)
+          });
+        }
+        fueraUbicacion = true;
       }
     } else if (lat != null && lng != null) {
       ubiInfo = await ubicacionCercana(parseFloat(lat), parseFloat(lng), empleado_id);
@@ -1175,6 +1216,7 @@ router.post('/salida', async (req, res) => {
          notas=COALESCE(NULLIF($3,''), notas),
          lat_salida=$4, lng_salida=$5, ubicacion_id_sal=$6, distancia_sal_mts=$7,
          foto_salida=COALESCE($8, foto_salida),
+         fuera_ubicacion_sal=$10,
          actualizado_en=NOW()
        WHERE id=$9`,
       [horaAhora, minTrab, notas||'',
@@ -1182,7 +1224,8 @@ router.post('/salida', async (req, res) => {
        lng != null ? parseFloat(lng) : null,
        ubiInfo?.id || null, ubiInfo?.distancia ?? null,
        fotoOk,
-       reg.rows[0].id]
+       reg.rows[0].id,
+       fueraUbicacion]
     );
 
     // Traer notificaciones pendientes también al marcar salida

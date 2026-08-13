@@ -10572,7 +10572,10 @@ function renderUbicacionCH(r) {
       : '';
     parts.push(`<div><span style="color:#166534;font-weight:700">📥 ${r.ubicacion_entrada}</span><span style="color:var(--muted)">${dist}</span>${link}</div>`);
   } else if (r.lat_entrada && r.lng_entrada) {
-    parts.push(`<div><a href="https://www.google.com/maps?q=${r.lat_entrada},${r.lng_entrada}" target="_blank" style="color:#d97706;text-decoration:none" title="Fuera de zona autorizada">📥 ⚠ Fuera de zona 🗺</a></div>`);
+    // Marcar fuera del area puede ser una anomalia o un permiso de campo; se
+    // distinguen porque significan cosas distintas para quien revisa.
+    const aut = r.fuera_ubicacion_entr;
+    parts.push(`<div><a href="https://www.google.com/maps?q=${r.lat_entrada},${r.lng_entrada}" target="_blank" style="color:${aut?'#0369a1':'#d97706'};text-decoration:none" title="${aut?'Marcó fuera del área con permiso autorizado':'Fuera de zona autorizada'}">📥 ${aut?'🛰 Fuera del área (autorizado)':'⚠ Fuera de zona'} 🗺</a></div>`);
   }
   if (r.ubicacion_salida) {
     const dist = r.distancia_sal_mts != null ? ` · ${r.distancia_sal_mts}m` : '';
@@ -12075,6 +12078,13 @@ async function openConfigPINs() {
                       </label>`;
                     }).join('')}
                     <div class="ft">Sin selección = puede marcar en <strong>cualquier</strong> ubicación activa.</div>
+                    <label class="ubi-op${e.checa_fuera_ubicacion?' on':''}"
+                           style="border-top:1px solid var(--border);margin-top:4px;padding-top:7px"
+                           title="Para quien trabaja en campo. El registro queda señalado como fuera de ubicación.">
+                      <input type="checkbox" ${e.checa_fuera_ubicacion?'checked':''}
+                             onchange="onToggleFueraUbi(this, ${e.id})">
+                      <span class="bx"></span>🛰 Puede marcar fuera del área
+                    </label>
                   </div>
                 </div>` : '<span style="font-size:10.5px;color:#92400e;font-style:italic">⚠ Sin ubicaciones — créalas en 📍 Ubicaciones</span>'}
               </td>
@@ -12094,6 +12104,25 @@ async function openConfigPINs() {
 }
 
 // ── Selector desplegable de ubicaciones por colaborador ──
+// Permiso individual para marcar fuera de las ubicaciones autorizadas.
+// Existe para el personal de campo; el registro queda señalado, asi que se puede
+// distinguir despues de una asistencia normal.
+async function onToggleFueraUbi(chk, empId) {
+  const activo = chk.checked;
+  chk.disabled = true;
+  try {
+    await api(`/checador/empleados/${empId}/fuera-ubicacion`, {
+      method: 'PATCH', body: JSON.stringify({ permitir: activo })
+    });
+    chk.closest('label').classList.toggle('on', activo);
+    toast(activo ? 'Puede marcar fuera del área. Sus registros quedarán señalados.'
+                 : 'Ya solo puede marcar dentro de sus ubicaciones.');
+  } catch(e) {
+    chk.checked = !activo;
+    toast(e.message, 'err');
+  } finally { chk.disabled = false; }
+}
+
 function _lblUbi(setAsig, ubis) {
   const n = setAsig.size;
   // Sin asignaciones NO significa "checa desde donde sea": el sistema valida
