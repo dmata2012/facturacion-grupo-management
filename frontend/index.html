@@ -12601,6 +12601,13 @@ async function openTiposSF() {
           <div style="font-size:11px;color:${t.n_registros ? 'var(--muted)' : '#16a34a'};margin-top:1px">
             ${t.n_registros ? `${t.n_registros} cobro${t.n_registros!=1?'s':''} registrado${t.n_registros!=1?'s':''}` : 'Sin usar — se puede eliminar'}
           </div>
+          <label style="display:inline-flex;align-items:center;gap:6px;margin-top:5px;cursor:pointer;
+                        font-size:10.5px;font-weight:700;color:${t.en_reporte_mensual?'#059669':'var(--muted)'}"
+                 title="Los tipos marcados suman en la columna Otros Ingresos del Reporte Mensual de Dirección">
+            <input type="checkbox" ${t.en_reporte_mensual?'checked':''}
+                   onchange="onToggleTipoMensual(this, ${t.id}, '${(t.nombre||'').replace(/'/g,"\'")}')">
+            📋 Suma en el Reporte Mensual
+          </label>
         </div>
         <button class="btn bo bsm" style="padding:5px 10px" onclick="renombrarTipoSF(${t.id},'${(t.nombre||'').replace(/'/g,"\\'")}')">✏️</button>
         <button class="btn ${t.n_registros?'bo':'bd'} bsm" style="padding:5px 10px${t.n_registros?';opacity:.45':''}"
@@ -12622,6 +12629,27 @@ async function openTiposSF() {
       <button class="btn bs" onclick="closeModal('modal-gt-cats');cargarSF()">Listo</button>
     </div>`;
   openModal('modal-gt-cats');
+}
+
+// Marca si el tipo suma en la columna "Otros Ingresos" del Reporte Mensual.
+// Se manda el nombre porque el endpoint de edicion lo exige; la bandera es lo
+// unico que cambia.
+async function onToggleTipoMensual(chk, id, nombre) {
+  const activo = chk.checked;
+  chk.disabled = true;
+  try {
+    const t = (window._sfTipos || []).find(x => x.id === id) || {};
+    await api(`/ingresos-sf/tipos/${id}`, { method:'PUT', body: JSON.stringify({
+      nombre: t.nombre || nombre, color: t.color, orden: t.orden,
+      en_reporte_mensual: activo }) });
+    chk.closest('label').style.color = activo ? '#059669' : 'var(--muted)';
+    toast(activo ? `"${t.nombre || nombre}" ya suma en el Reporte Mensual.`
+                 : `"${t.nombre || nombre}" deja de sumar en el Reporte Mensual.`);
+    await sfCargarTipos(true);
+  } catch(e) {
+    chk.checked = !activo;
+    toast(e.message, 'err');
+  } finally { chk.disabled = false; }
 }
 
 async function crearTipoSF() {

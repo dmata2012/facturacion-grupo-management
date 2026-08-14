@@ -685,10 +685,15 @@ router.get('/mensual-direccion', async (req, res) => {
     // Otros ingresos: los cobros sin factura. La tabla puede no existir todavía.
     let otros = [];
     try {
+      // Solo los tipos marcados para este reporte. Sin el filtro, la columna
+      // sumaria todos los cobros sin factura y no coincidiria con lo que
+      // direccion espera ver ahi.
       const o = await query(`
-        SELECT EXTRACT(MONTH FROM fecha_cobro)::int AS mes, COALESCE(SUM(monto),0) AS total
-          FROM fac_ingresos_sf
-         WHERE EXTRACT(YEAR FROM fecha_cobro) = $1
+        SELECT EXTRACT(MONTH FROM i.fecha_cobro)::int AS mes, COALESCE(SUM(i.monto),0) AS total
+          FROM fac_ingresos_sf i
+          JOIN fac_ingresos_sf_tipos t ON t.id = i.tipo_id
+         WHERE EXTRACT(YEAR FROM i.fecha_cobro) = $1
+           AND t.en_reporte_mensual = TRUE
          GROUP BY 1`, [anio]);
       otros = o.rows;
     } catch (e) { otros = []; }

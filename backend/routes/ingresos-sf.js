@@ -13,9 +13,10 @@ router.use(verificarToken);
 // hay saldo, ni fecha de vencimiento, ni estatus de cobro: el registro ES el
 // cobro. Si algún día se pudiera quedar a deber, esto necesitaría replantearse.
 const TIPOS_SEED = [
-  { nombre: 'Relativos',           color: '#0891b2', orden: 1 },
-  { nombre: 'Otros Ingresos',      color: '#7c3aed', orden: 2 },
-  { nombre: 'Ingresos por Mes SRI', color: '#059669', orden: 3 }
+  { nombre: 'Relativos',            color: '#0891b2', orden: 1, mensual: false },
+  { nombre: 'Otros Ingresos',       color: '#7c3aed', orden: 2, mensual: false },
+  // Este es el que alimenta la columna "Otros Ingresos" del Reporte Mensual
+  { nombre: 'Ingresos por Mes SRI', color: '#059669', orden: 3, mensual: true }
 ];
 
 (async () => {
@@ -53,11 +54,24 @@ const TIPOS_SEED = [
     // ensuciando pantallas que existen para perseguir dinero por cobrar.
     await query(`ALTER TABLE fac_clientes ADD COLUMN IF NOT EXISTS solo_sf BOOLEAN DEFAULT FALSE`);
 
+    // Que tipos suman en la columna "Otros Ingresos" del Reporte Mensual de
+    // Direccion. Es una decision de reporte, no del cobro, por eso vive en el tipo.
+    await query(`ALTER TABLE fac_ingresos_sf_tipos ADD COLUMN IF NOT EXISTS en_reporte_mensual BOOLEAN DEFAULT FALSE`);
+
     for (const t of TIPOS_SEED) {
-      await query(
-        `INSERT INTO fac_ingresos_sf_tipos(nombre, color, orden) VALUES($1,$2,$3)
-         ON CONFLICT (nombre) DO NOTHING`,
-        [t.nombre, t.color, t.orden]);
+      // DO NOTHING para no pisar nombre ni color ajustados desde la pantalla;
+      // la bandera se siembra aparte solo si el tipo acaba de crearse.
+      const r = await query(
+        `INSERT INTO fac_ingresos_sf_tipos(nombre, color, orden, en_reporte_mensual)
+         VALUES($1,$2,$3,$4)
+         ON CONFLICT (nombre) DO NOTHING RETURNING id`,
+        [t.nombre, t.color, t.orden, !!t.mensual]);
+      if (!r.rows.length && t.mensual) {
+        // Ya existia sin la bandera (se creo antes de que la columna existiera)
+        await query(
+          `UPDATE fac_ingresos_sf_tipos SET en_reporte_mensual = TRUE
+            WHERE nombre = $1 AND en_reporte_mensual IS NOT TRUE`, [t.nombre]);
+      }
     }
     console.log('✔ Otros Ingresos S/F: tablas listas');
   } catch (e) { console.warn('Migración ingresos S/F:', e.message); }
@@ -77,22 +91,30 @@ router.get('/tipos', async (req, res) => {
 
 router.post('/tipos', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
   try {
-    const { nombre, color, orden } = req.body;
+    const { nombre, color, orden, en_reporte_mensual } = req.body;
     if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Nombre del tipo requerido.' });
     const r = await query(
-      `INSERT INTO fac_ingresos_sf_tipos(nombre, color, orden) VALUES($1,$2,$3)
+      `INSERT INTO fac_ingresos_sf_tipos(nombre, color, orden, en_reporte_mensual)
+       VALUES($1,$2,$3,$4)
        ON CONFLICT (nombre) DO UPDATE SET activo=TRUE, color=EXCLUDED.color RETURNING *`,
-      [nombre.trim(), color || '#0891b2', parseInt(orden) || 99]);
+      [nombre.trim(), color || '#0891b2', parseInt(orden) || 99, en_reporte_mensual === true]);
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.put('/tipos/:id', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
   try {
-    const { nombre, color, orden } = req.body;
+    const { nombre, color, orden, en_reporte_mensual } = req.body;
     if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Nombre requerido.' });
-    await query(`UPDATE fac_ingresos_sf_tipos SET nombre=$1, color=$2, orden=$3 WHERE id=$4`,
-      [nombre.trim(), color || '#0891b2', parseInt(orden) || 99, req.params.id]);
+    // Solo se toca la bandera si el cliente la manda: renombrar un tipo no debe
+    // sacarlo del reporte por omision.
+    const tocar = Object.prototype.hasOwnProperty.call(req.body, 'en_reporte_mensual');
+    await query(
+      `UPDATE fac_ingresos_sf_tipos SET nombre=$1, color=$2, orden=$3,
+              en_reporte_mensual = CASE WHEN $4 THEN $5 ELSE en_reporte_mensual END
+        WHERE id=$6`,
+      [nombre.trim(), color || '#0891b2', parseInt(orden) || 99,
+       tocar, en_reporte_mensual === true, req.params.id]);
     res.json({ ok: true });
   } catch (e) {
     if (e.code === '23505') return res.status(400).json({ error: 'Ya existe otro tipo con ese nombre.' });
