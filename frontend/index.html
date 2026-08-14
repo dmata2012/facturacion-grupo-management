@@ -645,6 +645,7 @@ canvas{max-height:230px}
         </button>
         <div class="nav-group-items">
           <a href="#" onclick="nav('concentrado')" id="nav-concentrado"><span class="ni"><svg><use href="#i-chart"/></svg></span> Concentrado Anual</a>
+          <a href="#" onclick="nav('mensualDireccion')" id="nav-mensualDireccion"><span class="ni"><svg><use href="#i-clipboard"/></svg></span> Reporte Mensual</a>
           <a href="#" onclick="nav('estadoCuenta')" id="nav-estadoCuenta"><span class="ni"><svg><use href="#i-doc"/></svg></span> Estado de Cuenta</a>
           <a href="#" onclick="nav('reportes')"     id="nav-reportes"><span class="ni"><svg><use href="#i-clipboard"/></svg></span> Reportes</a>
           <a href="#" onclick="nav('estadisticas')" id="nav-estadisticas"><span class="ni"><svg><use href="#i-chart"/></svg></span> Estadísticas</a>
@@ -1198,12 +1199,14 @@ function nav(page) {
     reportes:'Reportes', estadisticas:'Estadísticas', usuarios:'Usuarios y Permisos',
     catalogo:'Conceptos de Desglose', bancos:'Bancos', gastos:'Gastos (CxP)',
     misVacaciones:'Mis Vacaciones', asistencia:'Lista de Asistencia',
-    concentrado:'Concentrado Anual', otrosIngresos:'Otros Ingresos S/F'
+    concentrado:'Concentrado Anual', otrosIngresos:'Otros Ingresos S/F',
+    mensualDireccion:'Reporte Mensual'
   };
   const mt = $('mt-title');
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
-    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones, asistencia, concentrado, otrosIngresos
+    dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones, asistencia, concentrado, otrosIngresos,
+    mensualDireccion
   };
   if (pages[page]) pages[page]();
 }
@@ -12678,6 +12681,298 @@ function exportarSFExcel() {
   wsT['!cols'] = [{wch:24},{wch:10},{wch:16}];
   XLSX.utils.book_append_sheet(wb, wsT, 'Por tipo');
   XLSX.writeFile(wb, `Otros_ingresos_SF_${$('sf-desde').value}_a_${$('sf-hasta').value}.xlsx`);
+}
+
+// ══ REPORTE MENSUAL DE DIRECCIÓN ═══════════════════════════════════
+// Reproduce el concentrado que dirección lleva en Excel: un renglón por mes con
+// ingresos, gastos operativos, impuestos por empresa y los dos totales.
+const MESES_MD = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+async function mensualDireccion() {
+  const y = new Date().getFullYear();
+  $('content').innerHTML = `
+    <style>
+      .md-tool{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+      .md-f{border:1.5px solid var(--border);border-radius:10px;padding:8px 12px;
+        font-size:13px;font-weight:700;background:#fff;color:#475569}
+      .md-hoja{background:#fff;border:1px solid var(--border);border-radius:var(--r);
+        padding:24px 26px;box-shadow:var(--sh);overflow:auto}
+      .md-enc{display:flex;align-items:center;gap:18px;border-bottom:2.5px solid var(--red);
+        padding-bottom:14px;margin-bottom:18px;min-width:900px}
+      .md-enc img{width:175px;height:auto}
+      .md-enc .t{flex:1;text-align:right}
+      .md-enc h2{margin:0;font-size:17px;font-weight:900;color:var(--dark);letter-spacing:-.2px}
+      .md-enc .s{font-size:12px;color:var(--muted);margin-top:2px}
+      .md-t{border-collapse:collapse;font-size:11.5px;min-width:900px}
+      .md-t th{padding:6px 9px;font-size:9.5px;font-weight:800;text-align:center;
+        border:1px solid #94a3b8;white-space:nowrap}
+      .md-t td{padding:5px 9px;text-align:right;border:1px solid #cbd5e1;
+        font-variant-numeric:tabular-nums;white-space:nowrap}
+      .md-t td.mes{text-align:left;font-weight:700;color:var(--dark);background:#f8fafc}
+      .md-t tr.vacio td{color:#cbd5e1}
+      .md-t tr.vacio td.mes{color:#94a3b8}
+      /* Los colores replican el Excel: cada bloque se distingue de un vistazo */
+      .md-t .h-ing {background:#f1f5f9;color:#334155}
+      .md-t .h-gas {background:#1e40af;color:#fff}
+      .md-t .h-imp {background:#bfdbfe;color:#1e3a8a}
+      .md-t .h-egr {background:#7c2d12;color:#fff}
+      .md-t .h-dif {background:#7c2d12;color:#fff}
+      .md-t .c-tot {background:#f8fafc;font-weight:800;font-style:italic}
+      .md-t .c-gas {background:#eff6ff;font-weight:700;font-style:italic}
+      .md-t .c-egr {background:#fef2f2;font-weight:800;font-style:italic}
+      .md-t .c-dif {background:#fffbeb;font-weight:800;font-style:italic}
+      .md-t tfoot td{background:#e2e8f0;font-weight:900;font-style:italic;border-top:2px solid #64748b}
+      .md-pie{margin-top:16px;font-size:11px;color:var(--muted);line-height:1.6;
+        border-top:1px solid var(--border);padding-top:12px;min-width:900px}
+    </style>
+
+    <div class="md-tool no-print">
+      <label style="font-size:11px;font-weight:700;color:var(--gray-d)">AÑO</label>
+      <select id="md-anio" class="md-f" onchange="cargarMensualDir()">
+        ${[y+1,y,y-1,y-2,y-3].map(a=>`<option value="${a}" ${a===y?'selected':''}>${a}</option>`).join('')}
+      </select>
+      <div style="margin-left:auto;display:flex;gap:7px">
+        <button class="btn bo bsm" onclick="exportarMensualDirExcel()">⬇ Excel</button>
+        <button class="btn bs bsm" onclick="imprimirMensualDir()">🖨 Imprimir</button>
+      </div>
+    </div>
+    <div id="md-body"><p class="empty">Cargando…</p></div>`;
+  cargarMensualDir();
+}
+
+async function cargarMensualDir() {
+  const anio = $('md-anio').value;
+  $('md-body').innerHTML = '<p class="empty">Cargando…</p>';
+  try {
+    const d = await api(`/reportes/mensual-direccion?anio=${anio}`);
+    window._mdData = d;
+    renderMensualDir(d);
+  } catch(e) { $('md-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+// Celda numérica: el cero se atenúa para que resalten los meses con movimiento
+function mdN(v) {
+  const n = parseFloat(v) || 0;
+  return n ? fmt(n) : '–';
+}
+
+function renderMensualDir(d) {
+  const emp = d.empresas || [];
+  const nCols = 5 + 1 + emp.length * 2 + 2;
+
+  $('md-body').innerHTML = `
+    <div class="md-hoja" id="md-hoja">
+      <div class="md-enc">
+        <img src="logo.png" alt="Grupo Management"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+        <div style="display:none;font-size:17px;font-weight:900;color:var(--dark)">GRUPO MANAGEMENT</div>
+        <div class="t">
+          <h2>Reporte Mensual de Ingresos y Egresos</h2>
+          <div class="s">Ejercicio ${d.anio}</div>
+        </div>
+      </div>
+
+      <table class="md-t">
+        <thead>
+          <tr>
+            <th class="h-ing" rowspan="2" style="text-align:left">Mes</th>
+            <th class="h-ing" rowspan="2">Comisiones</th>
+            <th class="h-ing" rowspan="2">Facturación</th>
+            <th class="h-ing" rowspan="2">Otros Ingresos</th>
+            <th class="h-ing" rowspan="2">Total Ingresos</th>
+            <th class="h-gas" rowspan="2">Gastos<br>Operativos</th>
+            ${emp.length ? `<th class="h-imp" colspan="${emp.length*2}">Impuestos</th>` : ''}
+            <th class="h-egr" rowspan="2">Total<br>Egresos</th>
+            <th class="h-dif" rowspan="2">Total Ingreso<br>− Gastos</th>
+          </tr>
+          <tr>
+            ${emp.map(e => `<th class="h-imp" colspan="2" title="${e.nombre}">${e.nombre}</th>`).join('')}
+          </tr>
+          ${emp.length ? `<tr>
+            <th class="h-ing" colspan="6"></th>
+            ${emp.map(() => `<th class="h-imp">IVA</th><th class="h-imp">ISR</th>`).join('')}
+            <th class="h-egr"></th><th class="h-dif"></th>
+          </tr>` : ''}
+        </thead>
+        <tbody>${d.meses.map(m => {
+          const vacio = !m.total_ingresos && !m.total_egresos;
+          return `<tr class="${vacio?'vacio':''}">
+            <td class="mes">${MESES_MD[m.mes-1]}</td>
+            <td>${mdN(m.comisiones)}</td>
+            <td>${mdN(m.facturacion)}</td>
+            <td>${mdN(m.otros_ingresos)}</td>
+            <td class="c-tot">${mdN(m.total_ingresos)}</td>
+            <td class="c-gas">${mdN(m.gastos_operativos)}</td>
+            ${(m.impuestos||[]).map(i => `<td>${mdN(i.iva)}</td><td>${mdN(i.isr)}</td>`).join('')}
+            <td class="c-egr">${mdN(m.total_egresos)}</td>
+            <td class="c-dif">${mdN(m.diferencia)}</td>
+          </tr>`;
+        }).join('')}</tbody>
+        <tfoot><tr>
+          <td class="mes" style="background:#e2e8f0">TOTAL ${d.anio}</td>
+          <td>${fmt(d.totales.comisiones)}</td>
+          <td>${fmt(d.totales.facturacion)}</td>
+          <td>${fmt(d.totales.otros_ingresos)}</td>
+          <td>${fmt(d.totales.total_ingresos)}</td>
+          <td>${fmt(d.totales.gastos_operativos)}</td>
+          ${(d.totales.impuestos||[]).map(i => `<td>${mdN(i.iva)}</td><td>${mdN(i.isr)}</td>`).join('')}
+          <td>${fmt(d.totales.total_egresos)}</td>
+          <td>${fmt(d.totales.diferencia)}</td>
+        </tr></tfoot>
+      </table>
+
+      <div class="md-pie">
+        <strong>Comisiones:</strong> concepto de comisión del desglose de las facturas emitidas en el mes.
+        &nbsp;<strong>Facturación:</strong> IVA de esas mismas facturas.
+        &nbsp;<strong>Otros ingresos:</strong> cobros sin factura del mes.
+        &nbsp;<strong>Gastos operativos:</strong> gastos del bloque de operación, por fecha del gasto.
+        No incluye facturas canceladas.
+        ${d.impuestos_sin_origen ? `
+        <div class="no-print" style="margin-top:9px;background:#fffbeb;border:1px solid #fcd34d;
+             border-radius:8px;padding:8px 11px;color:#78350f">
+          <strong>⚠ El bloque de Impuestos sale en ceros.</strong> Las columnas se arman con tus
+          ${emp.length} empresa${emp.length!==1?'s':''} emisora${emp.length!==1?'s':''}, pero el sistema
+          todavía no captura el IVA e ISR pagado por cada una. Dime de dónde debe salir ese dato y lo conecto.
+        </div>` : ''}
+        <div style="margin-top:5px">Generado el ${new Date().toLocaleString('es-MX')}.</div>
+      </div>
+    </div>`;
+}
+
+function exportarMensualDirExcel() {
+  const d = window._mdData;
+  if (!d) return toast('No hay datos para exportar.', 'warn');
+  if (typeof XLSX === 'undefined') return toast('Librería XLSX no disponible.', 'err');
+  const emp = d.empresas || [];
+
+  const enc1 = ['Mes','Comisiones','Facturación','Otros Ingresos','Total Ingresos','Gastos Operativos'];
+  emp.forEach(e => { enc1.push(e.nombre + ' IVA', e.nombre + ' ISR'); });
+  enc1.push('Total Egresos', 'Total Ingreso - Gastos');
+
+  const aoa = [
+    ['GRUPO MANAGEMENT'],
+    [`REPORTE MENSUAL DE INGRESOS Y EGRESOS — EJERCICIO ${d.anio}`],
+    [`Generado: ${new Date().toLocaleString('es-MX')}`], [],
+    enc1
+  ];
+  d.meses.forEach(m => {
+    const f = [MESES_MD[m.mes-1], m.comisiones, m.facturacion, m.otros_ingresos,
+               m.total_ingresos, m.gastos_operativos];
+    (m.impuestos||[]).forEach(i => f.push(i.iva, i.isr));
+    f.push(m.total_egresos, m.diferencia);
+    aoa.push(f);
+  });
+  const t = [`TOTAL ${d.anio}`, d.totales.comisiones, d.totales.facturacion,
+             d.totales.otros_ingresos, d.totales.total_ingresos, d.totales.gastos_operativos];
+  (d.totales.impuestos||[]).forEach(i => t.push(i.iva, i.isr));
+  t.push(d.totales.total_egresos, d.totales.diferencia);
+  aoa.push(t);
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:14}, ...enc1.slice(1).map(()=>({wch:17}))];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, `Mensual ${d.anio}`);
+  XLSX.writeFile(wb, `Reporte_mensual_${d.anio}.xlsx`);
+}
+
+function imprimirMensualDir() {
+  const d = window._mdData;
+  if (!d) return toast('No hay datos para imprimir.', 'warn');
+  const emp = d.empresas || [];
+  // El logo viaja como URL absoluta: la ventana nueva no hereda la ruta base
+  const logo = new URL('logo.png', window.location.href).href;
+
+  const w = window.open('', '_blank');
+  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+    <title>Reporte Mensual ${d.anio} — Grupo Management</title>
+    <style>
+      @page{size:landscape;margin:10mm}
+      body{font-family:'Segoe UI',Arial,sans-serif;font-size:8.5px;margin:0;color:#111}
+      .enc{display:flex;align-items:center;gap:16px;border-bottom:2px solid #9B1528;
+        padding-bottom:10px;margin-bottom:14px}
+      .enc img{width:150px;height:auto}
+      .enc .t{flex:1;text-align:right}
+      .enc h2{margin:0;font-size:13px;font-weight:900}
+      .enc .s{font-size:10px;color:#666;margin-top:2px}
+      table{border-collapse:collapse;width:100%}
+      th{padding:4px 5px;font-size:7.5px;font-weight:800;text-align:center;border:.5px solid #666}
+      td{padding:3px 5px;text-align:right;border:.5px solid #bbb;white-space:nowrap}
+      td.mes{text-align:left;font-weight:700;background:#f5f5f5}
+      tr.vacio td{color:#bbb}
+      .h-ing{background:#f1f5f9}
+      .h-gas{background:#1e40af;color:#fff}
+      .h-imp{background:#bfdbfe}
+      .h-egr,.h-dif{background:#7c2d12;color:#fff}
+      .c-tot{background:#f8fafc;font-weight:800;font-style:italic}
+      .c-gas{background:#eff6ff;font-weight:700;font-style:italic}
+      .c-egr{background:#fef2f2;font-weight:800;font-style:italic}
+      .c-dif{background:#fffbeb;font-weight:800;font-style:italic}
+      tfoot td{background:#e2e8f0;font-weight:900;font-style:italic;border-top:1.5px solid #666}
+      .pie{margin-top:10px;font-size:7px;color:#666;line-height:1.5;border-top:.5px solid #ccc;padding-top:6px}
+      .actions{margin:12px 0;text-align:center}
+      .p{background:#9B1528;color:#fff;border:none;padding:8px 20px;border-radius:6px;
+         font-size:11px;font-weight:700;cursor:pointer}
+      @media print{.actions{display:none}}
+    </style></head><body>
+    <div class="enc">
+      <img src="${logo}" alt="Grupo Management" onerror="this.style.display='none'">
+      <div class="t">
+        <h2>Reporte Mensual de Ingresos y Egresos</h2>
+        <div class="s">Ejercicio ${d.anio}</div>
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th class="h-ing" rowspan="2" style="text-align:left">Mes</th>
+          <th class="h-ing" rowspan="2">Comisiones</th>
+          <th class="h-ing" rowspan="2">Facturación</th>
+          <th class="h-ing" rowspan="2">Otros Ingresos</th>
+          <th class="h-ing" rowspan="2">Total Ingresos</th>
+          <th class="h-gas" rowspan="2">Gastos Operativos</th>
+          ${emp.length ? `<th class="h-imp" colspan="${emp.length*2}">Impuestos</th>` : ''}
+          <th class="h-egr" rowspan="2">Total Egresos</th>
+          <th class="h-dif" rowspan="2">Total Ingreso − Gastos</th>
+        </tr>
+        <tr>${emp.map(e => `<th class="h-imp" colspan="2">${e.nombre}</th>`).join('')}</tr>
+        ${emp.length ? `<tr>
+          <th class="h-ing" colspan="6"></th>
+          ${emp.map(() => `<th class="h-imp">IVA</th><th class="h-imp">ISR</th>`).join('')}
+          <th class="h-egr"></th><th class="h-dif"></th>
+        </tr>` : ''}
+      </thead>
+      <tbody>${d.meses.map(m => {
+        const vac = !m.total_ingresos && !m.total_egresos;
+        const n = v => (parseFloat(v)||0) ? fmt(v) : '–';
+        return `<tr class="${vac?'vacio':''}">
+          <td class="mes">${MESES_MD[m.mes-1]}</td>
+          <td>${n(m.comisiones)}</td><td>${n(m.facturacion)}</td>
+          <td>${n(m.otros_ingresos)}</td><td class="c-tot">${n(m.total_ingresos)}</td>
+          <td class="c-gas">${n(m.gastos_operativos)}</td>
+          ${(m.impuestos||[]).map(i => `<td>${n(i.iva)}</td><td>${n(i.isr)}</td>`).join('')}
+          <td class="c-egr">${n(m.total_egresos)}</td><td class="c-dif">${n(m.diferencia)}</td>
+        </tr>`;
+      }).join('')}</tbody>
+      <tfoot><tr>
+        <td class="mes" style="background:#e2e8f0">TOTAL ${d.anio}</td>
+        <td>${fmt(d.totales.comisiones)}</td><td>${fmt(d.totales.facturacion)}</td>
+        <td>${fmt(d.totales.otros_ingresos)}</td><td>${fmt(d.totales.total_ingresos)}</td>
+        <td>${fmt(d.totales.gastos_operativos)}</td>
+        ${(d.totales.impuestos||[]).map(i => `<td>${mdN(i.iva)}</td><td>${mdN(i.isr)}</td>`).join('')}
+        <td>${fmt(d.totales.total_egresos)}</td><td>${fmt(d.totales.diferencia)}</td>
+      </tr></tfoot>
+    </table>
+    <div class="pie">
+      Comisiones: concepto de comisión del desglose de las facturas emitidas en el mes.
+      Facturación: IVA de esas mismas facturas. Otros ingresos: cobros sin factura del mes.
+      Gastos operativos: gastos del bloque de operación. No incluye facturas canceladas.
+      <br>Impreso el ${new Date().toLocaleString('es-MX')}.
+    </div>
+    <div class="actions"><button class="p" onclick="window.print()">🖨 Imprimir</button></div>
+    <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),500));<\/script>
+    </body></html>`);
+  w.document.close();
 }
 
 // ══ CONCENTRADO DE INGRESOS Y GASTOS (Dirección) ══════════════════

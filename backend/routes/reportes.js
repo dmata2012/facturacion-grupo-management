@@ -7,7 +7,7 @@ router.use(verificarToken);
 // Los reportes son solo para admin, con una excepción: el Estado de Cuenta
 // también lo consulta gerencia (es una vista de saldos por cliente, no un reporte
 // operativo). Si en el futuro se abren más reportes a gerente, agregarlos aquí.
-const RUTAS_GERENCIA = ['/estado-cuenta', '/concentrado'];
+const RUTAS_GERENCIA = ['/estado-cuenta', '/concentrado', '/mensual-direccion'];
 router.use((req, res, next) => {
   const roles = RUTAS_GERENCIA.includes(req.path) ? ['admin','gerente'] : ['admin'];
   return requireRol(...roles)(req, res, next);
@@ -650,6 +650,120 @@ router.get('/concentrado', async (req, res) => {
       gastos:   { bloques, meses: mesesGas, total: mesesGas.reduce((a, b) => a + b, 0) },
       utilidad: { meses: utilidad, total: utilidad.reduce((a, b) => a + b, 0) },
       categorias_impuestos: catImp.rows[0].n
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══ REPORTE MENSUAL DE DIRECCIÓN ═══════════════════════════════════
+// Un renglón por mes con la estructura del concentrado que dirección lleva en
+// Excel: ingresos, gastos operativos, impuestos por empresa y los dos totales.
+//
+// Comisiones e IVA salen de las facturas EMITIDAS en el mes, no de lo cobrado:
+// las dos miden lo que se facturó, y mezclarlas con fecha de pago daría un
+// renglón que no cuadra contra ningún reporte fiscal.
+router.get('/mensual-direccion', async (req, res) => {
+  try {
+    const anio = parseInt(req.query.anio) || new Date().getFullYear();
+    const vacio = () => Array(12).fill(0);
+
+    // ── Ingresos: comisiones del desglose e IVA de la factura ──
+    const fact = await query(`
+      SELECT EXTRACT(MONTH FROM f.fecha_emision)::int AS mes,
+             COALESCE(SUM(d.comision),0) AS comisiones,
+             COALESCE(SUM(f.iva),0)      AS iva
+        FROM fac_facturas f
+        LEFT JOIN (
+          SELECT factura_id,
+                 SUM(monto) FILTER (WHERE UPPER(concepto) LIKE '%COMISI%') AS comision
+            FROM fac_desglose_rh GROUP BY factura_id
+        ) d ON d.factura_id = f.id
+       WHERE EXTRACT(YEAR FROM f.fecha_emision) = $1
+         AND f.estatus <> 'cancelada'
+       GROUP BY 1
+    `, [anio]);
+
+    // Otros ingresos: los cobros sin factura. La tabla puede no existir todavía.
+    let otros = [];
+    try {
+      const o = await query(`
+        SELECT EXTRACT(MONTH FROM fecha_cobro)::int AS mes, COALESCE(SUM(monto),0) AS total
+          FROM fac_ingresos_sf
+         WHERE EXTRACT(YEAR FROM fecha_cobro) = $1
+         GROUP BY 1`, [anio]);
+      otros = o.rows;
+    } catch (e) { otros = []; }
+
+    // ── Gastos operativos: los del bloque de operación, sin los de impuestos ──
+    let gastos = [];
+    try {
+      const g = await query(`
+        SELECT EXTRACT(MONTH FROM g.fecha)::int AS mes, COALESCE(SUM(g.monto),0) AS total
+          FROM fac_gastos g
+          LEFT JOIN fac_gastos_conceptos  c ON c.id = g.concepto_id
+          LEFT JOIN fac_gastos_categorias k ON k.id = c.categoria_id
+         WHERE EXTRACT(YEAR FROM g.fecha) = $1
+           AND COALESCE(k.bloque,'operacion') = 'operacion'
+         GROUP BY 1`, [anio]);
+      gastos = g.rows;
+    } catch (e) { gastos = []; }
+
+    // ── Impuestos por empresa ──
+    // Las columnas se arman desde el catálogo de empresas emisoras; los importes
+    // todavía no tienen de dónde salir, así que van en cero. Se devuelven de
+    // todos modos para que el reporte muestre la estructura completa y se note
+    // qué falta capturar, en vez de omitir el bloque.
+    let empresas = [];
+    try {
+      const e = await query(
+        `SELECT id, COALESCE(NULLIF(TRIM(nombre_comercial),''), razon_social) AS nombre
+           FROM fac_empresas_receptoras WHERE activo = TRUE ORDER BY nombre`);
+      empresas = e.rows.map(x => ({ id: x.id, nombre: x.nombre, iva: vacio(), isr: vacio() }));
+    } catch (e) { empresas = []; }
+
+    const comisiones = vacio(), iva = vacio(), otrosIng = vacio(), gastosOp = vacio();
+    fact.rows.forEach(r => {
+      comisiones[r.mes - 1] = parseFloat(r.comisiones) || 0;
+      iva[r.mes - 1]        = parseFloat(r.iva) || 0;
+    });
+    otros.forEach(r  => { otrosIng[r.mes - 1] = parseFloat(r.total) || 0; });
+    gastos.forEach(r => { gastosOp[r.mes - 1] = parseFloat(r.total) || 0; });
+
+    const impuestos = vacio();
+    empresas.forEach(e => e.iva.forEach((_, i) => {
+      impuestos[i] += (e.iva[i] || 0) + (e.isr[i] || 0);
+    }));
+
+    const totalIng  = comisiones.map((v, i) => v + iva[i] + otrosIng[i]);
+    const totalEgr  = gastosOp.map((v, i) => v + impuestos[i]);
+    const diferencia = totalIng.map((v, i) => v - totalEgr[i]);
+    const suma = a => a.reduce((x, y) => x + y, 0);
+
+    res.json({
+      anio,
+      empresas: empresas.map(e => ({ id: e.id, nombre: e.nombre })),
+      meses: comisiones.map((_, i) => ({
+        mes: i + 1,
+        comisiones: comisiones[i],
+        facturacion: iva[i],
+        otros_ingresos: otrosIng[i],
+        total_ingresos: totalIng[i],
+        gastos_operativos: gastosOp[i],
+        impuestos: empresas.map(e => ({ iva: e.iva[i], isr: e.isr[i] })),
+        total_egresos: totalEgr[i],
+        diferencia: diferencia[i]
+      })),
+      totales: {
+        comisiones: suma(comisiones),
+        facturacion: suma(iva),
+        otros_ingresos: suma(otrosIng),
+        total_ingresos: suma(totalIng),
+        gastos_operativos: suma(gastosOp),
+        impuestos: empresas.map(e => ({ iva: suma(e.iva), isr: suma(e.isr) })),
+        total_egresos: suma(totalEgr),
+        diferencia: suma(diferencia)
+      },
+      // Para que la pantalla explique por qué el bloque de impuestos va en ceros
+      impuestos_sin_origen: true
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
