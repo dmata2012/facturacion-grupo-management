@@ -12760,6 +12760,7 @@ async function mensualDireccion() {
       <select id="md-anio" class="md-f" onchange="cargarMensualDir()">
         ${[y+1,y,y-1,y-2,y-3].map(a=>`<option value="${a}" ${a===y?'selected':''}>${a}</option>`).join('')}
       </select>
+      <button class="btn bo bsm" id="md-btn-imp" onclick="mdToggleImpuestos()"></button>
       <div style="margin-left:auto;display:flex;gap:7px">
         <button class="btn bo bsm" onclick="exportarMensualDirExcel()">⬇ Excel</button>
         <button class="btn bs bsm" onclick="imprimirMensualDir()">🖨 Imprimir</button>
@@ -12767,6 +12768,26 @@ async function mensualDireccion() {
     </div>
     <div id="md-body"><p class="empty">Cargando…</p></div>`;
   cargarMensualDir();
+}
+
+// Plegado del bloque de Impuestos. Arranca cerrado porque son dos columnas por
+// empresa y hoy van todas vacias; la preferencia se recuerda entre sesiones.
+function mdImpAbierto() {
+  try { return localStorage.getItem('md-impuestos') === 'abierto'; } catch(e) { return false; }
+}
+function mdToggleImpuestos() {
+  try { localStorage.setItem('md-impuestos', mdImpAbierto() ? 'cerrado' : 'abierto'); } catch(e) {}
+  if (window._mdData) renderMensualDir(window._mdData);
+}
+function mdActualizarBoton(nEmp) {
+  const b = $('md-btn-imp'); if (!b) return;
+  const ab = mdImpAbierto();
+  b.innerHTML = ab
+    ? `▾ Ocultar impuestos`
+    : `▸ Ver impuestos por empresa (${nEmp})`;
+  b.title = ab
+    ? 'Plegar el bloque a una sola columna con el total'
+    : `Desplegar IVA e ISR de cada una de tus ${nEmp} empresas emisoras`;
 }
 
 async function cargarMensualDir() {
@@ -12787,7 +12808,8 @@ function mdN(v) {
 
 function renderMensualDir(d) {
   const emp = d.empresas || [];
-  const nCols = 5 + 1 + emp.length * 2 + 2;
+  const abierto = mdImpAbierto();
+  mdActualizarBoton(emp.length);
 
   $('md-body').innerHTML = `
     <div class="md-hoja" id="md-hoja">
@@ -12810,14 +12832,20 @@ function renderMensualDir(d) {
             <th class="h-ing" rowspan="2">Otros Ingresos</th>
             <th class="h-ing" rowspan="2">Total Ingresos</th>
             <th class="h-gas" rowspan="2">Gastos<br>Operativos</th>
-            ${emp.length ? `<th class="h-imp" colspan="${emp.length*2}">Impuestos</th>` : ''}
+            ${emp.length
+              ? (abierto
+                  ? `<th class="h-imp" colspan="${emp.length*2}" style="cursor:pointer"
+                         onclick="mdToggleImpuestos()" title="Clic para plegar">▾ Impuestos</th>`
+                  : `<th class="h-imp" rowspan="2" style="cursor:pointer;min-width:96px"
+                         onclick="mdToggleImpuestos()" title="Clic para desplegar por empresa">▸ Impuestos</th>`)
+              : ''}
             <th class="h-egr" rowspan="2">Total<br>Egresos</th>
             <th class="h-dif" rowspan="2">Total Ingreso<br>− Gastos</th>
           </tr>
           <tr>
-            ${emp.map(e => `<th class="h-imp" colspan="2" title="${e.nombre}">${e.nombre}</th>`).join('')}
+            ${abierto ? emp.map(e => `<th class="h-imp" colspan="2" title="${e.nombre}">${e.nombre}</th>`).join('') : ''}
           </tr>
-          ${emp.length ? `<tr>
+          ${abierto && emp.length ? `<tr>
             <th class="h-ing" colspan="6"></th>
             ${emp.map(() => `<th class="h-imp">IVA</th><th class="h-imp">ISR</th>`).join('')}
             <th class="h-egr"></th><th class="h-dif"></th>
@@ -12832,7 +12860,9 @@ function renderMensualDir(d) {
             <td>${mdN(m.otros_ingresos)}</td>
             <td class="c-tot">${mdN(m.total_ingresos)}</td>
             <td class="c-gas">${mdN(m.gastos_operativos)}</td>
-            ${(m.impuestos||[]).map(i => `<td>${mdN(i.iva)}</td><td>${mdN(i.isr)}</td>`).join('')}
+            ${abierto
+              ? (m.impuestos||[]).map(i => `<td>${mdN(i.iva)}</td><td>${mdN(i.isr)}</td>`).join('')
+              : `<td>${mdN((m.impuestos||[]).reduce((a,i) => a + (i.iva||0) + (i.isr||0), 0))}</td>`}
             <td class="c-egr">${mdN(m.total_egresos)}</td>
             <td class="c-dif">${mdN(m.diferencia)}</td>
           </tr>`;
@@ -12844,7 +12874,9 @@ function renderMensualDir(d) {
           <td>${fmt(d.totales.otros_ingresos)}</td>
           <td>${fmt(d.totales.total_ingresos)}</td>
           <td>${fmt(d.totales.gastos_operativos)}</td>
-          ${(d.totales.impuestos||[]).map(i => `<td>${mdN(i.iva)}</td><td>${mdN(i.isr)}</td>`).join('')}
+          ${abierto
+            ? (d.totales.impuestos||[]).map(i => `<td>${mdN(i.iva)}</td><td>${mdN(i.isr)}</td>`).join('')
+            : `<td>${mdN((d.totales.impuestos||[]).reduce((a,i) => a + (i.iva||0) + (i.isr||0), 0))}</td>`}
           <td>${fmt(d.totales.total_egresos)}</td>
           <td>${fmt(d.totales.diferencia)}</td>
         </tr></tfoot>
@@ -12908,6 +12940,9 @@ function imprimirMensualDir() {
   const d = window._mdData;
   if (!d) return toast('No hay datos para imprimir.', 'warn');
   const emp = d.empresas || [];
+  // La hoja sale como se ve en pantalla: si el bloque esta plegado, se imprime
+  // plegado. Con dieciseis columnas de impuestos no cabe de otra forma.
+  const abierto = mdImpAbierto();
   // El logo viaja como URL absoluta: la ventana nueva no hereda la ruta base
   const logo = new URL('logo.png', window.location.href).href;
 
@@ -12959,12 +12994,15 @@ function imprimirMensualDir() {
           <th class="h-ing" rowspan="2">Otros Ingresos</th>
           <th class="h-ing" rowspan="2">Total Ingresos</th>
           <th class="h-gas" rowspan="2">Gastos Operativos</th>
-          ${emp.length ? `<th class="h-imp" colspan="${emp.length*2}">Impuestos</th>` : ''}
+          ${emp.length
+            ? (abierto ? `<th class="h-imp" colspan="${emp.length*2}">Impuestos</th>`
+                       : `<th class="h-imp" rowspan="2">Impuestos</th>`)
+            : ''}
           <th class="h-egr" rowspan="2">Total Egresos</th>
           <th class="h-dif" rowspan="2">Total Ingreso − Gastos</th>
         </tr>
-        <tr>${emp.map(e => `<th class="h-imp" colspan="2">${e.nombre}</th>`).join('')}</tr>
-        ${emp.length ? `<tr>
+        <tr>${abierto ? emp.map(e => `<th class="h-imp" colspan="2">${e.nombre}</th>`).join('') : ''}</tr>
+        ${abierto && emp.length ? `<tr>
           <th class="h-ing" colspan="6"></th>
           ${emp.map(() => `<th class="h-imp">IVA</th><th class="h-imp">ISR</th>`).join('')}
           <th class="h-egr"></th><th class="h-dif"></th>
@@ -12978,7 +13016,9 @@ function imprimirMensualDir() {
           <td>${n(m.comisiones)}</td><td>${n(m.facturacion)}</td>
           <td>${n(m.otros_ingresos)}</td><td class="c-tot">${n(m.total_ingresos)}</td>
           <td class="c-gas">${n(m.gastos_operativos)}</td>
-          ${(m.impuestos||[]).map(i => `<td>${n(i.iva)}</td><td>${n(i.isr)}</td>`).join('')}
+          ${abierto
+            ? (m.impuestos||[]).map(i => `<td>${n(i.iva)}</td><td>${n(i.isr)}</td>`).join('')
+            : `<td>${n((m.impuestos||[]).reduce((a,i) => a + (i.iva||0) + (i.isr||0), 0))}</td>`}
           <td class="c-egr">${n(m.total_egresos)}</td><td class="c-dif">${n(m.diferencia)}</td>
         </tr>`;
       }).join('')}</tbody>
@@ -12987,7 +13027,9 @@ function imprimirMensualDir() {
         <td>${fmt(d.totales.comisiones)}</td><td>${fmt(d.totales.facturacion)}</td>
         <td>${fmt(d.totales.otros_ingresos)}</td><td>${fmt(d.totales.total_ingresos)}</td>
         <td>${fmt(d.totales.gastos_operativos)}</td>
-        ${(d.totales.impuestos||[]).map(i => `<td>${mdN(i.iva)}</td><td>${mdN(i.isr)}</td>`).join('')}
+        ${abierto
+          ? (d.totales.impuestos||[]).map(i => `<td>${mdN(i.iva)}</td><td>${mdN(i.isr)}</td>`).join('')
+          : `<td>${mdN((d.totales.impuestos||[]).reduce((a,i) => a + (i.iva||0) + (i.isr||0), 0))}</td>`}
         <td>${fmt(d.totales.total_egresos)}</td><td>${fmt(d.totales.diferencia)}</td>
       </tr></tfoot>
     </table>
