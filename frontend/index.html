@@ -12291,6 +12291,7 @@ async function otrosIngresos() {
       <input type="date" id="sf-hasta" value="${finMes}" onchange="cargarSF()" class="sf-f">
       <button class="btn bo bsm" onclick="sfPreset('mes')">Este mes</button>
       <button class="btn bo bsm" onclick="sfPreset('anio')">Este año</button>
+      <button class="btn bo bsm" onclick="sfVerTodo()">Todo</button>
     </div>
     <div id="sf-body"><p class="empty">Cargando…</p></div>`;
 
@@ -12305,6 +12306,16 @@ async function sfCargarTipos(forzar) {
   const sel = $('sf-tipo');
   if (sel) sel.innerHTML = '<option value="">Todos los tipos</option>' +
     window._sfTipos.map(t => `<option value="${t.id}">${t.nombre}</option>`).join('');
+}
+
+// Abre el filtro a todo lo capturado, usando las fechas reales de la base
+function sfVerTodo() {
+  const G = window._sfData?.global;
+  $('sf-desde').value = G?.primero || '2000-01-01';
+  $('sf-hasta').value = G?.ultimo  || new Date().toISOString().slice(0,10);
+  $('sf-tipo').value  = '';
+  $('sf-buscar').value = '';
+  cargarSF();
 }
 
 function sfPreset(tipo) {
@@ -12359,11 +12370,33 @@ function renderSF(r) {
   }
 
   if (!r.ingresos.length) {
+    const G = r.global || { n: 0 };
+    // Distinguir "no hay nada capturado" de "sí hay, pero fuera del rango": sin
+    // esto no se pueden ver —ni corregir— los cobros de otras fechas.
+    if (G.n > 0) {
+      $('sf-body').innerHTML = `
+        <div style="background:linear-gradient(160deg,#eff6ff,#dbeafe);border:2px dashed #60a5fa;
+                    border-radius:18px;padding:38px 30px;text-align:center">
+          <div style="font-size:52px;margin-bottom:10px">🔎</div>
+          <h3 style="margin:0 0 6px;font-size:19px;font-weight:900;color:#1e40af">
+            Hay ${G.n} cobro${G.n!=1?'s':''} registrado${G.n!=1?'s':''}, pero ninguno en este período
+          </h3>
+          <p style="font-size:13px;color:#1e3a8a;max-width:520px;margin:0 auto 8px;line-height:1.6">
+            El primero es del <strong>${fmtDate(G.primero)}</strong> y el último del
+            <strong>${fmtDate(G.ultimo)}</strong>, por un total de <strong>${fmt(G.total)}</strong>.
+          </p>
+          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:16px">
+            <button class="btn bs" onclick="sfVerTodo()">📅 Ver todos los cobros</button>
+            ${canWrite()||canFacturar()?`<button class="btn bo" onclick="openIngresoSF()">＋ Registrar otro</button>`:''}
+          </div>
+        </div>`;
+      return;
+    }
     $('sf-body').innerHTML = `
       <div style="background:linear-gradient(160deg,#ecfeff,#cffafe);border:2px dashed #67e8f9;
                   border-radius:18px;padding:44px 30px;text-align:center">
         <div style="font-size:56px;margin-bottom:10px">💵</div>
-        <h3 style="margin:0 0 6px;font-size:19px;font-weight:900;color:#155e75">Sin cobros en este período</h3>
+        <h3 style="margin:0 0 6px;font-size:19px;font-weight:900;color:#155e75">Todavía no hay ningún cobro capturado</h3>
         <p style="font-size:13px;color:#164e63;max-width:460px;margin:0 auto 18px;line-height:1.55">
           Aquí se registran los cobros por servicio que no generan factura.
           Suman al Concentrado de Dirección como ingreso, separados de lo facturado.

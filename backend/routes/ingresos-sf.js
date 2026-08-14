@@ -167,8 +167,18 @@ router.get('/', async (req, res) => {
       ${where}
       GROUP BY 1 ORDER BY total DESC LIMIT 20`, params);
 
+    // Panorama sin filtros: permite explicar en pantalla que un listado vacio es
+    // por el rango consultado y no porque no se haya capturado nada.
+    const global = await query(`
+      SELECT COUNT(*)::int                        AS n,
+             TO_CHAR(MIN(fecha_cobro),'YYYY-MM-DD') AS primero,
+             TO_CHAR(MAX(fecha_cobro),'YYYY-MM-DD') AS ultimo,
+             COALESCE(SUM(monto),0)               AS total
+        FROM fac_ingresos_sf`);
+
     res.json({ ingresos: r.rows, totales: tot.rows[0],
-               por_tipo: porTipo.rows, por_cliente: porCliente.rows });
+               por_tipo: porTipo.rows, por_cliente: porCliente.rows,
+               global: global.rows[0] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
