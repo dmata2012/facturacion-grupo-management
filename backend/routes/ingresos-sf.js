@@ -13,8 +13,9 @@ router.use(verificarToken);
 // hay saldo, ni fecha de vencimiento, ni estatus de cobro: el registro ES el
 // cobro. Si algún día se pudiera quedar a deber, esto necesitaría replantearse.
 const TIPOS_SEED = [
-  { nombre: 'Relativos',      color: '#0891b2', orden: 1 },
-  { nombre: 'Otros Ingresos', color: '#7c3aed', orden: 2 }
+  { nombre: 'Relativos',           color: '#0891b2', orden: 1 },
+  { nombre: 'Otros Ingresos',      color: '#7c3aed', orden: 2 },
+  { nombre: 'Ingresos por Mes SRI', color: '#059669', orden: 3 }
 ];
 
 (async () => {
