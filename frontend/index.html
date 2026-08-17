@@ -691,6 +691,7 @@ canvas{max-height:230px}
           <a href="#" onclick="nav('vacaciones')" id="nav-vacaciones"><span class="ni"><svg><use href="#i-sun"/></svg></span> Vacaciones</a>
           <a href="#" onclick="nav('checador')"   id="nav-checador"><span class="ni"><svg><use href="#i-clock"/></svg></span> Reloj Checador</a>
           <a href="#" onclick="nav('asistencia')" id="nav-asistencia"><span class="ni"><svg><use href="#i-check-list"/></svg></span> Lista de Asistencia</a>
+          <a href="#" onclick="nav('expedienteAsistencia')" id="nav-expedienteAsistencia"><span class="ni"><svg><use href="#i-user"/></svg></span> Expediente de Asistencia</a>
         </div>
       </div>
 
@@ -1200,13 +1201,14 @@ function nav(page) {
     catalogo:'Conceptos de Desglose', bancos:'Bancos', gastos:'Gastos (CxP)',
     misVacaciones:'Mis Vacaciones', asistencia:'Lista de Asistencia',
     concentrado:'Concentrado Anual', otrosIngresos:'Otros Ingresos S/F',
+    expedienteAsistencia:'Expediente de Asistencia',
     mensualDireccion:'Reporte Mensual'
   };
   const mt = $('mt-title');
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
     dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones, asistencia, concentrado, otrosIngresos,
-    mensualDireccion
+    mensualDireccion, expedienteAsistencia
   };
   if (pages[page]) pages[page]();
 }
@@ -12709,6 +12711,349 @@ function exportarSFExcel() {
   wsT['!cols'] = [{wch:24},{wch:10},{wch:16}];
   XLSX.utils.book_append_sheet(wb, wsT, 'Por tipo');
   XLSX.writeFile(wb, `Otros_ingresos_SF_${$('sf-desde').value}_a_${$('sf-hasta').value}.xlsx`);
+}
+
+// ══ EXPEDIENTE DE ASISTENCIA POR COLABORADOR ═══════════════════════
+// Reporte individual: incidencias del período, horas laboradas, retardos y el
+// historial de cambios con su justificación. Es su propio módulo de permisos
+// porque contiene el detalle de una persona, no el panorama del equipo.
+const COD_EXP = {
+  'A':   { l:'Asistencias',        bg:'#dcfce7', fg:'#166534' },
+  'F':   { l:'Faltas',             bg:'#fee2e2', fg:'#991b1b' },
+  'FJ':  { l:'Faltas justificadas',bg:'#ffedd5', fg:'#9a3412' },
+  'V':   { l:'Vacaciones',         bg:'#dbeafe', fg:'#1e40af' },
+  'P/G': { l:'Permisos con goce',  bg:'#fef3c7', fg:'#92400e' },
+  'In':  { l:'Incapacidades',      bg:'#f3e8ff', fg:'#6b21a8' },
+  'D':   { l:'Descansos',          bg:'#fee2e2', fg:'#dc2626' },
+  'R':   { l:'Retardos',           bg:'#fef9c3', fg:'#854d0e' }
+};
+
+async function expedienteAsistencia() {
+  const hoy = new Date(), y = hoy.getFullYear(), pad = n => String(n).padStart(2,'0');
+  const ini = `${y}-${pad(hoy.getMonth()+1)}-01`;
+  const fin = new Date(y, hoy.getMonth()+1, 0).toISOString().slice(0,10);
+
+  $('content').innerHTML = `
+    <style>
+      .ex-hero{background:linear-gradient(135deg,#1e1b4b 0%,#3730a3 55%,#4f46e5 100%);
+        border-radius:16px;padding:16px 20px;color:#fff;margin-bottom:14px;position:relative;overflow:hidden}
+      .ex-hero::after{content:'🗂';position:absolute;right:18px;bottom:-18px;font-size:88px;opacity:.09;line-height:1}
+      .ex-hero h2{margin:0;font-size:18px;font-weight:900}
+      .ex-hero .sub{font-size:11px;opacity:.8;margin-top:1px}
+      .ex-tool{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px;position:relative;z-index:1}
+      .ex-tool select,.ex-tool input{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);
+        color:#fff;border-radius:8px;padding:7px 10px;font-size:12.5px;font-weight:700;font-family:inherit}
+      .ex-tool select option{color:#111}
+      .ex-tool button{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);
+        color:#fff;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit}
+      .ex-tool button:hover{background:rgba(255,255,255,.26)}
+      .ex-tool button.pri{background:#fff;color:#3730a3;font-weight:900;border:none}
+      .ex-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+      .ex-card{border:1.5px solid var(--border);border-radius:13px;padding:13px 15px;background:#fff}
+      .ex-card .l{font-size:9.5px;font-weight:900;text-transform:uppercase;letter-spacing:.9px;color:var(--muted)}
+      .ex-card .v{font-size:23px;font-weight:900;line-height:1.15;margin-top:3px;letter-spacing:-.5px}
+      .ex-card .s{font-size:10.5px;color:var(--muted);margin-top:2px}
+      .ex-inc{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:9px}
+      .ex-inc div{border-radius:11px;padding:10px 13px;text-align:center}
+      .ex-inc .n{font-size:21px;font-weight:900;line-height:1}
+      .ex-inc .t{font-size:10px;font-weight:700;margin-top:2px}
+      .ex-barra{height:9px;background:#e2e8f0;border-radius:99px;overflow:hidden;margin-top:6px}
+      .ex-barra i{display:block;height:100%;border-radius:99px}
+    </style>
+
+    <div class="ex-hero">
+      <h2>🗂 Expediente de Asistencia</h2>
+      <div class="sub">Reporte individual por colaborador y período</div>
+      <div class="ex-tool">
+        <select id="ex-emp" onchange="cargarExpediente()" style="min-width:230px">
+          <option value="">— Selecciona un colaborador —</option>
+        </select>
+        <input type="date" id="ex-desde" value="${ini}" onchange="cargarExpediente()">
+        <input type="date" id="ex-hasta" value="${fin}" onchange="cargarExpediente()">
+        <button onclick="exPreset('quincena')">Quincena</button>
+        <button onclick="exPreset('mes')">Este mes</button>
+        <button onclick="exPreset('anio')">Este año</button>
+        <button class="pri" onclick="imprimirExpediente()" style="margin-left:auto">🖨 Imprimir</button>
+      </div>
+    </div>
+    <div id="ex-body"><p class="empty">Selecciona un colaborador para generar su expediente.</p></div>`;
+
+  try {
+    const emps = await api('/nomina/empleados');
+    const sel = $('ex-emp');
+    sel.innerHTML = '<option value="">— Selecciona un colaborador —</option>' +
+      emps.map(e => `<option value="${e.id}">${e.nombre}${e.puesto?` · ${e.puesto}`:''}</option>`).join('');
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+function exPreset(tipo) {
+  const hoy = new Date(), y = hoy.getFullYear(), pad = n => String(n).padStart(2,'0');
+  const m = hoy.getMonth();
+  if (tipo === 'quincena') {
+    const d = hoy.getDate();
+    $('ex-desde').value = d <= 15 ? `${y}-${pad(m+1)}-01` : `${y}-${pad(m+1)}-16`;
+    $('ex-hasta').value = d <= 15 ? `${y}-${pad(m+1)}-15`
+                                  : new Date(y, m+1, 0).toISOString().slice(0,10);
+  } else if (tipo === 'mes') {
+    $('ex-desde').value = `${y}-${pad(m+1)}-01`;
+    $('ex-hasta').value = new Date(y, m+1, 0).toISOString().slice(0,10);
+  } else {
+    $('ex-desde').value = `${y}-01-01`;
+    $('ex-hasta').value = `${y}-12-31`;
+  }
+  cargarExpediente();
+}
+
+async function cargarExpediente() {
+  const emp = $('ex-emp').value, desde = $('ex-desde').value, hasta = $('ex-hasta').value;
+  if (!emp) { $('ex-body').innerHTML = '<p class="empty">Selecciona un colaborador para generar su expediente.</p>'; return; }
+  if (!desde || !hasta) return;
+  $('ex-body').innerHTML = '<p class="empty">Cargando…</p>';
+  try {
+    // Se componen los reportes que ya existen en vez de duplicar sus cálculos:
+    // la matriz de asistencia, la productividad y el historial de cambios.
+    const [asis, prod, hist] = await Promise.all([
+      api(`/checador/asistencia?desde=${desde}&hasta=${hasta}&empleado_id=${emp}`),
+      api(`/checador/productividad?desde=${desde}&hasta=${hasta}&empleado_id=${emp}`),
+      api(`/checador/asistencia/historial-empleado?empleado_id=${emp}&desde=${desde}&hasta=${hasta}`)
+    ]);
+    window._exData = { asis, prod, hist, desde, hasta };
+    renderExpediente(window._exData);
+  } catch(e) { $('ex-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function renderExpediente(d) {
+  const e = d.asis.empleados[0];
+  if (!e) { $('ex-body').innerHTML = '<p class="empty">Sin datos para este colaborador en el período.</p>'; return; }
+  const p = (d.prod.empleados || []).find(x => x.empleado_id === e.empleado_id) || {};
+  const t = e.totales || {};
+
+  const horasLab = parseFloat(p.horas_laboradas) || 0;
+  const horasEsp = parseFloat(p.horas_esperadas) || 0;
+  const pct = horasEsp > 0 ? Math.min(100, horasLab / horasEsp * 100) : 0;
+  const nRet = t.R || 0;
+  const promRet = nRet > 0 ? Math.round((e.minutos_retardo || 0) / nRet) : 0;
+
+  // Los días con incidencia, para el detalle
+  const conInc = [];
+  d.asis.dias.forEach(f => {
+    const c = e.celdas[f];
+    if (typeof c === 'object' && c && c.c && c.c !== 'A' && c.c !== 'D')
+      conInc.push({ fecha: f, ...c });
+    else if (typeof c === 'object' && c && c.r)
+      conInc.push({ fecha: f, ...c });   // asistió pero con retardo
+  });
+
+  $('ex-body').innerHTML = `
+    <div class="ex-cards">
+      <div class="ex-card">
+        <div class="l">Colaborador</div>
+        <div class="v" style="font-size:15px;color:var(--dark)">${e.nombre}</div>
+        <div class="s">${e.puesto || ''}${e.numero_colaborador?` · #${e.numero_colaborador}`:''}</div>
+      </div>
+      <div class="ex-card">
+        <div class="l">Horas laboradas</div>
+        <div class="v" style="color:#4f46e5">${horasLab.toFixed(1)}</div>
+        <div class="s">de ${horasEsp.toFixed(1)} esperadas</div>
+        <div class="ex-barra"><i style="width:${pct}%;background:${pct>=95?'#16a34a':pct>=80?'#d97706':'#dc2626'}"></i></div>
+      </div>
+      <div class="ex-card">
+        <div class="l">Productividad</div>
+        <div class="v" style="color:${pct>=95?'#16a34a':pct>=80?'#d97706':'#dc2626'}">${pct.toFixed(0)}%</div>
+        <div class="s">${p.dias_trabajados||0} de ${p.dias_laborables||0} días laborables</div>
+      </div>
+      <div class="ex-card">
+        <div class="l">Retardos</div>
+        <div class="v" style="color:${nRet?'#b45309':'#16a34a'}">${nRet}</div>
+        <div class="s">${nRet ? `${promRet} min en promedio · ${e.minutos_retardo} min en total` : 'Sin retardos'}</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:10px">
+        Resumen de incidencias · ${fmtDate(d.desde)} al ${fmtDate(d.hasta)}
+      </div>
+      <div class="ex-inc">
+        ${Object.keys(COD_EXP).map(k => {
+          const c = COD_EXP[k], n = t[k] || 0;
+          return `<div style="background:${n?c.bg:'#f8fafc'};color:${n?c.fg:'#cbd5e1'}">
+            <div class="n">${n}</div><div class="t">${c.l}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:10px">
+        Días con incidencia (${conInc.length})
+      </div>
+      ${conInc.length ? `<div class="tscroll" style="max-height:38vh;overflow:auto"><table style="font-size:12px">
+        <thead><tr><th>Fecha</th><th style="text-align:center">Código</th><th style="text-align:center">Retardo</th><th>Nota</th></tr></thead>
+        <tbody>${conInc.map(x => {
+          const c = COD_EXP[x.c] || { bg:'#f1f5f9', fg:'#64748b' };
+          return `<tr>
+            <td style="white-space:nowrap">${fmtDate(x.fecha)}</td>
+            <td style="text-align:center"><span style="display:inline-block;padding:2px 8px;border-radius:5px;
+              background:${c.bg};color:${c.fg};font-weight:900;font-size:11px">${x.c}</span></td>
+            <td style="text-align:center;color:${x.r?'#b45309':'#cbd5e1'};font-weight:${x.r?'800':'400'}">${x.r?`${x.r} min`:'–'}</td>
+            <td style="font-size:11.5px">${(x.n||'').replace(/</g,'&lt;') || '<span style="color:#cbd5e1">—</span>'}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>` : '<p class="empty">Sin incidencias en el período.</p>'}
+    </div>
+
+    <div class="card">
+      <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:10px">
+        Cambios de incidencia (${d.hist.cambios.length + d.hist.sin_historial.length})
+      </div>
+      ${(d.hist.cambios.length || d.hist.sin_historial.length) ? `
+      <div class="tscroll" style="max-height:38vh;overflow:auto"><table style="font-size:12px">
+        <thead><tr><th>Fecha</th><th style="text-align:center">Cómo estaba → quedó</th><th>Motivo</th><th>Lo cambió</th></tr></thead>
+        <tbody>
+          ${d.hist.cambios.map(h => `<tr>
+            <td style="white-space:nowrap">${fmtDate(h.fecha)}</td>
+            <td style="text-align:center;white-space:nowrap">${exPin(h.codigo_antes)} → ${exPin(h.codigo_despues)}</td>
+            <td style="font-size:11.5px">${(h.notas||'').replace(/</g,'&lt;')}</td>
+            <td style="font-size:11px;color:var(--muted);white-space:nowrap">
+              ${h.hecho_por_nombre||'—'}<br><span style="font-size:9.5px">${new Date(h.creado_en).toLocaleString('es-MX')}</span></td>
+          </tr>`).join('')}
+          ${d.hist.sin_historial.map(h => `<tr style="opacity:.75">
+            <td style="white-space:nowrap">${fmtDate(h.fecha)}</td>
+            <td style="text-align:center;white-space:nowrap">${exPin(null)} → ${exPin(h.codigo_despues)}</td>
+            <td style="font-size:11.5px">${(h.notas||'').replace(/</g,'&lt;')}</td>
+            <td style="font-size:11px;color:var(--muted);font-style:italic">anterior al registro de cambios</td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>` : '<p class="empty">No se ha modificado ninguna incidencia en el período.</p>'}
+    </div>`;
+}
+
+function exPin(cod) {
+  if (!cod) return '<span style="color:#94a3b8;font-size:10px">sin dato</span>';
+  const c = COD_EXP[cod] || { bg:'#f1f5f9', fg:'#64748b' };
+  return `<span style="display:inline-block;padding:2px 7px;border-radius:5px;background:${c.bg};
+    color:${c.fg};font-weight:900;font-size:10.5px">${cod}</span>`;
+}
+
+function imprimirExpediente() {
+  const d = window._exData;
+  if (!d) return toast('Primero genera el expediente de un colaborador.', 'warn');
+  const e = d.asis.empleados[0];
+  if (!e) return toast('Sin datos para imprimir.', 'warn');
+  const p = (d.prod.empleados || []).find(x => x.empleado_id === e.empleado_id) || {};
+  const t = e.totales || {};
+  const horasLab = parseFloat(p.horas_laboradas) || 0;
+  const horasEsp = parseFloat(p.horas_esperadas) || 0;
+  const pct = horasEsp > 0 ? (horasLab / horasEsp * 100) : 0;
+  const nRet = t.R || 0;
+  const promRet = nRet > 0 ? Math.round((e.minutos_retardo || 0) / nRet) : 0;
+  const logo = new URL('logo.png', window.location.href).href;
+
+  const conInc = [];
+  d.asis.dias.forEach(f => {
+    const c = e.celdas[f];
+    if (typeof c === 'object' && c && ((c.c && c.c !== 'A' && c.c !== 'D') || c.r))
+      conInc.push({ fecha: f, ...c });
+  });
+
+  const w = window.open('', '_blank');
+  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+    <title>Expediente de asistencia — ${e.nombre}</title>
+    <style>
+      @page{size:portrait;margin:12mm}
+      body{font-family:'Segoe UI',Arial,sans-serif;font-size:10px;margin:0;color:#111}
+      .enc{display:flex;align-items:center;gap:16px;border-bottom:2px solid #9B1528;padding-bottom:10px;margin-bottom:14px}
+      .enc img{width:150px}
+      .enc .t{flex:1;text-align:right}
+      .enc h1{margin:0;font-size:14px;font-weight:900}
+      .enc .s{font-size:10px;color:#666;margin-top:2px}
+      .datos{background:#f5f5f5;border:.5px solid #ddd;border-radius:5px;padding:9px 12px;margin-bottom:12px}
+      .datos b{font-size:12px}
+      .kpis{display:flex;gap:8px;margin-bottom:14px}
+      .k{flex:1;border:.5px solid #ccc;border-radius:5px;padding:8px 10px;text-align:center}
+      .k .n{font-size:16px;font-weight:900}
+      .k .l{font-size:7.5px;text-transform:uppercase;letter-spacing:.5px;color:#666;margin-top:1px}
+      h3{font-size:10px;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid #111;
+         padding-bottom:3px;margin:14px 0 6px}
+      table{width:100%;border-collapse:collapse}
+      th{background:#eee;padding:4px 6px;font-size:8px;text-transform:uppercase;text-align:left;border-bottom:1px solid #999}
+      td{padding:3px 6px;border-bottom:.5px solid #e5e5e5;font-size:9px;vertical-align:top}
+      .cod{display:inline-block;padding:1px 5px;border-radius:3px;font-weight:900;font-size:8.5px}
+      .res{display:flex;flex-wrap:wrap;gap:6px}
+      .res div{border:.5px solid #ccc;border-radius:4px;padding:5px 9px;text-align:center;min-width:64px}
+      .res .n{font-size:13px;font-weight:900}
+      .res .t{font-size:7px;color:#555}
+      .firma{margin-top:34px;display:flex;gap:40px}
+      .firma div{flex:1;border-top:.5px solid #111;padding-top:4px;font-size:8px;text-align:center}
+      .pie{margin-top:12px;font-size:7.5px;color:#777}
+      .actions{margin:14px 0;text-align:center}
+      .p{background:#9B1528;color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer}
+      @media print{.actions{display:none}}
+    </style></head><body>
+    <div class="enc">
+      <img src="${logo}" alt="Grupo Management" onerror="this.style.display='none'">
+      <div class="t"><h1>Expediente de Asistencia</h1>
+        <div class="s">${fmtDate(d.desde)} al ${fmtDate(d.hasta)}</div></div>
+    </div>
+
+    <div class="datos">
+      <b>${e.nombre}</b>${e.numero_colaborador?` &nbsp;·&nbsp; No. ${e.numero_colaborador}`:''}
+      ${e.puesto?` &nbsp;·&nbsp; ${e.puesto}`:''}${e.departamento?` &nbsp;·&nbsp; ${e.departamento}`:''}
+    </div>
+
+    <div class="kpis">
+      <div class="k"><div class="n">${horasLab.toFixed(1)}</div><div class="l">Horas laboradas</div></div>
+      <div class="k"><div class="n">${horasEsp.toFixed(1)}</div><div class="l">Horas esperadas</div></div>
+      <div class="k"><div class="n">${pct.toFixed(0)}%</div><div class="l">Productividad</div></div>
+      <div class="k"><div class="n">${nRet}</div><div class="l">Retardos</div></div>
+      <div class="k"><div class="n">${promRet}</div><div class="l">Min. promedio</div></div>
+    </div>
+
+    <h3>Resumen de incidencias</h3>
+    <div class="res">
+      ${Object.keys(COD_EXP).map(k => `<div>
+        <div class="n">${t[k]||0}</div><div class="t">${COD_EXP[k].l}</div></div>`).join('')}
+    </div>
+
+    <h3>Días con incidencia (${conInc.length})</h3>
+    ${conInc.length ? `<table>
+      <thead><tr><th style="width:80px">Fecha</th><th style="width:50px">Código</th>
+        <th style="width:60px">Retardo</th><th>Nota</th></tr></thead>
+      <tbody>${conInc.map(x => {
+        const c = COD_EXP[x.c] || { bg:'#f1f1f1', fg:'#555' };
+        return `<tr><td>${fmtDate(x.fecha)}</td>
+          <td><span class="cod" style="background:${c.bg};color:${c.fg}">${x.c}</span></td>
+          <td>${x.r?`${x.r} min`:'–'}</td>
+          <td>${(x.n||'').replace(/</g,'&lt;')}</td></tr>`;
+      }).join('')}</tbody></table>` : '<p style="font-size:9px;color:#777">Sin incidencias en el período.</p>'}
+
+    <h3>Cambios de incidencia (${d.hist.cambios.length + d.hist.sin_historial.length})</h3>
+    ${(d.hist.cambios.length || d.hist.sin_historial.length) ? `<table>
+      <thead><tr><th style="width:80px">Fecha</th><th style="width:90px">Estaba → quedó</th>
+        <th>Motivo</th><th style="width:110px">Lo cambió</th></tr></thead>
+      <tbody>
+        ${d.hist.cambios.map(h => `<tr>
+          <td>${fmtDate(h.fecha)}</td>
+          <td>${h.codigo_antes||'auto'} → ${h.codigo_despues||'auto'}</td>
+          <td>${(h.notas||'').replace(/</g,'&lt;')}</td>
+          <td>${h.hecho_por_nombre||'—'}<br><span style="font-size:7px;color:#888">${new Date(h.creado_en).toLocaleString('es-MX')}</span></td>
+        </tr>`).join('')}
+        ${d.hist.sin_historial.map(h => `<tr>
+          <td>${fmtDate(h.fecha)}</td>
+          <td>— → ${h.codigo_despues||'auto'}</td>
+          <td>${(h.notas||'').replace(/</g,'&lt;')}</td>
+          <td style="font-style:italic;color:#888">anterior al registro</td>
+        </tr>`).join('')}
+      </tbody></table>` : '<p style="font-size:9px;color:#777">No se modificó ninguna incidencia en el período.</p>'}
+
+    <div class="firma">
+      <div>Colaborador</div><div>Recursos Humanos</div>
+    </div>
+    <div class="pie">Impreso el ${new Date().toLocaleString('es-MX')} · Grupo Management</div>
+    <div class="actions"><button class="p" onclick="window.print()">🖨 Imprimir</button></div>
+    <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),500));<\/script>
+    </body></html>`);
+  w.document.close();
 }
 
 // ══ REPORTE MENSUAL DE DIRECCIÓN ═══════════════════════════════════

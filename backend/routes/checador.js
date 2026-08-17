@@ -6,6 +6,18 @@ const { permiso, NIVEL } = require('../middleware/permiso');
 // La Lista de Asistencia es su propio módulo: se puede dar a alguien de RH sin
 // abrirle el reloj, y capturar notas de justificación exige nivel Editar.
 const verAsistencia    = permiso('asistencia', NIVEL.VER);
+// El expediente individual es su propio modulo: muestra el detalle de una
+// persona, no el panorama del equipo, y se asigna a quien corresponda.
+const verExpediente    = permiso('expedienteAsistencia', NIVEL.VER);
+
+// La matriz de asistencia la consumen dos pantallas con alcances distintos:
+// la Lista de Asistencia pide toda la plantilla, y el Expediente pide una sola
+// persona. Se exige el modulo que corresponde al alcance de la consulta, para no
+// obligar a dar la lista completa a quien solo debe ver expedientes.
+function verMatrizAsistencia(req, res, next) {
+  return req.query.empleado_id ? verExpediente(req, res, next)
+                               : verAsistencia(req, res, next);
+}
 const editarAsistencia = permiso('asistencia', NIVEL.EDITAR);
 
 router.use(verificarToken);
@@ -520,6 +532,43 @@ router.post('/asistencia/ajuste', editarAsistencia, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/checador/asistencia/historial-empleado?empleado_id&desde&hasta
+// Todos los cambios de incidencia de un colaborador en el rango. Alimenta el
+// expediente individual: la nota justifica el cambio, y sin el historial solo se
+// vería la última, perdiendo por qué se movió cada día.
+router.get('/asistencia/historial-empleado', verExpediente, async (req, res) => {
+  try {
+    const { empleado_id, desde, hasta } = req.query;
+    if (!empleado_id || !desde || !hasta)
+      return res.status(400).json({ error: 'Se requieren empleado_id, desde y hasta.' });
+    const r = await query(`
+      SELECT TO_CHAR(fecha,'YYYY-MM-DD') AS fecha,
+             codigo_antes, codigo_despues, notas,
+             hecho_por_nombre, creado_en
+        FROM fac_asistencia_ajustes_hist
+       WHERE empleado_id = $1 AND fecha BETWEEN $2::date AND $3::date
+       ORDER BY fecha, creado_en`, [empleado_id, desde, hasta]);
+
+    // Los ajustes anteriores al historial no dejaron rastro de quién ni cuándo,
+    // pero su nota sigue guardada: se incluyen para que el expediente no pierda
+    // justificaciones viejas.
+    const sinHist = await query(`
+      SELECT TO_CHAR(a.fecha,'YYYY-MM-DD') AS fecha, a.codigo AS codigo_despues, a.notas
+        FROM fac_asistencia_ajustes a
+       WHERE a.empleado_id = $1 AND a.fecha BETWEEN $2::date AND $3::date
+         AND NULLIF(TRIM(a.notas),'') IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM fac_asistencia_ajustes_hist h
+            WHERE h.empleado_id = a.empleado_id AND h.fecha = a.fecha)
+       ORDER BY a.fecha`, [empleado_id, desde, hasta]);
+
+    res.json({
+      cambios: r.rows,
+      sin_historial: sinHist.rows   // notas anteriores a que existiera el rastro
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/checador/asistencia/historial?empleado_id&fecha — quién cambió qué y por qué
 router.get('/asistencia/historial', verAsistencia, async (req, res) => {
   try {
@@ -543,7 +592,7 @@ router.get('/asistencia/historial', verAsistencia, async (req, res) => {
 //   In = Incapacidad (solicitud aprobada tipo='incapacidad')
 //   D  = Dia de descanso (segun empleado)
 //   -  = Sin datos (empleado inactivo o fuera de rango)
-router.get('/asistencia', verAsistencia, async (req, res) => {
+router.get('/asistencia', verMatrizAsistencia, async (req, res) => {
   try {
     const { desde, hasta, empleado_id, incluir_inactivos } = req.query;
     if (!desde || !hasta) return res.status(400).json({ error: 'Se requieren desde y hasta (YYYY-MM-DD).' });
@@ -724,7 +773,13 @@ router.get('/asistencia', verAsistencia, async (req, res) => {
 
 // GET /api/checador/productividad — resumen por colaborador
 // Calcula: dias laborables, horas esperadas, horas laboradas, retardos, incidencias, % productividad
-router.get('/productividad', async (req, res) => {
+// Igual que la matriz: por empleado corresponde al Expediente, y de toda la
+// plantilla al Reloj Checador.
+function verProductividad(req, res, next) {
+  return req.query.empleado_id ? verExpediente(req, res, next)
+                               : permiso('checador', NIVEL.VER)(req, res, next);
+}
+router.get('/productividad', verProductividad, async (req, res) => {
   try {
     const { desde, hasta, empleado_id } = req.query;
     if (!desde || !hasta) return res.status(400).json({ error: 'Se requieren desde y hasta (YYYY-MM-DD).' });
