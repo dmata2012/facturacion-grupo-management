@@ -47,7 +47,7 @@
 
   // ── Formulario de contacto ──────────────────
   // Validación en el navegador y aviso de recibido. Todavía no hay backend:
-  // ver sitio/README.md para conectarlo cuando exista el endpoint.
+  // ver el README de esta carpeta para conectarlo cuando exista el endpoint.
   const forma = document.querySelector('[data-forma-contacto]');
   if (forma) {
     const aviso = forma.querySelector('[data-aviso]');

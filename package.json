@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node backend/server.js",
     "install-deps": "cd backend && npm install",
-    "sitio": "node sitio/dev-server.js"
+    "crm": "node \"CRM Despacho/dev-server.js\""
   },
   "engines": {
     "node": ">=18.0.0"

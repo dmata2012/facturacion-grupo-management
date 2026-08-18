@@ -1,4 +1,4 @@
-# Sitio web público — Grupo Management
+# CRM Despacho — sitio web público de Grupo Management
 
 Sitio institucional de Grupo Management. Es un **proyecto aparte** del sistema
 de facturación: vive en esta misma carpeta del repositorio, pero no comparte
@@ -13,13 +13,13 @@ código, servidor ni base de datos con `backend/` ni con `frontend/`.
 Con Node 18 o superior instalado:
 
 ```bash
-node sitio/dev-server.js
+node "CRM Despacho/dev-server.js"
 ```
 
 o, desde la raíz del repositorio:
 
 ```bash
-npm run sitio
+npm run crm
 ```
 
 Después abre **http://localhost:5173**.
@@ -27,7 +27,7 @@ Después abre **http://localhost:5173**.
 Si el puerto está ocupado:
 
 ```bash
-PORT=5174 node sitio/dev-server.js
+PORT=5174 node "CRM Despacho/dev-server.js"
 ```
 
 El servidor de desarrollo recarga el navegador solo cada vez que guardas un
@@ -36,7 +36,7 @@ archivo dentro de `public/`. No hace falta reiniciarlo.
 ## Estructura
 
 ```
-sitio/
+CRM Despacho/
 ├── dev-server.js        servidor de desarrollo (Node puro, con recarga en vivo)
 ├── package.json
 ├── README.md
@@ -91,7 +91,7 @@ Al no haber build, se sube la carpeta `public/` completa a cualquier hosting
 estático (Netlify, Vercel, Cloudflare Pages, GitHub Pages, o un bucket detrás de
 un CDN). En Render funciona como *Static Site* con:
 
-- **Publish directory**: `sitio/public`
+- **Publish directory**: `CRM Despacho/public`
 - **Build command**: *(vacío)*
 
 `dev-server.js` es solo para desarrollo; no se usa en producción.
