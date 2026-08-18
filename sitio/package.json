@@ -1,0 +1,13 @@
+{
+  "name": "grupo-management-sitio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sitio web público de Grupo Management — estático, sin dependencias",
+  "scripts": {
+    "dev": "node dev-server.js",
+    "start": "node dev-server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

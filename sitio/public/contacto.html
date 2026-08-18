@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Contacto — Grupo Management</title>
+<meta name="description" content="Escríbenos y te contactamos en menos de 24 horas hábiles para agendar tu diagnóstico.">
+<link rel="icon" href="img/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+
+<!-- ══ NAVEGACIÓN ══ -->
+<header class="nav">
+  <div class="contenedor nav__interior">
+    <a class="nav__logo" href="index.html">
+      <img src="img/logo.png" alt="Grupo Management">
+      <span class="nav__logo-txt">Grupo <span>Management</span></span>
+    </a>
+    <button class="nav__menu" type="button" data-menu aria-expanded="false" aria-controls="menu-principal" aria-label="Abrir menú">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+    <nav class="nav__enlaces" id="menu-principal" data-enlaces aria-label="Navegación principal">
+      <a class="nav__enlace" href="index.html">Inicio</a>
+      <a class="nav__enlace" href="servicios.html">Servicios</a>
+      <a class="nav__enlace" href="nosotros.html">Nosotros</a>
+      <a class="nav__enlace" href="contacto.html">Contacto</a>
+      <a class="boton boton--principal" href="contacto.html">Agendar una llamada</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="portada" style="padding:76px 0 64px">
+  <div class="contenedor portada__interior">
+    <span class="etiqueta">Contacto</span>
+    <h1>Cuéntanos qué necesitas</h1>
+    <p class="portada__texto">
+      Déjanos tus datos y te contactamos en menos de 24 horas hábiles para
+      agendar el diagnóstico, sin costo ni compromiso.
+    </p>
+  </div>
+</section>
+
+<section class="seccion">
+  <div class="contenedor dos-columnas dos-columnas--arriba">
+
+    <form class="formulario" data-forma-contacto novalidate>
+      <div class="aviso" data-aviso role="status" hidden></div>
+
+      <div class="campo">
+        <label for="nombre">Nombre completo *</label>
+        <input id="nombre" name="nombre" type="text" autocomplete="name" required>
+        <span class="campo__error"></span>
+      </div>
+
+      <div class="campo">
+        <label for="empresa">Empresa *</label>
+        <input id="empresa" name="empresa" type="text" autocomplete="organization" required>
+        <span class="campo__error"></span>
+      </div>
+
+      <div class="campo">
+        <label for="correo">Correo electrónico *</label>
+        <input id="correo" name="correo" type="email" autocomplete="email" required>
+        <span class="campo__error"></span>
+      </div>
+
+      <div class="campo">
+        <label for="telefono">Teléfono</label>
+        <input id="telefono" name="telefono" type="tel" autocomplete="tel">
+        <span class="campo__error"></span>
+      </div>
+
+      <div class="campo">
+        <label for="servicio">¿Qué te interesa? *</label>
+        <select id="servicio" name="servicio" required>
+          <option value="">Selecciona una opción</option>
+          <option>Facturación y cobranza</option>
+          <option>Nómina y personal</option>
+          <option>Tesorería y bancos</option>
+          <option>Reportes de dirección</option>
+          <option>Administración completa</option>
+          <option>Otro</option>
+        </select>
+        <span class="campo__error"></span>
+      </div>
+
+      <div class="campo">
+        <label for="mensaje">Cuéntanos brevemente tu situación *</label>
+        <textarea id="mensaje" name="mensaje" required></textarea>
+        <span class="campo__error"></span>
+      </div>
+
+      <button class="boton boton--principal" type="submit">Enviar mensaje</button>
+      <p style="font-size:13px;color:var(--tenue)">
+        Usamos tus datos únicamente para contactarte. No los compartimos con terceros.
+      </p>
+    </form>
+
+    <aside class="datos-contacto">
+      <div class="dato-contacto">
+        <div class="dato-contacto__titulo">Correo</div>
+        <a href="mailto:contacto@grupomanagement.mx">contacto@grupomanagement.mx</a>
+      </div>
+      <div class="dato-contacto">
+        <div class="dato-contacto__titulo">Teléfono</div>
+        <a href="tel:+520000000000">+52 (00) 0000 0000</a>
+      </div>
+      <div class="dato-contacto">
+        <div class="dato-contacto__titulo">Horario</div>
+        <p>Lunes a viernes, 9:00 – 18:00 h</p>
+      </div>
+      <div class="dato-contacto">
+        <div class="dato-contacto__titulo">Oficina</div>
+        <p>Calle y número, Colonia<br>Ciudad, Estado, C.P. 00000<br>México</p>
+      </div>
+      <div class="dato-contacto">
+        <div class="dato-contacto__titulo">¿Ya eres cliente?</div>
+        <p>Entra a la plataforma con tu usuario para consultar facturas, pagos y reportes.</p>
+      </div>
+    </aside>
+
+  </div>
+</section>
+
+</main>
+
+<!-- ══ PIE ══ -->
+<footer class="pie">
+  <div class="contenedor">
+    <div class="pie__rejilla">
+      <div>
+        <div class="pie__logo">
+          <img src="img/logo.png" alt="">
+          <span>Grupo Management</span>
+        </div>
+        <p class="pie__nota">
+          Servicios administrativos, contables y de nómina para empresas que
+          quieren decidir con información al día.
+        </p>
+      </div>
+      <div>
+        <h4>Sitio</h4>
+        <ul>
+          <li><a href="index.html">Inicio</a></li>
+          <li><a href="servicios.html">Servicios</a></li>
+          <li><a href="nosotros.html">Nosotros</a></li>
+          <li><a href="contacto.html">Contacto</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Contacto</h4>
+        <ul>
+          <li><a href="mailto:contacto@grupomanagement.mx">contacto@grupomanagement.mx</a></li>
+          <li><a href="tel:+520000000000">+52 (00) 0000 0000</a></li>
+          <li>Lunes a viernes, 9:00 – 18:00</li>
+        </ul>
+      </div>
+    </div>
+    <div class="pie__linea">
+      <span>© <span data-anio>2026</span> Grupo Management. Todos los derechos reservados.</span>
+      <span>Hecho en México</span>
+    </div>
+  </div>
+</footer>
+
+<script src="js/sitio.js"></script>
+</body>
+</html>

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Página no encontrada — Grupo Management</title>
+<meta name="description" content="La página que buscas no existe o cambió de dirección.">
+<link rel="icon" href="img/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+
+<!-- ══ NAVEGACIÓN ══ -->
+<header class="nav">
+  <div class="contenedor nav__interior">
+    <a class="nav__logo" href="index.html">
+      <img src="img/logo.png" alt="Grupo Management">
+      <span class="nav__logo-txt">Grupo <span>Management</span></span>
+    </a>
+    <button class="nav__menu" type="button" data-menu aria-expanded="false" aria-controls="menu-principal" aria-label="Abrir menú">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+    <nav class="nav__enlaces" id="menu-principal" data-enlaces aria-label="Navegación principal">
+      <a class="nav__enlace" href="index.html">Inicio</a>
+      <a class="nav__enlace" href="servicios.html">Servicios</a>
+      <a class="nav__enlace" href="nosotros.html">Nosotros</a>
+      <a class="nav__enlace" href="contacto.html">Contacto</a>
+      <a class="boton boton--principal" href="contacto.html">Agendar una llamada</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="pagina-404 contenedor">
+  <div class="codigo">404</div>
+  <h1>Esta página no existe</h1>
+  <p class="subtitulo">Puede que el enlace haya cambiado o que la dirección tenga un error.</p>
+  <p style="margin-top:22px"><a class="boton boton--principal" href="index.html">Volver al inicio</a></p>
+</section>
+
+</main>
+
+<!-- ══ PIE ══ -->
+<footer class="pie">
+  <div class="contenedor">
+    <div class="pie__rejilla">
+      <div>
+        <div class="pie__logo">
+          <img src="img/logo.png" alt="">
+          <span>Grupo Management</span>
+        </div>
+        <p class="pie__nota">
+          Servicios administrativos, contables y de nómina para empresas que
+          quieren decidir con información al día.
+        </p>
+      </div>
+      <div>
+        <h4>Sitio</h4>
+        <ul>
+          <li><a href="index.html">Inicio</a></li>
+          <li><a href="servicios.html">Servicios</a></li>
+          <li><a href="nosotros.html">Nosotros</a></li>
+          <li><a href="contacto.html">Contacto</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Contacto</h4>
+        <ul>
+          <li><a href="mailto:contacto@grupomanagement.mx">contacto@grupomanagement.mx</a></li>
+          <li><a href="tel:+520000000000">+52 (00) 0000 0000</a></li>
+          <li>Lunes a viernes, 9:00 – 18:00</li>
+        </ul>
+      </div>
+    </div>
+    <div class="pie__linea">
+      <span>© <span data-anio>2026</span> Grupo Management. Todos los derechos reservados.</span>
+      <span>Hecho en México</span>
+    </div>
+  </div>
+</footer>
+
+<script src="js/sitio.js"></script>
+</body>
+</html>

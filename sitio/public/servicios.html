@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Servicios — Grupo Management</title>
+<meta name="description" content="Facturación, nómina, tesorería, reportes de dirección y cumplimiento fiscal para empresas.">
+<link rel="icon" href="img/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+
+<!-- ══ NAVEGACIÓN ══ -->
+<header class="nav">
+  <div class="contenedor nav__interior">
+    <a class="nav__logo" href="index.html">
+      <img src="img/logo.png" alt="Grupo Management">
+      <span class="nav__logo-txt">Grupo <span>Management</span></span>
+    </a>
+    <button class="nav__menu" type="button" data-menu aria-expanded="false" aria-controls="menu-principal" aria-label="Abrir menú">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+    <nav class="nav__enlaces" id="menu-principal" data-enlaces aria-label="Navegación principal">
+      <a class="nav__enlace" href="index.html">Inicio</a>
+      <a class="nav__enlace" href="servicios.html">Servicios</a>
+      <a class="nav__enlace" href="nosotros.html">Nosotros</a>
+      <a class="nav__enlace" href="contacto.html">Contacto</a>
+      <a class="boton boton--principal" href="contacto.html">Agendar una llamada</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="portada" style="padding:76px 0 64px">
+  <div class="contenedor portada__interior">
+    <span class="etiqueta">Servicios</span>
+    <h1>Un servicio para cada parte de tu administración</h1>
+    <p class="portada__texto">
+      Puedes contratarlos por separado o dejarnos la operación completa.
+      En los dos casos trabajas con el mismo equipo y con la misma plataforma.
+    </p>
+  </div>
+</section>
+
+<section class="seccion">
+  <div class="contenedor rejilla rejilla--2">
+
+    <article class="tarjeta">
+      <div class="tarjeta__icono">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>
+      </div>
+      <h3>Facturación y cobranza</h3>
+      <p>Dejamos de perseguir facturas en hojas sueltas: todo queda registrado, con vencimientos y saldos a la vista.</p>
+      <ul class="lista-marcas">
+        <li>Emisión y timbrado de facturas</li>
+        <li>Control de anticipos y pagos parciales</li>
+        <li>Antigüedad de saldos y facturas vencidas</li>
+        <li>Recordatorios de cobro a clientes</li>
+      </ul>
+    </article>
+
+    <article class="tarjeta">
+      <div class="tarjeta__icono">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </div>
+      <h3>Nómina y personal</h3>
+      <p>El cálculo de cada periodo y el expediente de cada colaborador, sin depender de una sola persona que sepa hacerlo.</p>
+      <ul class="lista-marcas">
+        <li>Cálculo de nómina y recibos</li>
+        <li>Vacaciones, permisos e incidencias</li>
+        <li>Control de asistencia con ubicación</li>
+        <li>Expediente por colaborador</li>
+      </ul>
+    </article>
+
+    <article class="tarjeta">
+      <div class="tarjeta__icono">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg>
+      </div>
+      <h3>Tesorería y bancos</h3>
+      <p>Saber cuánto entró, cuánto salió y qué falta por pagar, sin esperar al cierre de mes.</p>
+      <ul class="lista-marcas">
+        <li>Registro de ingresos y egresos</li>
+        <li>Conciliación bancaria por cuenta</li>
+        <li>Control de gastos por concepto</li>
+        <li>Programación de pagos</li>
+      </ul>
+    </article>
+
+    <article class="tarjeta">
+      <div class="tarjeta__icono">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 4 3 5-7"/></svg>
+      </div>
+      <h3>Reportes de dirección</h3>
+      <p>El concentrado mensual que la dirección necesita para decidir, con el mismo formato que ya conoce.</p>
+      <ul class="lista-marcas">
+        <li>Facturado, cobrado y pendiente del mes</li>
+        <li>Otros ingresos y su desglose</li>
+        <li>Comparativos contra meses anteriores</li>
+        <li>Exportación a Excel</li>
+      </ul>
+    </article>
+
+  </div>
+</section>
+
+<section class="seccion seccion--alt">
+  <div class="contenedor dos-columnas">
+    <div>
+      <span class="etiqueta">Plataforma incluida</span>
+      <h2>Tu información, disponible cuando la necesites</h2>
+      <p>
+        Los clientes de Grupo Management trabajan sobre nuestra plataforma web:
+        entran con su usuario y consultan facturas, pagos, nómina y reportes sin
+        tener que pedirlos por correo.
+      </p>
+      <ul class="lista-marcas">
+        <li>Acceso desde computadora o celular</li>
+        <li>Permisos por usuario y por área</li>
+        <li>Documentos respaldados y ordenados</li>
+        <li>Reportes que se exportan a Excel</li>
+      </ul>
+    </div>
+    <aside class="panel-marca">
+      <h3>¿No sabes por dónde empezar?</h3>
+      <p>
+        La mayoría de nuestros clientes empieza por facturación y cobranza,
+        porque es donde el desorden cuesta dinero más rápido. En el diagnóstico
+        te decimos qué conviene en tu caso.
+      </p>
+      <p style="margin-top:26px">
+        <a class="boton boton--linea" href="contacto.html" style="background:#fff;color:var(--rojo);border-color:#fff">Solicitar diagnóstico</a>
+      </p>
+    </aside>
+  </div>
+</section>
+
+</main>
+
+<!-- ══ PIE ══ -->
+<footer class="pie">
+  <div class="contenedor">
+    <div class="pie__rejilla">
+      <div>
+        <div class="pie__logo">
+          <img src="img/logo.png" alt="">
+          <span>Grupo Management</span>
+        </div>
+        <p class="pie__nota">
+          Servicios administrativos, contables y de nómina para empresas que
+          quieren decidir con información al día.
+        </p>
+      </div>
+      <div>
+        <h4>Sitio</h4>
+        <ul>
+          <li><a href="index.html">Inicio</a></li>
+          <li><a href="servicios.html">Servicios</a></li>
+          <li><a href="nosotros.html">Nosotros</a></li>
+          <li><a href="contacto.html">Contacto</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Contacto</h4>
+        <ul>
+          <li><a href="mailto:contacto@grupomanagement.mx">contacto@grupomanagement.mx</a></li>
+          <li><a href="tel:+520000000000">+52 (00) 0000 0000</a></li>
+          <li>Lunes a viernes, 9:00 – 18:00</li>
+        </ul>
+      </div>
+    </div>
+    <div class="pie__linea">
+      <span>© <span data-anio>2026</span> Grupo Management. Todos los derechos reservados.</span>
+      <span>Hecho en México</span>
+    </div>
+  </div>
+</footer>
+
+<script src="js/sitio.js"></script>
+</body>
+</html>
