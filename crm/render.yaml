@@ -47,6 +47,22 @@ services:
       - key: RUTA_ARCHIVOS
         value: /var/data/archivos
 
+      # ── Servidor de correo ──
+      # Se capturan en el panel cuando el despacho tenga los datos de su
+      # proveedor. Hasta entonces el sistema no envía y lo dice en pantalla.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PUERTO
+        sync: false
+      - key: SMTP_USUARIO
+        sync: false
+      - key: SMTP_CLAVE
+        sync: false
+      - key: CORREO_REMITENTE
+        sync: false
+      - key: CORREO_NOMBRE
+        value: Grupo Management
+
     # Los documentos de los clientes (pasaportes, actas) viven aquí. Sin este
     # disco se borrarían en cada despliegue, porque el disco de la aplicación
     # es efímero. Súbelo de tamaño cuando haga falta; no se puede reducir.

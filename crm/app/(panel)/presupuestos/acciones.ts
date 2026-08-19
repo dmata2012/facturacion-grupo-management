@@ -7,8 +7,8 @@ import { prisma } from '@/lib/prisma';
 import { exigir } from '@/lib/sesion';
 import { filtroVentas } from '@/lib/permisos';
 import {
-  aceptarPresupuesto, crearPresupuesto, enviarPresupuesto, rechazarPresupuesto,
-  type LineaConcepto, type LineaPago,
+  aceptarPresupuesto, crearPresupuesto, enviarPresupuesto, enviarPresupuestoPorCorreo,
+  rechazarPresupuesto, type LineaConcepto, type LineaPago,
 } from '@/lib/negocio';
 
 /** Nadie toca el presupuesto de una venta que no le corresponde. */
@@ -99,6 +99,23 @@ export async function marcarEnviado(datos: FormData) {
   revalidatePath(`/presupuestos/${id}`);
   revalidatePath('/pipeline');
   revalidatePath(`/clientes/${presupuesto.venta.clienteId}`);
+}
+
+/** Manda el presupuesto al correo del cliente, con el PDF adjunto. */
+export async function enviarPorCorreo(datos: FormData) {
+  const id = String(datos.get('presupuestoId'));
+  const { sesion } = await presupuestoPropio(id);
+
+  const resultado = await enviarPresupuestoPorCorreo(id, sesion);
+
+  revalidatePath(`/presupuestos/${id}`);
+  revalidatePath('/pipeline');
+  if (!resultado.enviado) {
+    // El motivo real viaja en la URL: sin él, quien pulsó el botón no sabe si
+    // falta configurar el correo o si el cliente no tiene dirección.
+    redirect(`/presupuestos/${id}?error=${encodeURIComponent(resultado.motivo ?? 'No se pudo enviar.')}`);
+  }
+  redirect(`/presupuestos/${id}?enviado=${encodeURIComponent(resultado.destinatario ?? '')}`);
 }
 
 export async function aprobarPresupuesto(datos: FormData) {

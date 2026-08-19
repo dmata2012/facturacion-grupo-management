@@ -5,9 +5,10 @@ import { exigir } from '@/lib/sesion';
 import { filtroVentas } from '@/lib/permisos';
 import { fecha, pesos } from '@/lib/formato';
 import {
-  Boton, BotonEnlace, Campo, Insignia, Tarjeta, TituloSeccion, claseInput, type Tono,
+  Aviso, Boton, BotonEnlace, Campo, Insignia, Tarjeta, TituloSeccion, claseInput, type Tono,
 } from '@/componentes/ui';
-import { aprobarPresupuesto, declinarPresupuesto, marcarEnviado } from '../acciones';
+import { aprobarPresupuesto, declinarPresupuesto, enviarPorCorreo, marcarEnviado } from '../acciones';
+import { correoConfigurado, faltaConfigurar } from '@/lib/correo';
 
 const MEDIO: Record<string, string> = {
   CORREO: 'por correo',
@@ -23,8 +24,15 @@ const ETIQUETA: Record<string, { texto: string; tono: Tono }> = {
   RECHAZADO: { texto: 'Rechazado', tono: 'alerta' },
 };
 
-export default async function VerPresupuesto({ params }: { params: Promise<{ id: string }> }) {
+export default async function VerPresupuesto({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string; enviado?: string }>;
+}) {
   const { id } = await params;
+  const { error, enviado } = await searchParams;
   const sesion = await exigir('ventas');
 
   const presupuesto = await prisma.presupuesto.findFirst({
@@ -48,6 +56,15 @@ export default async function VerPresupuesto({ params }: { params: Promise<{ id:
   const cerrado = presupuesto.estatus === 'ACEPTADO' || presupuesto.estatus === 'RECHAZADO';
   const predeterminada = plantillas.find((p) => p.esPredeterminada) ?? plantillas[0];
 
+  // El botón de correo solo aparece cuando de verdad puede funcionar: con el
+  // servidor configurado y con una dirección a la cual mandarlo.
+  const hayServidor = correoConfigurado();
+  const correoCliente = presupuesto.venta.cliente.correo;
+  const puedeEnviarCorreo = hayServidor && Boolean(correoCliente);
+  const motivoSinCorreo = !hayServidor
+    ? `Para enviar por correo desde el sistema falta configurar el servidor (${faltaConfigurar().join(', ')}). Mientras tanto, descarga el PDF y mándalo tú.`
+    : 'Este cliente no tiene correo capturado en su ficha, así que no se le puede enviar desde aquí.';
+
   return (
     <>
       <TituloSeccion
@@ -65,6 +82,9 @@ export default async function VerPresupuesto({ params }: { params: Promise<{ id:
       >
         Presupuesto {presupuesto.folio}
       </TituloSeccion>
+
+      {enviado && <Aviso tono="exito">Presupuesto enviado por correo a {enviado}.</Aviso>}
+      {error && <Aviso>{error}</Aviso>}
 
       <div className="mb-5 flex flex-wrap items-center gap-2 text-sm text-suave">
         <Insignia tono={estado.tono}>
@@ -175,6 +195,24 @@ export default async function VerPresupuesto({ params }: { params: Promise<{ id:
                     avanza sola a &laquo;Propuesta enviada&raquo; y queda anotado en el historial
                     del cliente.
                   </p>
+                  {puedeEnviarCorreo ? (
+                    <form action={enviarPorCorreo} className="mb-4 border-b border-borde pb-4">
+                      <input type="hidden" name="presupuestoId" value={presupuesto.id} />
+                      <Boton type="submit" className="w-full">
+                        Enviar por correo a {presupuesto.venta.cliente.correo}
+                      </Boton>
+                      <p className="mt-2 text-xs text-tenue">
+                        Se manda el PDF adjunto y queda registrado en el historial del cliente.
+                        Las respuestas llegan a {presupuesto.venta.vendedor.correo}.
+                      </p>
+                    </form>
+                  ) : (
+                    <p className="mb-4 rounded-sm border-l-4 border-amber-400 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      {motivoSinCorreo}
+                    </p>
+                  )}
+
+                  <p className="mb-2 text-xs font-semibold text-tinta">O regístralo a mano:</p>
                   <form action={marcarEnviado} className="space-y-3">
                     <input type="hidden" name="presupuestoId" value={presupuesto.id} />
                     <Campo etiqueta="Se le envió por">

@@ -541,6 +541,82 @@ export async function aceptarPresupuesto(
   return presupuesto;
 }
 
+/**
+ * Envía el presupuesto por correo al cliente, con el PDF adjunto, y deja el
+ * envío registrado igual que si se hubiera marcado a mano.
+ *
+ * Si el correo no está configurado o el servidor lo rechaza, NO se marca como
+ * enviado: decir que se envió algo que no salió es peor que no tener el botón.
+ */
+export async function enviarPresupuestoPorCorreo(
+  presupuestoId: string,
+  actor: Actor & { correo?: string }
+): Promise<{ enviado: boolean; motivo?: string; destinatario?: string }> {
+  const presupuesto = await prisma.presupuesto.findUniqueOrThrow({
+    where: { id: presupuestoId },
+    include: {
+      conceptos: { orderBy: { orden: 'asc' } },
+      pagos: { orderBy: { numero: 'asc' } },
+      creadoPor: true,
+      venta: { include: { cliente: true, tipoTramite: true, vendedor: true } },
+    },
+  });
+
+  const destinatario = presupuesto.venta.cliente.correo;
+  if (!destinatario) {
+    return { enviado: false, motivo: 'El cliente no tiene correo capturado en su ficha.' };
+  }
+
+  const { generarPdfPresupuesto } = await import('@/lib/presupuesto-pdf');
+  const { enviarCorreo } = await import('@/lib/correo');
+  const pdf = await generarPdfPresupuesto(presupuesto);
+  const total = presupuesto.conceptos.reduce((t, c) => t + Number(c.monto), 0);
+  const importe = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(total);
+
+  const resultado = await enviarCorreo({
+    para: destinatario,
+    responderA: presupuesto.venta.vendedor.correo,
+    asunto: `Presupuesto ${presupuesto.folio} — ${presupuesto.venta.tipoTramite.nombre}`,
+    texto:
+      `Estimado(a) ${presupuesto.venta.cliente.nombre}:\n\n` +
+      `Adjunto encontrará el presupuesto ${presupuesto.folio} para su trámite de ` +
+      `${presupuesto.venta.tipoTramite.nombre}, por un total de ${importe}.\n\n` +
+      (presupuesto.validoHasta ? `El precio se sostiene hasta el ${fechaLarga(presupuesto.validoHasta)}.\n\n` : '') +
+      `Quedamos atentos a cualquier duda.\n\n` +
+      `${presupuesto.venta.vendedor.nombre}\nGrupo Management`,
+    adjuntos: [
+      { nombre: `presupuesto-${presupuesto.folio}.pdf`, contenido: pdf, tipo: 'application/pdf' },
+    ],
+  });
+
+  if (!resultado.enviado) return { enviado: false, motivo: resultado.motivo };
+
+  const enviadoEn = new Date();
+  await prisma.presupuesto.update({
+    where: { id: presupuestoId },
+    data: { estatus: 'ENVIADO', fechaEnvio: enviadoEn, medioEnvio: 'CORREO' },
+  });
+
+  await prisma.interaccion.create({
+    data: {
+      clienteId: presupuesto.venta.clienteId,
+      fecha: enviadoEn,
+      medio: 'CORREO',
+      resultado:
+        `Presupuesto ${presupuesto.folio} enviado por correo a ${destinatario} ` +
+        `el ${fechaLarga(enviadoEn)}.`,
+      usuarioId: actor.id,
+    },
+  });
+
+  const etapasPrevias = ['PROSPECTO_CALIFICADO', 'CONTACTADO', 'CONSULTA_AGENDADA'];
+  if (etapasPrevias.includes(presupuesto.venta.etapa)) {
+    await moverEtapaVenta(presupuesto.ventaId, 'PROPUESTA_ENVIADA', actor);
+  }
+
+  return { enviado: true, destinatario };
+}
+
 export async function rechazarPresupuesto(presupuestoId: string, motivo: string, actor: Actor) {
   const presupuesto = await prisma.presupuesto.update({
     where: { id: presupuestoId },

@@ -1,7 +1,8 @@
 import { prisma } from '@/lib/prisma';
 import { exigir } from '@/lib/sesion';
 import { ETIQUETA_ROL } from '@/lib/permisos';
-import { Boton, BotonEnlace, Tarjeta, TituloSeccion } from '@/componentes/ui';
+import { Boton, BotonEnlace, Insignia, Tarjeta, TituloSeccion } from '@/componentes/ui';
+import { correoConfigurado, faltaConfigurar } from '@/lib/correo';
 import { guardarAlerta } from '../acciones';
 import type { Rol, TipoAlerta } from '@prisma/client';
 
@@ -40,6 +41,8 @@ const DESCRIPCION: Record<TipoAlerta, { titulo: string; texto: string; unidad: s
 export default async function Alertas() {
   await exigir('configuracion');
   const alertas = await prisma.configAlerta.findMany({ orderBy: { tipo: 'asc' } });
+  const hayCorreo = correoConfigurado();
+  const pendientes = faltaConfigurar();
 
   return (
     <>
@@ -47,10 +50,30 @@ export default async function Alertas() {
         Motor de alertas
       </TituloSeccion>
 
-      <div className="mb-5 max-w-3xl rounded-lg border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        <strong>Todavía no se envía nada.</strong> Esta configuración ya se guarda y es la que usará
-        el motor, pero falta conectar el proveedor de WhatsApp y el de correo. Es lo siguiente que
-        toca construir.
+      <Tarjeta className="mb-5 max-w-3xl p-5">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <h2 className="text-sm font-bold text-tinta">Servidor de correo</h2>
+          <Insignia tono={hayCorreo ? 'exito' : 'aviso'}>
+            {hayCorreo ? 'Configurado' : 'Sin configurar'}
+          </Insignia>
+        </div>
+        {hayCorreo ? (
+          <p className="text-sm text-suave">
+            El sistema ya puede mandar presupuestos por correo desde la pantalla del presupuesto.
+          </p>
+        ) : (
+          <p className="text-sm text-suave">
+            Falta capturar en Render: <strong>{pendientes.join(', ')}</strong>. Mientras tanto, los
+            presupuestos se descargan en PDF y el envío se registra a mano; el sistema nunca da por
+            enviado algo que no salió.
+          </p>
+        )}
+      </Tarjeta>
+
+      <div className="mb-5 max-w-3xl rounded-sm border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <strong>Los recordatorios automáticos todavía no salen.</strong> Esta configuración ya se
+        guarda y es la que usará el motor, pero falta el proceso que los dispara y el proveedor de
+        WhatsApp.
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
