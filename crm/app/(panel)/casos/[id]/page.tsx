@@ -7,7 +7,8 @@ import { fecha, fechaHora, paraInput } from '@/lib/formato';
 import {
   Boton, BotonEnlace, Campo, Dato, Insignia, Tarjeta, TituloSeccion, claseInput,
 } from '@/componentes/ui';
-import { cambiarEtapaCaso, guardarDatosCaso, subirDocumento } from '../acciones';
+import { cambiarEtapaCaso, confirmarDocumento, guardarDatosCaso, guardarDetalleDocumento } from '../acciones';
+import { AvanceChecklist, CasillaEntrega } from '@/componentes/checklist';
 
 export default async function DetalleCaso({
   params,
@@ -27,7 +28,7 @@ export default async function DetalleCaso({
       abogado: true,
       tipoTramite: { include: { etapas: { orderBy: { orden: 'asc' } } } },
       venta: { include: { cliente: true, vendedor: true } },
-      documentos: { include: { plantilla: true, subidoPor: true }, orderBy: { nombre: 'asc' } },
+      documentos: { include: { plantilla: true, confirmadoPor: true }, orderBy: { nombre: 'asc' } },
       historial: { include: { usuario: true }, orderBy: { fecha: 'desc' } },
     },
   });
@@ -56,12 +57,6 @@ export default async function DetalleCaso({
         <Insignia tono="info">{caso.etapaActual?.nombre ?? 'Sin etapa'}</Insignia>
         <span>Vendedor: {caso.venta.vendedor.nombre}</span>
       </div>
-
-      {error === 'archivo' && (
-        <p className="mb-4 rounded-lg border-l-4 border-red-500 bg-red-50 px-3 py-2 text-sm text-red-700">
-          No se pudo subir el archivo. Revisa que sea PDF o imagen y pese menos de 10 MB.
-        </p>
-      )}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
         <div className="space-y-6">
@@ -164,48 +159,70 @@ export default async function DetalleCaso({
           </Tarjeta>
 
           <Tarjeta className="p-6">
-            <h2 className="mb-4 text-sm font-bold text-tinta">Checklist de documentos</h2>
+            <h2 className="mb-3 text-sm font-bold text-tinta">Checklist de documentos</h2>
+            <AvanceChecklist
+              entregados={caso.documentos.filter((d) => d.estatus === 'ENTREGADO').length}
+              total={caso.documentos.length}
+            />
+            <p className="mt-2 mb-4 text-xs text-tenue">
+              El despacho no guarda los archivos: aquí se confirma qué entregó ya el cliente y qué
+              le falta. Cada marca queda con su fecha y con quién la puso.
+            </p>
+
             <ul className="divide-y divide-borde">
               {caso.documentos.map((d) => (
-                <li key={d.id} className="flex flex-wrap items-center gap-3 py-3">
-                  <div className="min-w-52 flex-1">
-                    <p className="text-sm font-semibold text-tinta">{d.nombre}</p>
-                    {d.fechaSubida && (
-                      <p className="text-xs text-tenue">
-                        {d.subidoPor?.nombre} · {fecha(d.fechaSubida)}
+                <li key={d.id} className="py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    {puedeEditar ? (
+                      <CasillaEntrega
+                        documentoId={d.id}
+                        entregado={d.estatus === 'ENTREGADO'}
+                        nombre={d.nombre}
+                        accion={confirmarDocumento}
+                      />
+                    ) : (
+                      <span className="flex items-center gap-2.5 text-sm font-semibold text-tinta">
+                        <Insignia tono={d.estatus === 'ENTREGADO' ? 'exito' : 'neutro'}>
+                          {d.estatus === 'ENTREGADO' ? 'Entregado' : 'Pendiente'}
+                        </Insignia>
+                        {d.nombre}
+                      </span>
+                    )}
+                    {d.fechaEntrega && (
+                      <span className="text-xs text-tenue">
+                        {fecha(d.fechaEntrega)}
+                        {d.confirmadoPor && ` · ${d.confirmadoPor.nombre}`}
                         {d.fechaVigencia && ` · vence ${fecha(d.fechaVigencia)}`}
-                      </p>
+                      </span>
                     )}
                   </div>
-                  <Insignia tono={d.estatus === 'ENTREGADO' ? 'exito' : 'neutro'}>
-                    {d.estatus === 'ENTREGADO' ? 'Entregado' : 'Pendiente'}
-                  </Insignia>
-                  {d.archivoUrl && (
-                    <a href={d.archivoUrl} target="_blank" className="text-sm font-semibold text-marca hover:underline">
-                      Ver
-                    </a>
-                  )}
+
                   {puedeEditar && (
-                    <form action={subirDocumento} className="flex items-center gap-2">
+                    <form
+                      action={guardarDetalleDocumento}
+                      className="mt-2 flex flex-wrap items-center gap-2 pl-8"
+                    >
                       <input type="hidden" name="documentoId" value={d.id} />
-                      <input
-                        type="file"
-                        name="archivo"
-                        required
-                        aria-label={`Subir ${d.nombre}`}
-                        className="max-w-40 text-xs file:mr-2 file:rounded file:border-0 file:bg-slate-100 file:px-2 file:py-1 file:text-xs file:font-semibold"
-                      />
                       {d.plantilla?.requiereVigencia && (
-                        <input
-                          type="date"
-                          name="fechaVigencia"
-                          aria-label={`Vigencia de ${d.nombre}`}
-                          defaultValue={paraInput(d.fechaVigencia)}
-                          className="rounded border border-borde px-2 py-1 text-xs"
-                        />
+                        <label className="flex items-center gap-1.5 text-xs text-suave">
+                          Vigencia:
+                          <input
+                            type="date"
+                            name="fechaVigencia"
+                            defaultValue={paraInput(d.fechaVigencia)}
+                            className="rounded-sm border border-borde px-2 py-1 text-xs"
+                          />
+                        </label>
                       )}
-                      <Boton type="submit" estilo="suave" className="px-3 py-1 text-xs">
-                        Subir
+                      <input
+                        name="observacion"
+                        defaultValue={d.observacion ?? ''}
+                        placeholder="Nota sobre este documento…"
+                        aria-label={`Nota sobre ${d.nombre}`}
+                        className="min-w-44 flex-1 rounded-sm border border-borde px-2 py-1 text-xs"
+                      />
+                      <Boton type="submit" estilo="suave" className="px-2.5 py-1 text-xs">
+                        Guardar
                       </Boton>
                     </form>
                   )}

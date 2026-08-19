@@ -11,7 +11,8 @@ import {
   type Tono,
 } from '@/componentes/ui';
 import { guardarObservaciones, nuevaInteraccion } from '../acciones';
-import { subirDocumento } from '../../casos/acciones';
+import { confirmarDocumento, guardarDetalleDocumento } from '../../casos/acciones';
+import { AvanceChecklist, CasillaEntrega } from '@/componentes/checklist';
 import { pagarComision, registrarPago } from '../../cobros/acciones';
 
 type Pestana = 'general' | 'documentos' | 'pagos' | 'comisiones' | 'notas';
@@ -59,7 +60,10 @@ export default async function FichaCliente({
             include: {
               etapaActual: true,
               abogado: true,
-              documentos: { include: { plantilla: true }, orderBy: { nombre: 'asc' } },
+              documentos: {
+                include: { plantilla: true, confirmadoPor: true },
+                orderBy: { nombre: 'asc' },
+              },
             },
           },
         },
@@ -204,51 +208,65 @@ export default async function FichaCliente({
               expediente.
             </Vacio>
           ) : (
-            <ul className="divide-y divide-borde">
-              {caso.documentos.map((d) => (
-                <li key={d.id} className="flex flex-wrap items-center gap-3 py-3">
-                  <div className="min-w-56 flex-1">
-                    <p className="text-sm font-semibold text-tinta">{d.nombre}</p>
-                    {d.fechaSubida && (
-                      <p className="text-xs text-tenue">
-                        Subido el {fecha(d.fechaSubida)}
-                        {d.fechaVigencia && ` · vigente hasta ${fecha(d.fechaVigencia)}`}
-                      </p>
-                    )}
-                  </div>
-                  <Insignia tono={d.estatus === 'ENTREGADO' ? 'exito' : 'neutro'}>
-                    {d.estatus === 'ENTREGADO' ? 'Entregado' : 'Pendiente'}
-                  </Insignia>
-                  {d.archivoUrl && (
-                    <a href={d.archivoUrl} target="_blank" className="text-sm font-semibold text-marca hover:underline">
-                      Ver archivo
-                    </a>
-                  )}
-                  <form action={subirDocumento} className="flex items-center gap-2">
-                    <input type="hidden" name="documentoId" value={d.id} />
-                    <input
-                      type="file"
-                      name="archivo"
-                      required
-                      aria-label={`Subir ${d.nombre}`}
-                      className="max-w-44 text-xs file:mr-2 file:rounded file:border-0 file:bg-slate-100 file:px-2 file:py-1 file:text-xs file:font-semibold"
-                    />
-                    {d.plantilla?.requiereVigencia && (
-                      <input
-                        type="date"
-                        name="fechaVigencia"
-                        aria-label={`Vigencia de ${d.nombre}`}
-                        defaultValue={paraInput(d.fechaVigencia)}
-                        className="rounded border border-borde px-2 py-1 text-xs"
+            <>
+              <AvanceChecklist
+                entregados={caso.documentos.filter((d) => d.estatus === 'ENTREGADO').length}
+                total={caso.documentos.length}
+              />
+              <p className="mt-2 mb-4 text-xs text-tenue">
+                Marca cada documento cuando el cliente lo entregue. Se guarda solo, y queda
+                registrado quién lo confirmó.
+              </p>
+
+              <ul className="divide-y divide-borde">
+                {caso.documentos.map((d) => (
+                  <li key={d.id} className="py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <CasillaEntrega
+                        documentoId={d.id}
+                        entregado={d.estatus === 'ENTREGADO'}
+                        nombre={d.nombre}
+                        accion={confirmarDocumento}
                       />
-                    )}
-                    <Boton type="submit" estilo="suave" className="px-3 py-1 text-xs">
-                      Subir
-                    </Boton>
-                  </form>
-                </li>
-              ))}
-            </ul>
+                      {d.fechaEntrega && (
+                        <span className="text-xs text-tenue">
+                          {fecha(d.fechaEntrega)}
+                          {d.confirmadoPor && ` · ${d.confirmadoPor.nombre}`}
+                        </span>
+                      )}
+                    </div>
+
+                    <form
+                      action={guardarDetalleDocumento}
+                      className="mt-2 flex flex-wrap items-center gap-2 pl-8"
+                    >
+                      <input type="hidden" name="documentoId" value={d.id} />
+                      {d.plantilla?.requiereVigencia && (
+                        <label className="flex items-center gap-1.5 text-xs text-suave">
+                          Vigencia:
+                          <input
+                            type="date"
+                            name="fechaVigencia"
+                            defaultValue={paraInput(d.fechaVigencia)}
+                            className="rounded-sm border border-borde px-2 py-1 text-xs"
+                          />
+                        </label>
+                      )}
+                      <input
+                        name="observacion"
+                        defaultValue={d.observacion ?? ''}
+                        placeholder="Nota: dónde quedó el original, si viene incompleto…"
+                        aria-label={`Nota sobre ${d.nombre}`}
+                        className="min-w-44 flex-1 rounded-sm border border-borde px-2 py-1 text-xs"
+                      />
+                      <Boton type="submit" estilo="suave" className="px-2.5 py-1 text-xs">
+                        Guardar
+                      </Boton>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </Tarjeta>
       )}

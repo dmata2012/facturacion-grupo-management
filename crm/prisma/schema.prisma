@@ -114,7 +114,7 @@ model Usuario {
   ventasComoVendedor  Venta[]              @relation("VentaVendedor")
   casosComoAbogado    Caso[]               @relation("CasoAbogado")
   comisiones          Comision[]
-  documentosSubidos   Documento[]
+  documentosConfirmados Documento[]
   interacciones       Interaccion[]
   seguimientos        ProximoSeguimiento[]
   citas               Cita[]
@@ -330,24 +330,35 @@ model HistorialEtapa {
 
 // ── Documentos del expediente ─────────────────────────────────────
 
+/// Renglón del checklist del expediente. El despacho no guarda los archivos:
+/// confirma que el cliente ya entregó cada documento y quién lo revisó.
 model Documento {
-  id        String @id @default(cuid())
-  caso      Caso   @relation(fields: [casoId], references: [id], onDelete: Cascade)
-  casoId    String
+  id     String @id @default(cuid())
+  caso   Caso   @relation(fields: [casoId], references: [id], onDelete: Cascade)
+  casoId String
 
   plantilla   DocumentoPlantilla? @relation(fields: [plantillaId], references: [id])
   plantillaId String?
   nombre      String
 
-  archivoUrl  String?
-  archivoNombre String?
-  subidoPor   Usuario?  @relation(fields: [subidoPorId], references: [id])
-  subidoPorId String?
-  fechaSubida DateTime?
+  estatus EstatusDocumento @default(PENDIENTE)
+  /// Quién confirmó la entrega y cuándo. Sirve para saber a quién preguntarle
+  /// si después aparece una duda sobre ese documento.
+  confirmadoPor   Usuario?  @relation(fields: [confirmadoPorId], references: [id])
+  confirmadoPorId String?
+  fechaEntrega    DateTime?
 
-  estatus       EstatusDocumento @default(PENDIENTE)
   /// Para pasaportes, visas y permisos: alimenta la alerta de caducidad.
   fechaVigencia DateTime?
+
+  /// Nota del renglón: dónde quedó el original, si viene incompleto, etc.
+  observacion String?
+
+  /// Obsoletos: quedaron de cuando el expediente guardaba los archivos. Se
+  /// conservan para no perder las referencias de los documentos ya cargados;
+  /// ninguna pantalla los usa. Se eliminarán en una limpieza posterior.
+  archivoUrl    String?
+  archivoNombre String?
 
   @@index([casoId])
 }

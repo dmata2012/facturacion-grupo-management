@@ -6,7 +6,6 @@ import { Modalidad } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { exigir } from '@/lib/sesion';
 import { filtroCasos } from '@/lib/permisos';
-import { guardarArchivo } from '@/lib/archivos';
 import { aplicarPlantillaComision, moverEtapaCaso } from '@/lib/negocio';
 
 async function casoPropio(casoId: string, accion: 'ver' | 'editar' = 'editar') {
@@ -59,36 +58,67 @@ export async function guardarDatosCaso(datos: FormData) {
   revalidatePath(`/casos/${casoId}`);
 }
 
-export async function subirDocumento(datos: FormData) {
+/**
+ * Confirma o retira la entrega de un documento del checklist.
+ *
+ * El despacho no guarda el archivo: registra que el cliente ya lo entregó,
+ * junto con quién lo revisó y cuándo. Si después aparece una duda sobre ese
+ * documento, se sabe a quién preguntarle.
+ */
+export async function confirmarDocumento(datos: FormData) {
   const documentoId = String(datos.get('documentoId'));
   const documento = await prisma.documento.findUniqueOrThrow({ where: { id: documentoId } });
   const { sesion } = await casoPropio(documento.casoId);
 
-  const archivo = datos.get('archivo');
-  if (!(archivo instanceof File) || archivo.size === 0) {
-    redirect(`/casos/${documento.casoId}?error=archivo`);
-  }
+  const entregado = datos.get('entregado') === 'on';
 
-  const guardado = await guardarArchivo(archivo);
-  if (!guardado) redirect(`/casos/${documento.casoId}?error=archivo`);
+  await prisma.documento.update({
+    where: { id: documentoId },
+    data: entregado
+      ? { estatus: 'ENTREGADO', confirmadoPorId: sesion.id, fechaEntrega: new Date() }
+      : // Al volver a pendiente se limpia la confirmación: dejarla diría que
+        // alguien lo revisó cuando el documento ya no está entregado.
+        { estatus: 'PENDIENTE', confirmadoPorId: null, fechaEntrega: null },
+  });
+
+  await prisma.auditoria.create({
+    data: {
+      entidad: 'Documento',
+      entidadId: documentoId,
+      accion: entregado ? 'entregado' : 'pendiente',
+      usuarioId: sesion.id,
+      detalle: { documento: documento.nombre },
+    },
+  });
+
+  await revalidarExpediente(documento.casoId);
+}
+
+/** Vigencia y nota del renglón, que se capturan aparte de la casilla. */
+export async function guardarDetalleDocumento(datos: FormData) {
+  const documentoId = String(datos.get('documentoId'));
+  const documento = await prisma.documento.findUniqueOrThrow({ where: { id: documentoId } });
+  await casoPropio(documento.casoId);
 
   const vigencia = String(datos.get('fechaVigencia') ?? '');
   await prisma.documento.update({
     where: { id: documentoId },
     data: {
-      archivoUrl: `/api/archivos/${guardado.nombreAlmacenado}`,
-      archivoNombre: guardado.nombreOriginal,
-      subidoPorId: sesion.id,
-      fechaSubida: new Date(),
-      estatus: 'ENTREGADO',
-      fechaVigencia: vigencia ? new Date(vigencia) : undefined,
+      fechaVigencia: vigencia ? new Date(vigencia) : null,
+      observacion: String(datos.get('observacion') ?? '').trim() || null,
     },
   });
 
+  await revalidarExpediente(documento.casoId);
+}
+
+/** El checklist se ve en dos pantallas: ambas deben refrescarse. */
+async function revalidarExpediente(casoId: string) {
   const caso = await prisma.caso.findUniqueOrThrow({
-    where: { id: documento.casoId },
+    where: { id: casoId },
     include: { venta: true },
   });
-  revalidatePath(`/casos/${documento.casoId}`);
+  revalidatePath(`/casos/${casoId}`);
+  revalidatePath('/casos');
   revalidatePath(`/clientes/${caso.venta.clienteId}`);
 }
