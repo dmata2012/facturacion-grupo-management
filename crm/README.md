@@ -158,6 +158,8 @@ Se resuelven en dos niveles, porque uno solo no alcanza:
 - Reportes con selector de periodo (semana / mes / año)
 - Autenticación y permisos por rol, aplicados también a las consultas
 - Auditoría de ventas, pagos y comisiones
+- Configuración editable desde el sistema: tipos de trámite con sus etapas y
+  checklist, catálogos, plantillas de comisión, motor de alertas y usuarios
 
 **Falta (fases 2 y 3):**
 
@@ -165,8 +167,6 @@ Se resuelven en dos niveles, porque uno solo no alcanza:
   guarda y se consulta; falta conectar el proveedor y el proceso que las dispara.
 - **Agenda en vistas día / semana / mes.** Hoy es una lista cronológica que ya se
   alimenta sola de los seguimientos.
-- **Pantallas para editar catálogos y plantillas.** Hoy se consultan en
-  Configuración y se editan en la base de datos.
 - **Rango de fechas personalizado** en reportes (están semana, mes y año).
 - **Almacenamiento tipo S3.** Los documentos se guardan en disco (en local, la
   carpeta `archivos/`; en Render, el disco persistente montado), fuera de

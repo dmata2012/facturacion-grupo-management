@@ -157,3 +157,16 @@ export function Kpi({
     </Tarjeta>
   );
 }
+
+/** Aviso de error de un formulario, con el mismo aspecto en todo el sistema. */
+export function Aviso({ children, tono = 'alerta' }: { children: ReactNode; tono?: 'alerta' | 'exito' }) {
+  const estilo =
+    tono === 'exito'
+      ? 'border-green-500 bg-green-50 text-green-800'
+      : 'border-red-500 bg-red-50 text-red-700';
+  return (
+    <p className={`mb-4 rounded-lg border-l-4 px-3 py-2 text-sm ${estilo}`} role="status">
+      {children}
+    </p>
+  );
+}
