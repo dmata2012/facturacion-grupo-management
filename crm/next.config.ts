@@ -1,6 +1,9 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  // pdfkit lee sus fuentes desde node_modules en tiempo de ejecución; si el
+  // empaquetador lo procesa, esas fuentes no viajan y la generación falla.
+  serverExternalPackages: ['pdfkit'],
   experimental: {
     serverActions: {
       // Por defecto Next corta los envíos en 1 MB, y con eso fallaba la subida

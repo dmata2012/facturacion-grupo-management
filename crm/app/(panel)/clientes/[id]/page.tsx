@@ -15,10 +15,11 @@ import { confirmarDocumento, guardarDetalleDocumento } from '../../casos/accione
 import { AvanceChecklist, CasillaEntrega } from '@/componentes/checklist';
 import { pagarComision, registrarPago } from '../../cobros/acciones';
 
-type Pestana = 'general' | 'documentos' | 'pagos' | 'comisiones' | 'notas';
+type Pestana = 'general' | 'presupuestos' | 'documentos' | 'pagos' | 'comisiones' | 'notas';
 
 const PESTANAS: { clave: Pestana; nombre: string }[] = [
   { clave: 'general', nombre: 'Información general' },
+  { clave: 'presupuestos', nombre: 'Presupuestos' },
   { clave: 'documentos', nombre: 'Documentos' },
   { clave: 'pagos', nombre: 'Plan de pagos' },
   { clave: 'comisiones', nombre: 'Comisiones' },
@@ -54,6 +55,10 @@ export default async function FichaCliente({
           tipoTramite: true,
           vendedor: true,
           motivoPerdida: true,
+          presupuestos: {
+            include: { conceptos: true, pagos: true },
+            orderBy: { creadoEn: 'desc' },
+          },
           cuotas: { orderBy: { numero: 'asc' } },
           comisiones: { include: { participante: true }, orderBy: { rol: 'asc' } },
           caso: {
@@ -84,6 +89,12 @@ export default async function FichaCliente({
   const filtroCom = filtroComisiones(sesion);
   const comisiones = (ventaActiva?.comisiones ?? []).filter(
     (c) => !filtroCom.participanteId || c.participanteId === sesion.id
+  );
+
+  // Los presupuestos de todas las ventas del cliente, del más reciente al más
+  // antiguo: un cliente puede haber pedido varias cotizaciones con el tiempo.
+  const presupuestos = cliente.ventas.flatMap((v) =>
+    v.presupuestos.map((p) => ({ ...p, tramite: v.tipoTramite.nombre }))
   );
 
   const pestanasVisibles = PESTANAS.filter((p) => {
@@ -197,6 +208,59 @@ export default async function FichaCliente({
             )}
           </Tarjeta>
         </div>
+      )}
+
+      {/* ── Presupuestos ── */}
+      {pestana === 'presupuestos' && (
+        <Tarjeta className="p-6">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-suave">
+              Las propuestas económicas entregadas a este cliente. El PDF se genera al momento, así
+              que siempre coincide con lo que está guardado.
+            </p>
+            {ventaActiva && ventaActiva.etapa !== 'CERRADO_GANADO' && (
+              <BotonEnlace href={`/presupuestos/nuevo?venta=${ventaActiva.id}`}>
+                Nuevo presupuesto
+              </BotonEnlace>
+            )}
+          </div>
+
+          {!presupuestos.length ? (
+            <Vacio>Todavía no se le ha hecho ningún presupuesto.</Vacio>
+          ) : (
+            <ul className="divide-y divide-borde">
+              {presupuestos.map((p) => {
+                const total = p.conceptos.reduce((t, c) => t + Number(c.monto), 0);
+                const tono =
+                  p.estatus === 'ACEPTADO' ? 'exito' :
+                  p.estatus === 'RECHAZADO' ? 'alerta' :
+                  p.estatus === 'ENVIADO' ? 'info' : 'neutro';
+                return (
+                  <li key={p.id} className="flex flex-wrap items-center gap-3 py-3">
+                    <Link
+                      href={`/presupuestos/${p.id}`}
+                      className="text-sm font-semibold text-tinta hover:text-marca"
+                    >
+                      {p.folio}
+                    </Link>
+                    <Insignia tono={tono}>{p.estatus.toLowerCase()}</Insignia>
+                    <span className="text-xs text-suave">{p.tramite}</span>
+                    <span className="text-xs text-tenue">{fecha(p.creadoEn)}</span>
+                    <span className="flex-1" />
+                    <span className="text-sm font-bold">{pesos(total)}</span>
+                    <a
+                      href={`/presupuestos/${p.id}/pdf`}
+                      target="_blank"
+                      className="text-sm font-semibold text-marca hover:underline"
+                    >
+                      PDF
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Tarjeta>
       )}
 
       {/* ── Documentos ── */}

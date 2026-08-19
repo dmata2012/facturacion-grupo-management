@@ -91,6 +91,13 @@ enum CanalAlerta {
   AMBOS
 }
 
+enum EstatusPresupuesto {
+  BORRADOR
+  ENVIADO
+  ACEPTADO
+  RECHAZADO
+}
+
 enum TipoAlerta {
   CUOTA_POR_VENCER
   CUOTA_VENCIDA
@@ -120,6 +127,7 @@ model Usuario {
   citas               Cita[]
   cambiosDeEtapa      HistorialEtapa[]
   movimientos         Auditoria[]
+  presupuestos        Presupuesto[]
 }
 
 // ── Catálogos configurables (sección 13: sin tocar código) ────────
@@ -262,9 +270,10 @@ model Venta {
   actualizadoEn DateTime @updatedAt
 
   caso       Caso?
-  cuotas     Cuota[]
-  comisiones Comision[]
-  historial  HistorialEtapa[]
+  cuotas       Cuota[]
+  comisiones   Comision[]
+  historial    HistorialEtapa[]
+  presupuestos Presupuesto[]
 
   @@index([etapa])
   @@index([vendedorId])
@@ -512,4 +521,66 @@ model Auditoria {
 
   @@index([entidad, entidadId])
   @@index([fecha])
+}
+
+// ── Presupuestos ──────────────────────────────────────────────────
+
+/// Propuesta económica que se entrega al cliente para su aprobación: qué
+/// trámite se le cotiza, cuánto cuesta y en qué pagos. Al aceptarla, sus
+/// pagos se convierten en el plan de pagos real del caso — así lo cobrado
+/// coincide con lo prometido, sin recapturarlo.
+model Presupuesto {
+  id      String @id @default(cuid())
+  /// Folio legible para referirse a él con el cliente: P-2026-0007.
+  folio   String @unique
+  venta   Venta  @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  ventaId String
+
+  estatus EstatusPresupuesto @default(BORRADOR)
+
+  /// Hasta cuándo se sostiene el precio ofrecido.
+  validoHasta    DateTime?
+  fechaEnvio     DateTime?
+  fechaRespuesta DateTime?
+  motivoRechazo  String?
+
+  /// Condiciones del servicio, tal como se le presentan al cliente.
+  condiciones String?
+  notas       String?
+
+  creadoPor   Usuario? @relation(fields: [creadoPorId], references: [id])
+  creadoPorId String?
+  creadoEn    DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  conceptos PresupuestoConcepto[]
+  pagos     PresupuestoPago[]
+
+  @@index([ventaId])
+  @@index([estatus])
+}
+
+/// Renglón del presupuesto: honorarios, derechos gubernamentales, gestoría.
+/// Se desglosa para que el cliente vea por qué paga lo que paga.
+model PresupuestoConcepto {
+  id            String      @id @default(cuid())
+  presupuesto   Presupuesto @relation(fields: [presupuestoId], references: [id], onDelete: Cascade)
+  presupuestoId String
+  descripcion   String
+  monto         Decimal     @db.Decimal(12, 2)
+  orden         Int         @default(1)
+}
+
+/// Pago propuesto. Al aceptarse el presupuesto, cada uno se convierte en una
+/// cuota del plan de pagos.
+model PresupuestoPago {
+  id            String      @id @default(cuid())
+  presupuesto   Presupuesto @relation(fields: [presupuestoId], references: [id], onDelete: Cascade)
+  presupuestoId String
+  numero        Int
+  descripcion   String?
+  fechaPropuesta DateTime
+  monto         Decimal     @db.Decimal(12, 2)
+
+  @@unique([presupuestoId, numero])
 }

@@ -98,7 +98,16 @@ export default async function Pipeline() {
                   )}
 
                   {v.etapa !== 'CERRADO_GANADO' && v.etapa !== 'CERRADO_PERDIDO' && (
-                    <form action={moverVenta} className="mt-3 flex gap-1">
+                    <Link
+                      href={`/presupuestos/nuevo?venta=${v.id}`}
+                      className="mt-3 block rounded-sm border border-borde px-2 py-1.5 text-center text-xs font-semibold text-tinta transition hover:border-marca hover:text-marca"
+                    >
+                      Hacer presupuesto
+                    </Link>
+                  )}
+
+                  {v.etapa !== 'CERRADO_GANADO' && v.etapa !== 'CERRADO_PERDIDO' && (
+                    <form action={moverVenta} className="mt-2 flex gap-1">
                       <input type="hidden" name="ventaId" value={v.id} />
                       <select
                         name="etapa"

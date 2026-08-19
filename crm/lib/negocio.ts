@@ -365,3 +365,153 @@ export async function registrarInteraccion(
     return interaccion;
   });
 }
+
+// ── Presupuestos ──────────────────────────────────────────────────
+
+export type LineaConcepto = { descripcion: string; monto: number };
+export type LineaPago = { descripcion: string; fechaPropuesta: Date; monto: number };
+
+/**
+ * Folio legible del presupuesto: P-2026-0007. El consecutivo se reinicia cada
+ * año, que es como el despacho los va a referir por teléfono.
+ */
+async function siguienteFolio(tx: Prisma.TransactionClient): Promise<string> {
+  const anio = new Date().getFullYear();
+  const ultimo = await tx.presupuesto.findFirst({
+    where: { folio: { startsWith: `P-${anio}-` } },
+    orderBy: { folio: 'desc' },
+  });
+  const consecutivo = ultimo ? Number(ultimo.folio.split('-')[2]) + 1 : 1;
+  return `P-${anio}-${String(consecutivo).padStart(4, '0')}`;
+}
+
+export async function crearPresupuesto(
+  ventaId: string,
+  datos: {
+    conceptos: LineaConcepto[];
+    pagos: LineaPago[];
+    validoHasta: Date | null;
+    condiciones: string | null;
+    notas: string | null;
+  },
+  actor: Actor
+) {
+  return prisma.$transaction(async (tx) => {
+    const folio = await siguienteFolio(tx);
+    const presupuesto = await tx.presupuesto.create({
+      data: {
+        folio,
+        ventaId,
+        validoHasta: datos.validoHasta,
+        condiciones: datos.condiciones,
+        notas: datos.notas,
+        creadoPorId: actor.id,
+        conceptos: {
+          create: datos.conceptos.map((c, i) => ({
+            descripcion: c.descripcion,
+            monto: new Prisma.Decimal(c.monto),
+            orden: i + 1,
+          })),
+        },
+        pagos: {
+          create: datos.pagos.map((p, i) => ({
+            numero: i + 1,
+            descripcion: p.descripcion || null,
+            fechaPropuesta: p.fechaPropuesta,
+            monto: new Prisma.Decimal(p.monto),
+          })),
+        },
+      },
+    });
+    await auditar(tx, 'Presupuesto', presupuesto.id, `creado:${folio}`, actor.id);
+    return presupuesto;
+  });
+}
+
+/** Marca el presupuesto como entregado al cliente y adelanta la venta. */
+export async function enviarPresupuesto(presupuestoId: string, actor: Actor) {
+  const presupuesto = await prisma.presupuesto.findUniqueOrThrow({
+    where: { id: presupuestoId },
+    include: { venta: true },
+  });
+  if (presupuesto.estatus === 'ACEPTADO') {
+    throw new Error('Ese presupuesto ya fue aceptado.');
+  }
+
+  await prisma.presupuesto.update({
+    where: { id: presupuestoId },
+    data: { estatus: 'ENVIADO', fechaEnvio: new Date() },
+  });
+
+  // La venta refleja lo que pasó: ya hay propuesta con el cliente.
+  const etapasPrevias = ['PROSPECTO_CALIFICADO', 'CONTACTADO', 'CONSULTA_AGENDADA'];
+  if (etapasPrevias.includes(presupuesto.venta.etapa)) {
+    await moverEtapaVenta(presupuesto.ventaId, 'PROPUESTA_ENVIADA', actor);
+  }
+  return presupuesto;
+}
+
+/**
+ * El cliente aprobó: se cierra la venta como ganada y los pagos propuestos se
+ * vuelven el plan de pagos real. Así se le cobra exactamente lo que se le
+ * prometió, sin recapturar nada y sin margen para que difieran.
+ */
+export async function aceptarPresupuesto(
+  presupuestoId: string,
+  actor: Actor,
+  extra: { abogadoId?: string | null; plantillaComisionId?: string | null }
+) {
+  const presupuesto = await prisma.presupuesto.findUniqueOrThrow({
+    where: { id: presupuestoId },
+    include: { conceptos: true, pagos: { orderBy: { numero: 'asc' } }, venta: true },
+  });
+  if (presupuesto.estatus === 'ACEPTADO') return presupuesto;
+  if (!presupuesto.pagos.length) {
+    throw new Error('El presupuesto no tiene pagos propuestos: no se puede convertir en plan de pagos.');
+  }
+
+  const total = presupuesto.conceptos.reduce((t, c) => t + Number(c.monto), 0);
+
+  await prisma.presupuesto.update({
+    where: { id: presupuestoId },
+    data: { estatus: 'ACEPTADO', fechaRespuesta: new Date(), motivoRechazo: null },
+  });
+
+  // Los demás presupuestos de la misma venta quedan descartados: solo uno
+  // puede ser el acuerdo vigente.
+  await prisma.presupuesto.updateMany({
+    where: { ventaId: presupuesto.ventaId, id: { not: presupuestoId }, estatus: { in: ['BORRADOR', 'ENVIADO'] } },
+    data: { estatus: 'RECHAZADO', fechaRespuesta: new Date(), motivoRechazo: 'Se aprobó otro presupuesto' },
+  });
+
+  await moverEtapaVenta(presupuesto.ventaId, 'CERRADO_GANADO', actor, {
+    cierre: {
+      montoTotal: total,
+      abogadoId: extra.abogadoId ?? null,
+      plantillaComisionId: extra.plantillaComisionId ?? null,
+      cuotas: presupuesto.pagos.map((p) => ({
+        fechaPactada: p.fechaPropuesta,
+        monto: Number(p.monto),
+      })),
+    },
+  });
+
+  return presupuesto;
+}
+
+export async function rechazarPresupuesto(presupuestoId: string, motivo: string, actor: Actor) {
+  const presupuesto = await prisma.presupuesto.update({
+    where: { id: presupuestoId },
+    data: { estatus: 'RECHAZADO', fechaRespuesta: new Date(), motivoRechazo: motivo || null },
+  });
+  await prisma.auditoria.create({
+    data: {
+      entidad: 'Presupuesto',
+      entidadId: presupuestoId,
+      accion: 'rechazado',
+      usuarioId: actor.id,
+      detalle: { motivo },
+    },
+  });
+  return presupuesto;
+}
