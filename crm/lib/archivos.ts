@@ -69,23 +69,17 @@ const TIPOS_IMAGEN = new Set([
 const LADO_FOTO = 800;
 
 /**
- * Guarda la fotografía de un cliente reducida y comprimida: una foto de
- * celular de 4 MB queda en unos 80 KB, sin que nadie tenga que encogerla a
- * mano antes de subirla.
- *
- * Esto vale SOLO para la foto del cliente. Los documentos del expediente
- * (pasaportes, actas, resoluciones) se guardan intactos con guardarArchivo:
- * son evidencia y deben conservarse tal como se recibieron.
+ * Reduce y comprime la fotografía de un cliente: una foto de celular de 4 MB
+ * queda en unos 80 KB. Devuelve los bytes en vez de escribirlos, porque la
+ * foto se guarda en la base de datos: el disco de la aplicación se borra en
+ * cada despliegue y las fotos desaparecían con él.
  */
-export async function guardarFotografia(archivo: File): Promise<ArchivoGuardado | null> {
+export async function comprimirFotografia(archivo: File): Promise<Uint8Array<ArrayBuffer> | null> {
   if (!archivo || archivo.size === 0) return null;
   if (archivo.size > TAMANO_MAXIMO) throw new Error('La imagen excede 10 MB.');
   if (!TIPOS_IMAGEN.has(archivo.type)) {
     throw new Error('La fotografía debe ser una imagen: JPG, PNG, WEBP o HEIC.');
   }
-
-  await mkdir(CARPETA_ARCHIVOS, { recursive: true });
-  const nombreAlmacenado = `${randomUUID()}.jpg`;
 
   const optimizada = await sharp(Buffer.from(await archivo.arrayBuffer()))
     // Las fotos de celular traen la orientación en los metadatos; sin esto se
@@ -95,8 +89,11 @@ export async function guardarFotografia(archivo: File): Promise<ArchivoGuardado 
     .jpeg({ quality: 82, mozjpeg: true })
     .toBuffer();
 
-  await writeFile(path.join(CARPETA_ARCHIVOS, nombreAlmacenado), optimizada);
-  return { nombreAlmacenado, nombreOriginal: archivo.name };
+  // Se copia a un arreglo propio: el búfer de sharp comparte memoria del
+  // grupo interno de Node, y Prisma pide bytes con dueño único.
+  const bytes = new Uint8Array(new ArrayBuffer(optimizada.byteLength));
+  bytes.set(optimizada);
+  return bytes;
 }
 
 /**

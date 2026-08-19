@@ -213,6 +213,7 @@ model Cliente {
   archivado Boolean  @default(false)
   creadoEn  DateTime @default(now())
 
+  foto          FotoCliente?
   leads         Lead[]
   ventas        Venta[]
   interacciones Interaccion[]
@@ -220,6 +221,17 @@ model Cliente {
   citas         Cita[]
 
   @@index([nombre])
+}
+
+/// La fotografía vive en la base y no en disco: el disco de la aplicación se
+/// borra en cada despliegue, y las fotos desaparecían. Van en tabla aparte
+/// para que listar clientes no arrastre los binarios en cada consulta.
+model FotoCliente {
+  clienteId     String   @id
+  cliente       Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  datos         Bytes
+  tipo          String   @default("image/jpeg")
+  actualizadoEn DateTime @updatedAt
 }
 
 /// Contacto inicial. Todavía NO es prospecto: lo será cuando la entrevista

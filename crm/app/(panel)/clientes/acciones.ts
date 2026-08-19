@@ -6,7 +6,7 @@ import { MedioContacto } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { exigir } from '@/lib/sesion';
 import { filtroClientes } from '@/lib/permisos';
-import { borrarArchivo, guardarFotografia } from '@/lib/archivos';
+import { comprimirFotografia } from '@/lib/archivos';
 import { registrarInteraccion } from '@/lib/negocio';
 
 function texto(datos: FormData, campo: string): string {
@@ -29,12 +29,11 @@ export async function crearCliente(datos: FormData) {
   const vendedorId = sesion.rol === 'VENDEDOR' ? sesion.id : texto(datos, 'vendedorId');
   if (!vendedorId) redirect('/clientes/nuevo?error=vendedor');
 
-  let fotoUrl: string | null = null;
+  let fotoComprimida: Uint8Array<ArrayBuffer> | null = null;
   const foto = datos.get('foto');
   if (foto instanceof File && foto.size > 0) {
     try {
-      const guardado = await guardarFotografia(foto);
-      fotoUrl = guardado ? `/api/archivos/${guardado.nombreAlmacenado}` : null;
+      fotoComprimida = await comprimirFotografia(foto);
     } catch {
       redirect('/clientes/nuevo?error=foto');
     }
@@ -50,7 +49,7 @@ export async function crearCliente(datos: FormData) {
       telefono: texto(datos, 'telefono') || null,
       origenProspectoId: texto(datos, 'origenProspectoId') || null,
       observacionesGenerales: texto(datos, 'observaciones') || null,
-      fotoUrl,
+      foto: fotoComprimida ? { create: { datos: fotoComprimida } } : undefined,
       leads: {
         create: {
           vendedorId,
@@ -61,6 +60,14 @@ export async function crearCliente(datos: FormData) {
       },
     },
   });
+
+  // La URL apunta a la ruta que sirve la foto desde la base.
+  if (fotoComprimida) {
+    await prisma.cliente.update({
+      where: { id: cliente.id },
+      data: { fotoUrl: `/api/clientes/${cliente.id}/foto` },
+    });
+  }
 
   revalidatePath('/clientes');
   revalidatePath('/pipeline');
@@ -92,18 +99,29 @@ export async function actualizarCliente(datos: FormData) {
 
   // La fotografía solo se toca si suben una nueva: dejar el campo vacío
   // significa "conserva la que ya tenía", no "bórrala".
-  const fotoAnterior = permitido.fotoUrl;
-  let fotoUrl = fotoAnterior;
+  let fotoUrl = permitido.fotoUrl;
   const foto = datos.get('foto');
   if (foto instanceof File && foto.size > 0) {
     try {
-      const guardado = await guardarFotografia(foto);
-      if (guardado) fotoUrl = `/api/archivos/${guardado.nombreAlmacenado}`;
+      const comprimida = await comprimirFotografia(foto);
+      if (comprimida) {
+        // La foto nueva reemplaza a la anterior en el mismo renglón: no queda
+        // ninguna copia suelta ocupando espacio.
+        await prisma.fotoCliente.upsert({
+          where: { clienteId: id },
+          update: { datos: comprimida, tipo: 'image/jpeg' },
+          create: { clienteId: id, datos: comprimida },
+        });
+        fotoUrl = `/api/clientes/${id}/foto`;
+      }
     } catch {
       redirect(`/clientes/${id}/editar?error=foto`);
     }
   }
-  if (datos.get('quitarFoto') === 'on') fotoUrl = null;
+  if (datos.get('quitarFoto') === 'on') {
+    await prisma.fotoCliente.deleteMany({ where: { clienteId: id } });
+    fotoUrl = null;
+  }
 
   await prisma.cliente.update({
     where: { id },
@@ -121,17 +139,6 @@ export async function actualizarCliente(datos: FormData) {
       fotoUrl,
     },
   });
-
-  // La foto sustituida se retira del disco, pero solo tras comprobar que
-  // ningún otro registro la esté usando: borrar un archivo vivo dejaría una
-  // ficha o un expediente apuntando a la nada.
-  if (fotoAnterior && fotoAnterior !== fotoUrl) {
-    const [otrosClientes, documentos] = await Promise.all([
-      prisma.cliente.count({ where: { fotoUrl: fotoAnterior, NOT: { id } } }),
-      prisma.documento.count({ where: { archivoUrl: fotoAnterior } }),
-    ]);
-    if (otrosClientes + documentos === 0) await borrarArchivo(fotoAnterior);
-  }
 
   await prisma.auditoria.create({
     data: { entidad: 'Cliente', entidadId: id, accion: 'datos_editados', usuarioId: sesion.id },
