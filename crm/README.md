@@ -168,9 +168,11 @@ Se resuelven en dos niveles, porque uno solo no alcanza:
 - **Pantallas para editar catálogos y plantillas.** Hoy se consultan en
   Configuración y se editan en la base de datos.
 - **Rango de fechas personalizado** en reportes (están semana, mes y año).
-- **Almacenamiento tipo S3.** Hoy los documentos se guardan en la carpeta
-  `archivos/`, fuera de `public/`, y se sirven por una ruta que exige sesión.
-  Para producción hay que cambiar `lib/archivos.ts`.
+- **Almacenamiento tipo S3.** Los documentos se guardan en disco (en local, la
+  carpeta `archivos/`; en Render, el disco persistente montado), fuera de
+  `public/` y servidos por una ruta que exige sesión. Funciona bien, pero atado
+  a una sola máquina: el día que el sistema corra en varias, hay que mover esto
+  a S3 o equivalente. Solo implica cambiar `lib/archivos.ts`.
 
 ---
 
@@ -187,76 +189,55 @@ Se resuelven en dos niveles, porque uno solo no alcanza:
 
 ## 8. Publicar en Render
 
-El repositorio trae un `render.yaml`, así que Render puede crear el servicio
-solo. En el panel: **New → Blueprint**, eliges este repositorio y él lee el
-archivo. Si prefieres crearlo a mano (**New → Web Service**), estos son los
-valores:
+Render **no acepta un ZIP**: solo despliega desde un repositorio de GitHub, así
+que primero hay que subir el proyecto (sección 9).
 
-Render **no acepta un ZIP**: solo despliega desde un repositorio de GitHub. Hay
-que subir el proyecto a GitHub antes (sección 9).
+El repositorio trae un `render.yaml` que declara todo: el servicio web, la base
+de datos PostgreSQL y el disco donde viven los documentos. En el panel de
+Render: **New → Blueprint**, eliges el repositorio, **Apply**. No hay variables
+que capturar a mano — la cadena de conexión se inyecta sola desde la base
+declarada, y `AUTH_SECRET` la genera Render.
 
-Si prefieres crear el servicio a mano (**New → Web Service**), estos son los valores:
+El primer despliegue tarda entre 3 y 6 minutos. Las migraciones corren dentro
+del build, así que las tablas quedan creadas sin ejecutar nada aparte, y cada
+despliegue futuro deja la base al día igual.
 
-| Campo | Valor |
-|---|---|
-| Runtime | Node |
-| Build Command | `npm ci && npx prisma generate && npx prisma migrate deploy && npm run build` |
-| Start Command | `npm run start` |
-| Health Check Path | `/ingresar` |
+### Lo que crea el blueprint
 
-Las migraciones corren dentro del build: cada despliegue deja la base al día
-sin que nadie ejecute nada a mano.
+| Recurso | Plan | Para qué |
+|---|---|---|
+| Servicio web `crm-migratorio` | starter | La aplicación |
+| Base `crm-migratorio-db` | basic-256mb | Los datos |
+| Disco `documentos`, 5 GB en `/var/data` | — | Los archivos de los expedientes |
 
-### Variables de entorno
+Los tres son de pago a propósito. En el plan gratuito el servicio se duerme
+tras unos minutos sin uso, las bases caducan y Render las elimina, y no existen
+los discos persistentes: los documentos se borrarían en cada despliegue.
 
-| Variable | Valor |
-|---|---|
-| `DATABASE_URL` | La cadena de PostgreSQL (Neon, Supabase o la base de Render) |
-| `AUTH_SECRET` | Una clave larga y aleatoria, **distinta** a la de tu computadora |
-| `AUTH_URL` | La dirección pública, ej. `https://crm-migratorio.onrender.com` |
-| `RUTA_ARCHIVOS` | Solo si activaste el disco persistente: `/var/data/archivos` |
-| `NODE_VERSION` | `22` |
+Si Render no reconoce alguno de los nombres de plan (los cambia de vez en
+cuando), elige el equivalente en el panel al aplicar el blueprint.
 
-### Tres cosas que hay que atender, o duelen después
+### Crear el primer usuario
 
-1. **El disco de Render se borra en cada despliegue.** Los documentos de los
-   clientes (pasaportes, actas) desaparecerían con cada actualización del
-   sistema. Los discos persistentes **requieren plan de pago**, así que el
-   `render.yaml` viene sin disco para que el primer despliegue funcione en el
-   plan gratuito. **Mientras no lo resuelvas, no subas documentos reales.**
-   Cuando pases a plan de pago, descomenta el bloque `disk` del `render.yaml` y
-   agrega la variable `RUTA_ARCHIVOS=/var/data/archivos`. La alternativa
-   definitiva es almacenamiento tipo S3 (Cloudflare R2, Backblaze B2 o AWS S3),
-   y solo hay que cambiar `lib/archivos.ts`.
+Al terminar el despliegue la aplicación responde, pero **no hay usuarios**: en
+producción el seed no crea los de prueba, porque comparten una contraseña
+conocida. Para dar de alta el primer acceso, desde tu computadora con el `.env`
+apuntando a la base de producción:
 
-2. **No corras `prisma db seed` en producción con los usuarios de prueba.** El
-   seed ya se protege solo: en producción no los crea. Para dar de alta el
-   primer acceso real, desde tu computadora y apuntando a la base de
-   producción:
+```
+npm run crear-usuario
+```
 
-   ```
-   npm run crear-usuario
-   ```
+La cadena de conexión de la base la copias del panel de Render, en la sección
+**Connect** de `crm-migratorio-db` (usa la *External Connection String*).
 
-3. **El plan gratuito de Render duerme el servicio** tras unos minutos sin uso,
-   y la primera visita después tarda cerca de un minuto en responder. Para un
-   despacho que lo usa todos los días conviene el plan de pago.
+### Después del primer despliegue
 
-### Respaldos
-
-La base de datos es el sistema: si se pierde, se perdieron los expedientes, la
-cobranza y las comisiones. Activa los respaldos automáticos de tu proveedor de
-PostgreSQL desde el primer día y comprueba una vez que sabes restaurarlos.
-
-### Sobre la base de datos en producción
-
-Puedes usar el PostgreSQL de Render o uno externo (Neon, Supabase). Ojo con un
-detalle: **las bases gratuitas de Render tienen caducidad** — pasado el periodo
-gratuito Render las elimina. Confírmalo en el panel al crearla. Para un sistema
-que guarda expedientes, conviene una base de pago o un proveedor cuyo plan
-gratuito no caduque.
-
----
+1. **Activa los respaldos** de la base en el panel de Render. La base es el
+   sistema: si se pierde, se perdieron los expedientes, la cobranza y las
+   comisiones. Comprueba una vez que sabes restaurarlos.
+2. **Dominio propio**, si lo quieres: se configura en Settings → Custom Domains.
+3. El disco puede crecer cuando haga falta, pero **no se puede reducir**.
 
 ## 9. Subir el proyecto a un repositorio nuevo de GitHub
 

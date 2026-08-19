@@ -1,43 +1,53 @@
 # Despliegue en Render. Con este archivo en la raíz del repositorio, Render
-# arma el servicio solo: panel → New → Blueprint.
+# arma todo solo: panel → New → Blueprint → elegir el repositorio → Apply.
+#
+# No hay que capturar variables a mano: la base de datos se crea aquí y su
+# cadena de conexión se inyecta sola en el servicio.
+
+databases:
+  - name: crm-migratorio-db
+    databaseName: crm
+    user: crm
+    region: oregon
+    # Plan de pago: las bases gratuitas de Render caducan y se eliminan, lo que
+    # con expedientes de clientes no es opción. Si Render no reconoce este
+    # nombre de plan, elige el que ofrezca en el panel al aplicar el blueprint.
+    plan: basic-256mb
+
 services:
   - type: web
     name: crm-migratorio
     runtime: node
-    # Plan gratuito para empezar. Ojo: el servicio se duerme tras unos minutos
-    # sin uso y la siguiente visita tarda cerca de un minuto en responder.
-    # Para uso diario del despacho, cámbialo a "starter".
-    plan: free
+    # Plan de pago: el gratuito duerme el servicio tras unos minutos sin uso.
+    plan: starter
     region: oregon
     buildCommand: npm ci && npx prisma generate && npx prisma migrate deploy && npm run build
     startCommand: npm run start
     healthCheckPath: /ingresar
+
     envVars:
       - key: NODE_VERSION
         value: "22"
-      # Cadena de conexión de PostgreSQL. Se captura en el panel de Render;
-      # nunca se escribe en este archivo, que sí viaja al repositorio.
+
+      # La cadena de conexión la toma de la base declarada arriba. No se
+      # escribe a mano ni queda en el repositorio.
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: crm-migratorio-db
+          property: connectionString
+
       # Clave con la que se firman las sesiones. Render la genera sola.
       - key: AUTH_SECRET
         generateValue: true
-      # Dirección pública del servicio, ej. https://crm-migratorio.onrender.com
-      - key: AUTH_URL
-        sync: false
 
-# ── Documentos de los clientes ────────────────────────────────────
-# IMPORTANTE: el disco de la aplicación se borra en cada despliegue, así que
-# los documentos subidos (pasaportes, actas) se perderían al actualizar el
-# sistema. Mientras esto no se resuelva, no subas documentos reales.
-#
-# Los discos persistentes de Render requieren plan de pago. Cuando pases a uno,
-# descomenta lo siguiente y agrega la variable RUTA_ARCHIVOS=/var/data/archivos:
-#
-#    disk:
-#      name: documentos
-#      mountPath: /var/data
-#      sizeGB: 1
-#
-# La alternativa definitiva es almacenamiento tipo S3 (Cloudflare R2, Backblaze
-# B2 o AWS S3); solo hay que cambiar lib/archivos.ts.
+      # Carpeta de documentos, dentro del disco persistente de abajo.
+      - key: RUTA_ARCHIVOS
+        value: /var/data/archivos
+
+    # Los documentos de los clientes (pasaportes, actas) viven aquí. Sin este
+    # disco se borrarían en cada despliegue, porque el disco de la aplicación
+    # es efímero. Súbelo de tamaño cuando haga falta; no se puede reducir.
+    disk:
+      name: documentos
+      mountPath: /var/data
+      sizeGB: 5
