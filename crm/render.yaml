@@ -21,7 +21,10 @@ services:
     # Plan de pago: el gratuito duerme el servicio tras unos minutos sin uso.
     plan: starter
     region: oregon
-    buildCommand: npm ci && npx prisma generate && npx prisma migrate deploy && npm run build
+    # --include=dev es obligatorio: Render fija NODE_ENV=production y, sin esa
+    # bandera, npm ci omite las herramientas de desarrollo. Prisma es una de
+    # ellas y sin Prisma no hay migraciones ni cliente generado.
+    buildCommand: npm ci --include=dev && npx prisma generate && npx prisma migrate deploy && npm run build
     startCommand: npm run start
     healthCheckPath: /ingresar
 
