@@ -11,7 +11,9 @@ viven en este mismo repositorio: base de datos propia, usuarios propios.
 
 ## 1. Qué necesitas antes de empezar
 
-1. **Node.js 18 o superior** — compruébalo con `node --version`.
+1. **Node.js 20.9 o superior** — compruébalo con `node --version`. Si te falta
+   o tienes una versión anterior, descárgalo de [nodejs.org](https://nodejs.org)
+   (la opción **LTS**) y reinicia la terminal después de instalarlo.
 2. **Una base de datos PostgreSQL.** Lo más rápido es una gratuita en la nube
    ([Neon](https://neon.tech) o [Supabase](https://supabase.com)): te dan una
    cadena de conexión y no instalas nada en tu computadora.
