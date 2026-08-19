@@ -26,6 +26,14 @@ const PESTANAS: { clave: Pestana; nombre: string }[] = [
   { clave: 'notas', nombre: 'Notas e interacciones' },
 ];
 
+/** Cómo se le hizo llegar el presupuesto, para leerlo de un vistazo. */
+const MEDIO_ENVIO: Record<string, string> = {
+  CORREO: 'correo',
+  WHATSAPP: 'WhatsApp',
+  PRESENCIAL: 'en persona',
+  LLAMADA: 'teléfono',
+};
+
 const TONO_CUOTA: Record<string, Tono> = {
   PAGADO: 'exito',
   VENCIDO: 'alerta',
@@ -243,7 +251,10 @@ export default async function FichaCliente({
                     >
                       {p.folio}
                     </Link>
-                    <Insignia tono={tono}>{p.estatus.toLowerCase()}</Insignia>
+                    <Insignia tono={tono}>
+                      {p.estatus.toLowerCase()}
+                      {p.estatus === 'ENVIADO' && p.medioEnvio && ` · ${MEDIO_ENVIO[p.medioEnvio]}`}
+                    </Insignia>
                     <span className="text-xs text-suave">{p.tramite}</span>
                     <span className="text-xs text-tenue">{fecha(p.creadoEn)}</span>
                     <span className="flex-1" />

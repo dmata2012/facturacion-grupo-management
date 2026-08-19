@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import type { MedioContacto } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { exigir } from '@/lib/sesion';
 import { filtroVentas } from '@/lib/permisos';
@@ -89,9 +90,15 @@ export async function nuevoPresupuesto(datos: FormData) {
 export async function marcarEnviado(datos: FormData) {
   const id = String(datos.get('presupuestoId'));
   const { sesion } = await presupuestoPropio(id);
-  await enviarPresupuesto(id, sesion);
+  const medio = (String(datos.get('medio') ?? 'CORREO') as MedioContacto);
+  await enviarPresupuesto(id, medio, sesion);
+  const presupuesto = await prisma.presupuesto.findUniqueOrThrow({
+    where: { id },
+    include: { venta: true },
+  });
   revalidatePath(`/presupuestos/${id}`);
   revalidatePath('/pipeline');
+  revalidatePath(`/clientes/${presupuesto.venta.clienteId}`);
 }
 
 export async function aprobarPresupuesto(datos: FormData) {

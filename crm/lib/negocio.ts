@@ -1,4 +1,4 @@
-import { Prisma, type Rol } from '@prisma/client';
+import { Prisma, type MedioContacto, type Rol } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 
 /**
@@ -428,8 +428,25 @@ export async function crearPresupuesto(
   });
 }
 
-/** Marca el presupuesto como entregado al cliente y adelanta la venta. */
-export async function enviarPresupuesto(presupuestoId: string, actor: Actor) {
+const NOMBRE_MEDIO: Record<MedioContacto, string> = {
+  CORREO: 'por correo',
+  WHATSAPP: 'por WhatsApp',
+  LLAMADA: 'por teléfono',
+  PRESENCIAL: 'en persona',
+};
+
+/**
+ * Marca el presupuesto como entregado al cliente y adelanta la venta.
+ *
+ * Además deja el envío en el historial del cliente: cuando alguien abra la
+ * ficha meses después, verá que ese día se le mandó tal presupuesto y por
+ * dónde, sin tener que ir a buscarlo a otra pantalla.
+ */
+export async function enviarPresupuesto(
+  presupuestoId: string,
+  medio: MedioContacto,
+  actor: Actor
+) {
   const presupuesto = await prisma.presupuesto.findUniqueOrThrow({
     where: { id: presupuestoId },
     include: { venta: true },
@@ -440,7 +457,16 @@ export async function enviarPresupuesto(presupuestoId: string, actor: Actor) {
 
   await prisma.presupuesto.update({
     where: { id: presupuestoId },
-    data: { estatus: 'ENVIADO', fechaEnvio: new Date() },
+    data: { estatus: 'ENVIADO', fechaEnvio: new Date(), medioEnvio: medio },
+  });
+
+  await prisma.interaccion.create({
+    data: {
+      clienteId: presupuesto.venta.clienteId,
+      medio,
+      resultado: `Se le envió ${NOMBRE_MEDIO[medio]} el presupuesto ${presupuesto.folio}.`,
+      usuarioId: actor.id,
+    },
   });
 
   // La venta refleja lo que pasó: ya hay propuesta con el cliente.

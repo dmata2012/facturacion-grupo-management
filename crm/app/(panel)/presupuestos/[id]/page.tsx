@@ -9,6 +9,13 @@ import {
 } from '@/componentes/ui';
 import { aprobarPresupuesto, declinarPresupuesto, marcarEnviado } from '../acciones';
 
+const MEDIO: Record<string, string> = {
+  CORREO: 'por correo',
+  WHATSAPP: 'por WhatsApp',
+  PRESENCIAL: 'en persona',
+  LLAMADA: 'por teléfono',
+};
+
 const ETIQUETA: Record<string, { texto: string; tono: Tono }> = {
   BORRADOR: { texto: 'Borrador', tono: 'neutro' },
   ENVIADO: { texto: 'Enviado al cliente', tono: 'info' },
@@ -60,7 +67,10 @@ export default async function VerPresupuesto({ params }: { params: Promise<{ id:
       </TituloSeccion>
 
       <div className="mb-5 flex flex-wrap items-center gap-2 text-sm text-suave">
-        <Insignia tono={estado.tono}>{estado.texto}</Insignia>
+        <Insignia tono={estado.tono}>
+          {estado.texto}
+          {presupuesto.medioEnvio && ` ${MEDIO[presupuesto.medioEnvio]}`}
+        </Insignia>
         <span>{presupuesto.venta.cliente.nombre}</span>
         <span>· {presupuesto.venta.tipoTramite.nombre}</span>
         {presupuesto.validoHasta && <span>· válido hasta {fecha(presupuesto.validoHasta)}</span>}
@@ -137,7 +147,10 @@ export default async function VerPresupuesto({ params }: { params: Promise<{ id:
               {presupuesto.fechaEnvio && (
                 <div className="flex justify-between gap-2">
                   <dt className="text-tenue">Enviado</dt>
-                  <dd>{fecha(presupuesto.fechaEnvio)}</dd>
+                  <dd>
+                    {fecha(presupuesto.fechaEnvio)}
+                    {presupuesto.medioEnvio && ` ${MEDIO[presupuesto.medioEnvio]}`}
+                  </dd>
                 </div>
               )}
               {presupuesto.fechaRespuesta && (
@@ -158,11 +171,20 @@ export default async function VerPresupuesto({ params }: { params: Promise<{ id:
                 <Tarjeta className="p-5">
                   <h2 className="mb-2 text-sm font-bold text-tinta">Entregar al cliente</h2>
                   <p className="mb-3 text-xs text-tenue">
-                    Descarga el PDF, mándaselo y márcalo como enviado: la venta avanza sola a
-                    &laquo;Propuesta enviada&raquo;.
+                    Descarga el PDF, mándaselo y registra por dónde se lo hiciste llegar: la venta
+                    avanza sola a &laquo;Propuesta enviada&raquo; y queda anotado en el historial
+                    del cliente.
                   </p>
-                  <form action={marcarEnviado}>
+                  <form action={marcarEnviado} className="space-y-3">
                     <input type="hidden" name="presupuestoId" value={presupuesto.id} />
+                    <Campo etiqueta="Se le envió por">
+                      <select name="medio" className={claseInput} defaultValue="CORREO">
+                        <option value="CORREO">Correo electrónico</option>
+                        <option value="WHATSAPP">WhatsApp</option>
+                        <option value="PRESENCIAL">En persona</option>
+                        <option value="LLAMADA">Teléfono</option>
+                      </select>
+                    </Campo>
                     <Boton type="submit">Marcar como enviado</Boton>
                   </form>
                 </Tarjeta>

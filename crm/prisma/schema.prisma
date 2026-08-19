@@ -553,6 +553,9 @@ model Presupuesto {
   /// Hasta cuándo se sostiene el precio ofrecido.
   validoHasta    DateTime?
   fechaEnvio     DateTime?
+  /// Por dónde se le hizo llegar: correo, WhatsApp, en persona. Queda también
+  /// en el historial del cliente, para saber por dónde se le contactó.
+  medioEnvio     MedioContacto?
   fechaRespuesta DateTime?
   motivoRechazo  String?
 
