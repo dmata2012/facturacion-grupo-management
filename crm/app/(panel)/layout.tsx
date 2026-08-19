@@ -3,6 +3,7 @@ import { signOut } from '@/auth';
 import { sesionActual } from '@/lib/sesion';
 import { modulosVisibles, ETIQUETA_ROL } from '@/lib/permisos';
 import { EnlacesMenu } from '@/componentes/nav';
+import { MenuMovil } from '@/componentes/menu-movil';
 
 export default async function PanelLayout({ children }: { children: React.ReactNode }) {
   const sesion = await sesionActual();
@@ -15,9 +16,10 @@ export default async function PanelLayout({ children }: { children: React.ReactN
 
   return (
     <div className="flex min-h-screen">
-      {/* La barra lateral repite el fondo oscuro con resplandor rojo de la
-          portada del sitio: es lo que hace reconocible la marca. */}
-      <aside className="relative hidden w-60 shrink-0 flex-col overflow-hidden grad-tinta py-6 md:flex">
+      {/* La barra lateral fija aparece a partir de escritorio. En celular y
+          tableta el mismo menú vive detrás del botón hamburguesa, para no
+          comerse el ancho útil de la pantalla. */}
+      <aside className="relative hidden w-60 shrink-0 flex-col overflow-hidden grad-tinta py-6 lg:flex">
         <div className="resplandor-marca pointer-events-none absolute inset-0" />
 
         <div className="relative px-6 pb-6">
@@ -49,19 +51,13 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* En pantallas chicas el menú se vuelve una barra horizontal arriba. */}
-        <div className="relative flex items-center gap-1 overflow-x-auto grad-tinta px-4 py-3 md:hidden">
-          {modulos.map((m) => (
-            <a
-              key={m.href}
-              href={m.href}
-              className="whitespace-nowrap rounded-sm px-2.5 py-1.5 text-sm text-slate-200 hover:bg-white/10 hover:text-white"
-            >
-              {m.nombre}
-            </a>
-          ))}
-        </div>
-        <main className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">{children}</main>
+        <MenuMovil
+          modulos={modulos}
+          nombre={sesion.nombre}
+          rol={ETIQUETA_ROL[sesion.rol]}
+          salir={salir}
+        />
+        <main className="min-w-0 flex-1 px-4 py-6 lg:px-8 lg:py-8">{children}</main>
       </div>
     </div>
   );
