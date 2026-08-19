@@ -46,7 +46,7 @@ export default async function Entrevista({ params }: { params: Promise<{ id: str
                 ].map((o) => (
                   <label
                     key={o.v}
-                    className="flex cursor-pointer items-start gap-3 rounded-lg border border-borde p-3 hover:bg-slate-50"
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border border-borde p-3 hover:bg-lienzo"
                   >
                     <input type="radio" name="resultado" value={o.v} required className="mt-1" />
                     <span>

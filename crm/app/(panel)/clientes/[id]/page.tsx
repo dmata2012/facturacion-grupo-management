@@ -269,7 +269,7 @@ export default async function FichaCliente({
 
               <Tarjeta className="overflow-x-auto">
                 <table className="w-full min-w-[640px] text-sm">
-                  <thead className="border-b border-borde bg-slate-50 text-left text-xs uppercase tracking-wide text-tenue">
+                  <thead className="border-b border-borde bg-lienzo text-left text-xs uppercase tracking-wide text-tenue">
                     <tr>
                       <th className="px-4 py-3">Cuota</th>
                       <th className="px-4 py-3">Fecha pactada</th>
@@ -347,7 +347,7 @@ export default async function FichaCliente({
                 ({pesos(ventaActiva!.montoTotal)}). No es una bolsa que se reparta entre todos.
               </p>
               <table className="w-full min-w-[560px] text-sm">
-                <thead className="border-b border-borde bg-slate-50 text-left text-xs uppercase tracking-wide text-tenue">
+                <thead className="border-b border-borde bg-lienzo text-left text-xs uppercase tracking-wide text-tenue">
                   <tr>
                     <th className="px-4 py-3">Participante</th>
                     <th className="px-4 py-3">Rol</th>
@@ -404,7 +404,7 @@ export default async function FichaCliente({
               <Campo etiqueta="Resultado / lo que indicó el cliente" requerido>
                 <textarea name="resultado" rows={3} required className={claseInput} />
               </Campo>
-              <div className="rounded-lg bg-slate-50 p-3">
+              <div className="rounded-lg bg-lienzo p-3">
                 <p className="mb-2 text-xs font-semibold text-suave">
                   Próximo seguimiento (opcional)
                 </p>

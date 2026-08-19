@@ -86,7 +86,7 @@ export default async function NuevoCliente({
 
             {sesion.rol === 'VENDEDOR' ? (
               <Campo etiqueta="Vendedor asignado">
-                <input disabled value={sesion.nombre} className={`${claseInput} bg-slate-50`} />
+                <input disabled value={sesion.nombre} className={`${claseInput} bg-lienzo`} />
               </Campo>
             ) : (
               <Campo etiqueta="Vendedor asignado" requerido>

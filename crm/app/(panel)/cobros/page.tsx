@@ -81,7 +81,7 @@ export default async function Cobros({
       ) : (
         <Tarjeta className="mb-8 overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm">
-            <thead className="border-b border-borde bg-slate-50 text-left text-xs uppercase tracking-wide text-tenue">
+            <thead className="border-b border-borde bg-lienzo text-left text-xs uppercase tracking-wide text-tenue">
               <tr>
                 <th className="px-4 py-3">Cliente</th>
                 <th className="px-4 py-3">Cuota</th>
@@ -95,7 +95,7 @@ export default async function Cobros({
               {visibles.map((c) => {
                 const estatus = estatusCuota(c);
                 return (
-                  <tr key={c.id} className="hover:bg-slate-50">
+                  <tr key={c.id} className="hover:bg-lienzo">
                     <td className="px-4 py-3">
                       <Link href={`/clientes/${c.venta.clienteId}?pestana=pagos`} className="font-semibold hover:text-marca">
                         {c.venta.cliente.nombre}
@@ -151,7 +151,7 @@ export default async function Cobros({
           ) : (
             <Tarjeta className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-sm">
-                <thead className="border-b border-borde bg-slate-50 text-left text-xs uppercase tracking-wide text-tenue">
+                <thead className="border-b border-borde bg-lienzo text-left text-xs uppercase tracking-wide text-tenue">
                   <tr>
                     <th className="px-4 py-3">Cliente</th>
                     <th className="px-4 py-3">Participante</th>
@@ -163,7 +163,7 @@ export default async function Cobros({
                 </thead>
                 <tbody className="divide-y divide-borde">
                   {comisiones.map((c) => (
-                    <tr key={c.id} className="hover:bg-slate-50">
+                    <tr key={c.id} className="hover:bg-lienzo">
                       <td className="px-4 py-3">{c.venta.cliente.nombre}</td>
                       <td className="px-4 py-3 font-semibold">{c.participante.nombre}</td>
                       <td className="px-4 py-3 text-suave">{c.rol.toLowerCase()}</td>

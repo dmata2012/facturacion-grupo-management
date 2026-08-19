@@ -100,14 +100,14 @@ export default async function EditarTramite({
                     <form action={moverEtapa}>
                       <input type="hidden" name="id" value={e.id} />
                       <input type="hidden" name="direccion" value="arriba" />
-                      <button aria-label={`Subir ${e.nombre}`} className="rounded border border-borde px-2 py-0.5 text-xs hover:bg-slate-50">↑</button>
+                      <button aria-label={`Subir ${e.nombre}`} className="rounded border border-borde px-2 py-0.5 text-xs hover:bg-lienzo">↑</button>
                     </form>
                   )}
                   {i < tipo.etapas.length - 1 && (
                     <form action={moverEtapa}>
                       <input type="hidden" name="id" value={e.id} />
                       <input type="hidden" name="direccion" value="abajo" />
-                      <button aria-label={`Bajar ${e.nombre}`} className="rounded border border-borde px-2 py-0.5 text-xs hover:bg-slate-50">↓</button>
+                      <button aria-label={`Bajar ${e.nombre}`} className="rounded border border-borde px-2 py-0.5 text-xs hover:bg-lienzo">↓</button>
                     </form>
                   )}
                   {e._count.casosEnEstaEtapa === 0 && (

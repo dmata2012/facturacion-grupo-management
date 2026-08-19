@@ -57,7 +57,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
           rol={ETIQUETA_ROL[sesion.rol]}
           salir={salir}
         />
-        <main className="min-w-0 flex-1 px-4 py-6 lg:px-8 lg:py-8">{children}</main>
+        <main className="grad-lienzo min-w-0 flex-1 px-4 py-6 lg:px-8 lg:py-8">{children}</main>
       </div>
     </div>
   );

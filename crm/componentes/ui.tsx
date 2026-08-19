@@ -30,7 +30,7 @@ export function TituloSeccion({
     <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
         {etiqueta && <Etiqueta>{etiqueta}</Etiqueta>}
-        <h1 className="text-2xl font-bold text-tinta">{children}</h1>
+        <h1 className="text-[28px] font-extrabold leading-tight text-tinta sm:text-[32px]">{children}</h1>
       </div>
       {accion}
     </div>
@@ -40,7 +40,7 @@ export function TituloSeccion({
 /** Rótulo en versalitas rojas que el sitio usa sobre cada título. */
 export function Etiqueta({ children }: { children: ReactNode }) {
   return (
-    <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[1.6px] text-marca">
+    <span className="mb-2 block text-[11px] font-bold uppercase tracking-[1.8px] text-marca">
       {children}
     </span>
   );
@@ -48,7 +48,7 @@ export function Etiqueta({ children }: { children: ReactNode }) {
 
 const TONOS = {
   neutro: 'bg-slate-100 text-slate-700 ring-slate-200',
-  marca: 'bg-marca-tenue text-marca ring-red-100',
+  marca: 'bg-marca-tenue text-marca ring-cyan-200',
   exito: 'bg-green-50 text-green-700 ring-green-200',
   aviso: 'bg-amber-50 text-amber-700 ring-amber-200',
   alerta: 'bg-red-50 text-red-700 ring-red-200',
@@ -69,7 +69,7 @@ export function Insignia({ children, tono = 'neutro' }: { children: ReactNode; t
 
 const BOTONES = {
   principal: 'grad-marca text-white shadow-marca hover:shadow-marca-alta hover:-translate-y-0.5',
-  suave: 'bg-white text-tinta ring-1 ring-borde hover:border-marca hover:text-marca hover:-translate-y-0.5',
+  suave: 'bg-white text-tinta ring-1 ring-borde hover:ring-marca hover:text-marca hover:-translate-y-0.5',
   peligro: 'bg-white text-red-700 ring-1 ring-red-200 hover:bg-red-50',
 } as const;
 
@@ -170,12 +170,23 @@ export function Kpi({
     exito: 'text-green-700',
     aviso: 'text-amber-600',
     alerta: 'text-red-700',
-    info: 'text-sky-700',
+    info: 'text-blue-700',
+  }[tono];
+  const filo = {
+    neutro: 'bg-borde',
+    marca: 'grad-marca',
+    exito: 'bg-green-500',
+    aviso: 'bg-amber-500',
+    alerta: 'bg-red-500',
+    info: 'bg-blue-500',
   }[tono];
   return (
-    <Tarjeta className="p-5 transition duration-200 hover:-translate-y-1 hover:shadow-media">
+    <Tarjeta className="relative overflow-hidden p-5 transition duration-200 hover:-translate-y-1 hover:shadow-media">
+      {/* Filo de color arriba: identifica el indicador de un vistazo, sin
+          teñir toda la tarjeta. */}
+      <span className={`absolute inset-x-0 top-0 h-1 ${filo}`} />
       <div className="text-[11px] font-bold uppercase tracking-[1.2px] text-tenue">{etiqueta}</div>
-      <div className={`mt-2 text-[28px] font-extrabold leading-none tracking-[-0.03em] ${acento}`}>
+      <div className={`mt-2.5 text-[30px] font-extrabold leading-none tracking-[-0.03em] ${acento}`}>
         {valor}
       </div>
       {detalle && <div className="mt-1.5 text-xs text-suave">{detalle}</div>}
@@ -238,7 +249,7 @@ export function Avatar({
     <span
       aria-hidden="true"
       style={{ width: tamano, height: tamano, fontSize: Math.round(tamano * 0.36) }}
-      className="flex shrink-0 items-center justify-center rounded-full bg-marca-tenue font-bold text-marca ring-1 ring-inset ring-red-100"
+      className="flex shrink-0 items-center justify-center rounded-full bg-marca-tenue font-bold text-marca ring-1 ring-inset ring-cyan-200"
     >
       {iniciales(nombre)}
     </span>

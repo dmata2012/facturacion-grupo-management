@@ -50,7 +50,7 @@ export default async function Clientes({
       ) : (
         <Tarjeta className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
-            <thead className="border-b border-borde bg-slate-50 text-left text-xs uppercase tracking-wide text-tenue">
+            <thead className="border-b border-borde bg-lienzo text-left text-xs uppercase tracking-wide text-tenue">
               <tr>
                 <th className="px-4 py-3">Cliente</th>
                 <th className="px-4 py-3">Nacionalidad</th>
@@ -65,7 +65,7 @@ export default async function Clientes({
                 const venta = c.ventas[0];
                 const tramite = venta?.tipoTramite.nombre ?? c.leads[0]?.tipoTramite.nombre;
                 return (
-                  <tr key={c.id} className="hover:bg-slate-50">
+                  <tr key={c.id} className="hover:bg-lienzo">
                     <td className="px-4 py-3">
                       <Link href={`/clientes/${c.id}`} className="font-semibold text-tinta hover:text-marca">
                         {c.nombre}

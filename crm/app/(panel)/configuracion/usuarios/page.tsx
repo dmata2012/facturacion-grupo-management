@@ -76,7 +76,7 @@ export default async function Usuarios({
 
       <Tarjeta className="overflow-x-auto">
         <table className="w-full min-w-[820px] text-sm">
-          <thead className="border-b border-borde bg-slate-50 text-left text-xs uppercase tracking-wide text-tenue">
+          <thead className="border-b border-borde bg-lienzo text-left text-xs uppercase tracking-wide text-tenue">
             <tr>
               <th className="px-4 py-3">Usuario</th>
               <th className="px-4 py-3">Rol</th>
@@ -87,7 +87,7 @@ export default async function Usuarios({
           </thead>
           <tbody className="divide-y divide-borde">
             {usuarios.map((u) => (
-              <tr key={u.id} className={u.activo ? '' : 'bg-slate-50/60'}>
+              <tr key={u.id} className={u.activo ? '' : 'bg-lienzo/60'}>
                 <td className="px-4 py-3">
                   <span className="font-semibold">{u.nombre}</span>
                   {u.id === sesion.id && <span className="ml-2 text-xs text-marca">(tú)</span>}
@@ -106,7 +106,7 @@ export default async function Usuarios({
                         <option key={r} value={r}>{ETIQUETA_ROL[r]}</option>
                       ))}
                     </select>
-                    <button className="rounded border border-borde px-2 py-1 text-xs hover:bg-slate-50">
+                    <button className="rounded border border-borde px-2 py-1 text-xs hover:bg-lienzo">
                       Cambiar
                     </button>
                   </form>
@@ -123,7 +123,7 @@ export default async function Usuarios({
                     </Insignia>
                     <form action={alternarUsuario}>
                       <input type="hidden" name="id" value={u.id} />
-                      <button className="rounded border border-borde px-2 py-1 text-xs hover:bg-slate-50">
+                      <button className="rounded border border-borde px-2 py-1 text-xs hover:bg-lienzo">
                         {u.activo ? 'Desactivar' : 'Reactivar'}
                       </button>
                     </form>
@@ -138,7 +138,7 @@ export default async function Usuarios({
                         aria-label={`Nueva contraseña de ${u.nombre}`}
                         className="w-36 rounded-md border border-borde px-2 py-1 text-xs"
                       />
-                      <button className="rounded border border-borde px-2 py-1 text-xs hover:bg-slate-50">
+                      <button className="rounded border border-borde px-2 py-1 text-xs hover:bg-lienzo">
                         Restablecer
                       </button>
                     </form>

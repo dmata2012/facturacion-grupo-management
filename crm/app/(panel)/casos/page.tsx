@@ -33,7 +33,7 @@ export default async function Casos() {
       ) : (
         <Tarjeta className="overflow-x-auto">
           <table className="w-full min-w-[860px] text-sm">
-            <thead className="border-b border-borde bg-slate-50 text-left text-xs uppercase tracking-wide text-tenue">
+            <thead className="border-b border-borde bg-lienzo text-left text-xs uppercase tracking-wide text-tenue">
               <tr>
                 <th className="px-4 py-3">Cliente</th>
                 <th className="px-4 py-3">Trámite</th>
@@ -49,7 +49,7 @@ export default async function Casos() {
               {casos.map((c) => {
                 const entregados = c.documentos.filter((d) => d.estatus === 'ENTREGADO').length;
                 return (
-                  <tr key={c.id} className="hover:bg-slate-50">
+                  <tr key={c.id} className="hover:bg-lienzo">
                     <td className="px-4 py-3">
                       <Link href={`/casos/${c.id}`} className="font-semibold text-tinta hover:text-marca">
                         {c.venta.cliente.nombre}
