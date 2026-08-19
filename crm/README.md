@@ -18,14 +18,31 @@ viven en este mismo repositorio: base de datos propia, usuarios propios.
 
 ## 2. Arrancar en tu computadora
 
-```bash
-cd crm
-npm install                     # una sola vez
-cp .env.example .env            # y edita .env con tus datos
-npx prisma migrate deploy       # crea las tablas
-npx prisma db seed              # catálogos, plantillas y usuarios de prueba
+**Windows** (CMD o PowerShell) — parado *dentro* de la carpeta `crm`:
+
+```
+npm install
+copy .env.example .env
+npx prisma migrate deploy
+npx prisma db seed
 npm run dev
 ```
+
+**Mac o Linux:**
+
+```bash
+npm install
+cp .env.example .env
+npx prisma migrate deploy
+npx prisma db seed
+npm run dev
+```
+
+El paso más común que falla es el primero: si `npm install` responde
+`EPERM ... mkdir 'C:\'`, quiere decir que la terminal **no está dentro de la
+carpeta del proyecto**. Compruébalo con `dir` (Windows) o `ls`: tienes que ver
+ahí un archivo `package.json`. Truco: abre la carpeta en el Explorador, escribe
+`cmd` en la barra de dirección y presiona Enter — la terminal abre ya ubicada.
 
 Abre **http://localhost:3000**.
 
