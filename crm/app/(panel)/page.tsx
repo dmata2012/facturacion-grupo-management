@@ -1,250 +1,138 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import { prisma } from '@/lib/prisma';
 import { sesionActual } from '@/lib/sesion';
-import { filtroCasos, filtroComisiones, filtroVentas, modulosVisibles, puede } from '@/lib/permisos';
-import { resumenCobranza } from '@/lib/cuotas';
-import { pesos } from '@/lib/formato';
-import { Kpi, Tarjeta, TituloSeccion, Vacio } from '@/componentes/ui';
+import { modulosVisibles, puede, filtroVentas, filtroCasos, ETIQUETA_ROL } from '@/lib/permisos';
 
-export const metadata = { title: 'Reportes — CRM' };
+export const metadata = { title: 'Inicio — CRM Migratorio' };
 
-type Periodo = 'semana' | 'mes' | 'anio';
-
-/** "CERRADO_GANADO" → "Cerrado ganado": legible sin deformar el resto. */
-function nombreEtapa(etapa: string): string {
-  const texto = etapa.replaceAll('_', ' ').toLowerCase();
-  return texto.charAt(0).toUpperCase() + texto.slice(1);
+/** Saludo según la hora, para que la portada no se sienta impersonal. */
+function saludo(): string {
+  const hora = new Date().getHours();
+  if (hora < 12) return 'Buenos días';
+  if (hora < 19) return 'Buenas tardes';
+  return 'Buenas noches';
 }
 
-/** Inicio del periodo elegido. Los KPIs de flujo se miden contra esta fecha;
- *  los de saldo (casos activos, cartera) son foto del momento. */
-function desde(periodo: Periodo): Date {
-  const hoy = new Date();
-  if (periodo === 'semana') {
-    const d = new Date(hoy);
-    d.setDate(hoy.getDate() - 7);
-    return d;
-  }
-  if (periodo === 'anio') return new Date(hoy.getFullYear(), 0, 1);
-  return new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-}
+/** Descripción de cada módulo en la portada. */
+const RESUMEN: Record<string, string> = {
+  '/reportes': 'Ventas, cobranza y comisiones del periodo',
+  '/pipeline': 'Del primer contacto al cierre de la venta',
+  '/casos': 'Expedientes en trámite y su etapa',
+  '/clientes': 'Cartera completa y sus fichas',
+  '/agenda': 'Citas y seguimientos pactados',
+  '/cobros': 'Cuotas por cobrar y reparto de comisiones',
+  '/configuracion': 'Trámites, catálogos, alertas y usuarios',
+};
 
-export default async function Reportes({
-  searchParams,
-}: {
-  searchParams: Promise<{ periodo?: Periodo }>;
-}) {
-  const { periodo = 'mes' } = await searchParams;
+export default async function Inicio() {
   const sesion = await sesionActual();
+  const modulos = modulosVisibles(sesion.rol).filter((m) => m.href !== '/');
 
-  // Reportes es la pantalla de entrada, pero no todos los roles la tienen.
-  // En vez de recibirlos con un "sin acceso", se les manda a su primer módulo.
-  if (!puede(sesion.rol, 'reportes')) {
-    const primero = modulosVisibles(sesion.rol).find((m) => m.href !== '/');
-    redirect(primero?.href ?? '/sin-permiso');
-  }
-
-  const inicio = desde(periodo);
-
-  const [ventasPeriodo, casos, cuotas, comisiones, porNacionalidad, embudo] = await Promise.all([
-    prisma.venta.findMany({
-      where: { AND: [filtroVentas(sesion), { etapa: 'CERRADO_GANADO', fechaCierre: { gte: inicio } }] },
-      include: { vendedor: true },
-    }),
-    prisma.caso.findMany({ where: filtroCasos(sesion), include: { etapaActual: true } }),
-    prisma.cuota.findMany({
-      where: { venta: filtroVentas(sesion) },
-      include: { metodoPago: true },
-    }),
-    prisma.comision.findMany({ where: filtroComisiones(sesion) }),
-    prisma.cliente.groupBy({ by: ['nacionalidad'], _count: true, orderBy: { _count: { nacionalidad: 'desc' } }, take: 8 }),
-    prisma.venta.groupBy({ by: ['etapa'], _count: true, where: filtroVentas(sesion) }),
+  // Tres cifras de contexto, no un tablero: para eso está Reportes. Cada una
+  // solo se calcula si el rol puede ver ese módulo — la portada no es una
+  // rendija para asomarse a lo que el menú tiene cerrado.
+  const enSieteDias = new Date(Date.now() + 7 * 864e5);
+  const [prospectos, casosActivos, porCobrar] = await Promise.all([
+    puede(sesion.rol, 'ventas')
+      ? prisma.venta.count({
+          where: { AND: [filtroVentas(sesion), { etapa: { notIn: ['CERRADO_GANADO', 'CERRADO_PERDIDO'] } }] },
+        })
+      : null,
+    puede(sesion.rol, 'casos')
+      ? prisma.caso.count({ where: { AND: [filtroCasos(sesion), { etapaActual: { nombre: { not: 'Cerrado' } } }] } })
+      : null,
+    puede(sesion.rol, 'cobros')
+      ? prisma.cuota.count({
+          where: { venta: filtroVentas(sesion), pagadoEn: null, fechaPactada: { lte: enSieteDias } },
+        })
+      : null,
   ]);
 
-  const totalVendido = ventasPeriodo.reduce((t, v) => t + Number(v.montoTotal), 0);
-  const cobranza = resumenCobranza(cuotas);
-  const cobradoPeriodo = cuotas
-    .filter((c) => c.pagadoEn && c.pagadoEn >= inicio)
-    .reduce((t, c) => t + Number(c.monto), 0);
-
-  const comisionesPendientes = comisiones
-    .filter((c) => c.estatus === 'PENDIENTE')
-    .reduce((t, c) => t + Number(c.montoCalculado), 0);
-  const comisionesPagadas = comisiones
-    .filter((c) => c.estatus === 'PAGADA')
-    .reduce((t, c) => t + Number(c.montoCalculado), 0);
-
-  const casosActivos = casos.filter((c) => c.etapaActual?.nombre !== 'Cerrado').length;
-
-  // Cómo llegó el dinero cobrado en el periodo. Solo cuenta lo efectivamente
-  // pagado: un plan de pagos todavía no dice nada sobre la forma de cobro.
-  const porMedioDePago = new Map<string, { monto: number; pagos: number }>();
-  for (const cuota of cuotas) {
-    if (!cuota.pagadoEn || cuota.pagadoEn < inicio) continue;
-    const nombre = cuota.metodoPago?.nombre ?? 'Sin especificar';
-    const actual = porMedioDePago.get(nombre) ?? { monto: 0, pagos: 0 };
-    porMedioDePago.set(nombre, {
-      monto: actual.monto + Number(cuota.monto),
-      pagos: actual.pagos + 1,
-    });
-  }
-  const mediosOrdenados = [...porMedioDePago.entries()].sort((a, b) => b[1].monto - a[1].monto);
-
-  const porEtapa = new Map<string, number>();
-  for (const c of casos) {
-    const nombre = c.etapaActual?.nombre ?? 'Sin etapa';
-    porEtapa.set(nombre, (porEtapa.get(nombre) ?? 0) + 1);
-  }
-
-  const porVendedor = new Map<string, { monto: number; casos: number }>();
-  for (const v of ventasPeriodo) {
-    const actual = porVendedor.get(v.vendedor.nombre) ?? { monto: 0, casos: 0 };
-    porVendedor.set(v.vendedor.nombre, {
-      monto: actual.monto + Number(v.montoTotal),
-      casos: actual.casos + 1,
-    });
-  }
-
-  const periodos: { clave: Periodo; nombre: string }[] = [
-    { clave: 'semana', nombre: 'Semana' },
-    { clave: 'mes', nombre: 'Mes' },
-    { clave: 'anio', nombre: 'Año' },
-  ];
-
   return (
-    <>
-      <TituloSeccion
-        accion={
-          <div className="flex gap-1 rounded-lg bg-white p-1 ring-1 ring-borde">
-            {periodos.map((p) => (
-              <Link
-                key={p.clave}
-                href={`/?periodo=${p.clave}`}
-                className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${
-                  periodo === p.clave ? 'bg-tinta text-white' : 'text-suave hover:text-tinta'
-                }`}
-              >
-                {p.nombre}
-              </Link>
-            ))}
+    <div className="relative -mx-4 -my-6 flex min-h-[calc(100vh-3rem)] flex-col overflow-hidden lg:-mx-8 lg:-my-8 lg:min-h-screen">
+      <div className="malla pointer-events-none absolute inset-0" />
+      <div className="pointer-events-none absolute -left-40 -top-40 h-[28rem] w-[28rem] rounded-full bg-marca-clara/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-48 -right-32 h-[30rem] w-[30rem] rounded-full bg-marca/10 blur-3xl" />
+
+      <div className="relative mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center px-4 py-14 lg:px-8">
+        {/* La portada del sistema. */}
+        <header className="text-center">
+          <p className="aparece text-sm font-semibold text-suave" style={{ animationDelay: '0ms' }}>
+            {saludo()}, {sesion.nombre.split(' ')[0]} · {ETIQUETA_ROL[sesion.rol]}
+          </p>
+
+          <div className="relative">
+            <div className="halo-portada pointer-events-none absolute inset-x-0 -inset-y-10" />
+            <h1
+              className="aparece letras-portada relative mt-3 text-[clamp(76px,19vw,190px)] font-extrabold leading-[0.85] tracking-[-0.06em]"
+              style={{ animationDelay: '80ms' }}
+            >
+              CRM
+            </h1>
           </div>
-        }
-        etiqueta="Dirección"
-      >
-        Reportes
-      </TituloSeccion>
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi etiqueta="Ventas del periodo" valor={pesos(totalVendido)} detalle={`${ventasPeriodo.length} casos cerrados`} tono="marca" />
-        <Kpi etiqueta="Casos activos" valor={String(casosActivos)} detalle="Dato actual, no del periodo" />
-        <Kpi etiqueta="Cuentas por cobrar" valor={pesos(cobranza.total - cobranza.pagado)} />
-        <Kpi etiqueta="Cobrado en el periodo" valor={pesos(cobradoPeriodo)} tono="exito" />
-        <Kpi etiqueta="Cartera vencida" valor={pesos(cobranza.vencido)} tono="alerta" />
-        <Kpi etiqueta="Por vencer" valor={pesos(cobranza.porVencer)} tono="aviso" />
-        {puede(sesion.rol, 'comisiones', 'ver') && (
-          <>
-            <Kpi etiqueta="Comisiones pendientes" valor={pesos(comisionesPendientes)} tono="aviso" />
-            <Kpi etiqueta="Comisiones pagadas" valor={pesos(comisionesPagadas)} tono="exito" />
-          </>
-        )}
-      </div>
+          <p className="aparece mt-4 text-lg font-medium text-suave sm:text-xl" style={{ animationDelay: '160ms' }}>
+            Sistema de gestión — <span className="font-bold text-tinta">Despacho migratorio</span>
+          </p>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Panel titulo="Casos por etapa legal">
-          <Barras datos={[...porEtapa.entries()].map(([nombre, valor]) => ({ nombre, valor }))} />
-        </Panel>
-
-        <Panel titulo="Embudo comercial">
-          <Barras
-            datos={embudo.map((e) => ({ nombre: nombreEtapa(e.etapa), valor: e._count }))}
-          />
-        </Panel>
-
-        <Panel titulo="Cobros por medio de pago (periodo)">
-          {!mediosOrdenados.length ? (
-            <Vacio>Sin cobros registrados en el periodo.</Vacio>
-          ) : (
-            <table className="w-full text-sm">
-              <tbody className="divide-y divide-borde">
-                {mediosOrdenados.map(([nombre, d]) => (
-                  <tr key={nombre}>
-                    <td className="py-2 font-semibold">{nombre}</td>
-                    <td className="py-2 text-right text-suave">
-                      {d.pagos} {d.pagos === 1 ? 'pago' : 'pagos'}
-                    </td>
-                    <td className="py-2 text-right font-semibold">{pesos(d.monto)}</td>
-                    <td className="w-24 py-2 pl-3">
-                      <div className="h-2 overflow-hidden rounded-full bg-borde">
-                        <div
-                          className="h-full rounded-full grad-marca"
-                          style={{ width: `${(d.monto / cobradoPeriodo) * 100}%` }}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Panel>
-
-        <Panel titulo="Clientes por nacionalidad">
-          <Barras datos={porNacionalidad.map((n) => ({ nombre: n.nacionalidad, valor: n._count }))} />
-        </Panel>
-
-        <Panel titulo="Ventas por vendedor (periodo)">
-          {!porVendedor.size ? (
-            <Vacio>Sin ventas cerradas en el periodo.</Vacio>
-          ) : (
-            <table className="w-full text-sm">
-              <tbody className="divide-y divide-borde">
-                {[...porVendedor.entries()].map(([nombre, d]) => (
-                  <tr key={nombre}>
-                    <td className="py-2 font-semibold">{nombre}</td>
-                    <td className="py-2 text-right text-suave">{d.casos} casos</td>
-                    <td className="py-2 text-right font-semibold">{pesos(d.monto)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Panel>
-      </div>
-    </>
-  );
-}
-
-function Panel({ titulo, children }: { titulo: string; children: React.ReactNode }) {
-  return (
-    <Tarjeta className="p-6">
-      <h2 className="mb-4 text-sm font-bold text-tinta">{titulo}</h2>
-      {children}
-    </Tarjeta>
-  );
-}
-
-/** Barras en CSS: sin librería de gráficas, se imprimen y se leen igual. */
-function Barras({ datos }: { datos: { nombre: string; valor: number }[] }) {
-  if (!datos.length) return <Vacio>Sin datos todavía.</Vacio>;
-  const max = Math.max(...datos.map((d) => d.valor), 1);
-
-  return (
-    <ul className="space-y-2.5">
-      {datos.map((d) => (
-        <li key={d.nombre}>
-          <div className="mb-1 flex justify-between text-xs">
-            <span className="text-suave">{d.nombre}</span>
-            <span className="font-semibold text-tinta">{d.valor}</span>
-          </div>
-          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-            <div
-              className="h-full rounded-full bg-marca"
-              style={{ width: `${(d.valor / max) * 100}%` }}
+          <div className="aparece mt-8 flex flex-wrap justify-center gap-3" style={{ animationDelay: '240ms' }}>
+            <Cifra valor={prospectos} uno="prospecto abierto" varios="prospectos abiertos" />
+            <Cifra valor={casosActivos} uno="caso en trámite" varios="casos en trámite" />
+            <Cifra
+              valor={porCobrar}
+              uno="cuota por cobrar esta semana"
+              varios="cuotas por cobrar esta semana"
+              acento
             />
           </div>
-        </li>
-      ))}
-    </ul>
+        </header>
+
+        {/* Accesos: la portada también sirve para entrar a lo de siempre. */}
+        <nav className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {modulos.map((m, i) => (
+            <Link
+              key={m.href}
+              href={m.href}
+              className="aparece group rounded-2xl border border-borde bg-white/70 p-5 text-left shadow-suave backdrop-blur transition duration-200 hover:-translate-y-1 hover:border-marca hover:bg-white hover:shadow-media"
+              style={{ animationDelay: `${320 + i * 60}ms` }}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-base font-bold text-tinta">{m.nombre}</h2>
+                <span
+                  className="text-marca transition group-hover:translate-x-1 lg:opacity-0 lg:group-hover:opacity-100"
+                  aria-hidden="true"
+                >
+                  →
+                </span>
+              </div>
+              <p className="mt-1 text-sm text-suave">{RESUMEN[m.href] ?? ''}</p>
+            </Link>
+          ))}
+        </nav>
+      </div>
+    </div>
+  );
+}
+
+/** Una cifra suelta. Si el rol no puede ver ese módulo llega en `null` y no se pinta. */
+function Cifra({
+  valor,
+  uno,
+  varios,
+  acento,
+}: {
+  valor: number | null;
+  uno: string;
+  varios: string;
+  acento?: boolean;
+}) {
+  if (valor === null) return null;
+  return (
+    <span className="inline-flex items-baseline gap-2 rounded-full border border-borde bg-white/70 px-4 py-2 shadow-suave backdrop-blur">
+      <strong className={`text-xl font-extrabold ${acento && valor > 0 ? 'text-marca' : 'text-tinta'}`}>
+        {valor}
+      </strong>
+      <span className="text-sm text-suave">{valor === 1 ? uno : varios}</span>
+    </span>
   );
 }

@@ -108,8 +108,11 @@ export const ETIQUETA_ROL: Record<Rol, string> = {
 };
 
 /** Módulos del menú lateral, en orden, filtrados por rol. */
-export const MODULOS: { href: string; nombre: string; recurso: Recurso }[] = [
-  { href: '/', nombre: 'Reportes', recurso: 'reportes' },
+export const MODULOS: { href: string; nombre: string; recurso: Recurso | null }[] = [
+  // Inicio no pide permiso: es la portada del sistema y la ve cualquiera que
+  // haya entrado.
+  { href: '/', nombre: 'Inicio', recurso: null },
+  { href: '/reportes', nombre: 'Reportes', recurso: 'reportes' },
   { href: '/pipeline', nombre: 'Pipeline de ventas', recurso: 'ventas' },
   { href: '/casos', nombre: 'Casos legales', recurso: 'casos' },
   { href: '/clientes', nombre: 'Clientes', recurso: 'clientes' },
@@ -119,7 +122,7 @@ export const MODULOS: { href: string; nombre: string; recurso: Recurso }[] = [
 ];
 
 export function modulosVisibles(rol: Rol) {
-  // El contador no entra a "Cobros" por el permiso de cobros del vendedor,
-  // así que se evalúa módulo por módulo contra su propio recurso.
-  return MODULOS.filter((m) => puede(rol, m.recurso, 'ver'));
+  // Se evalúa módulo por módulo contra su propio recurso; los que no piden
+  // permiso (Inicio) los ve todo el mundo.
+  return MODULOS.filter((m) => m.recurso === null || puede(rol, m.recurso, 'ver'));
 }
