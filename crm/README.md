@@ -192,6 +192,11 @@ solo. En el panel: **New → Blueprint**, eliges este repositorio y él lee el
 archivo. Si prefieres crearlo a mano (**New → Web Service**), estos son los
 valores:
 
+Render **no acepta un ZIP**: solo despliega desde un repositorio de GitHub. Hay
+que subir el proyecto a GitHub antes (sección 9).
+
+Si prefieres crear el servicio a mano (**New → Web Service**), estos son los valores:
+
 | Campo | Valor |
 |---|---|
 | Runtime | Node |
@@ -209,17 +214,18 @@ sin que nadie ejecute nada a mano.
 | `DATABASE_URL` | La cadena de PostgreSQL (Neon, Supabase o la base de Render) |
 | `AUTH_SECRET` | Una clave larga y aleatoria, **distinta** a la de tu computadora |
 | `AUTH_URL` | La dirección pública, ej. `https://crm-migratorio.onrender.com` |
-| `RUTA_ARCHIVOS` | `/var/data/archivos` (ver disco, abajo) |
+| `RUTA_ARCHIVOS` | Solo si activaste el disco persistente: `/var/data/archivos` |
 | `NODE_VERSION` | `22` |
 
 ### Tres cosas que hay que atender, o duelen después
 
 1. **El disco de Render se borra en cada despliegue.** Los documentos de los
    clientes (pasaportes, actas) desaparecerían con cada actualización del
-   sistema. Por eso el `render.yaml` monta un disco persistente en `/var/data`
-   y apunta ahí `RUTA_ARCHIVOS`. Los discos persistentes **requieren plan de
-   pago**; en el plan gratuito no existen. Si vas a empezar en el plan
-   gratuito, no subas documentos reales hasta resolver esto — la alternativa
+   sistema. Los discos persistentes **requieren plan de pago**, así que el
+   `render.yaml` viene sin disco para que el primer despliegue funcione en el
+   plan gratuito. **Mientras no lo resuelvas, no subas documentos reales.**
+   Cuando pases a plan de pago, descomenta el bloque `disk` del `render.yaml` y
+   agrega la variable `RUTA_ARCHIVOS=/var/data/archivos`. La alternativa
    definitiva es almacenamiento tipo S3 (Cloudflare R2, Backblaze B2 o AWS S3),
    y solo hay que cambiar `lib/archivos.ts`.
 
@@ -241,3 +247,33 @@ sin que nadie ejecute nada a mano.
 La base de datos es el sistema: si se pierde, se perdieron los expedientes, la
 cobranza y las comisiones. Activa los respaldos automáticos de tu proveedor de
 PostgreSQL desde el primer día y comprueba una vez que sabes restaurarlos.
+
+### Sobre la base de datos en producción
+
+Puedes usar el PostgreSQL de Render o uno externo (Neon, Supabase). Ojo con un
+detalle: **las bases gratuitas de Render tienen caducidad** — pasado el periodo
+gratuito Render las elimina. Confírmalo en el panel al crearla. Para un sistema
+que guarda expedientes, conviene una base de pago o un proveedor cuyo plan
+gratuito no caduque.
+
+---
+
+## 9. Subir el proyecto a un repositorio nuevo de GitHub
+
+Render necesita el código en GitHub. Desde la carpeta del proyecto:
+
+```
+git init
+git add .
+git commit -m "CRM migratorio: version inicial"
+git branch -M main
+git remote add origin https://github.com/USUARIO/crm-migratorio.git
+git push -u origin main
+```
+
+Antes hay que crear el repositorio **vacío** en https://github.com/new — sin
+README, sin `.gitignore` y sin licencia, o el `push` choca. Márcalo **privado**:
+el código no contiene datos de clientes, pero sí la lógica del despacho.
+
+El `.gitignore` ya excluye lo que nunca debe subir: `node_modules`, la carpeta
+`archivos/` con los documentos y, sobre todo, el `.env` con tus contraseñas.

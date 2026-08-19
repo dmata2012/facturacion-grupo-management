@@ -1,10 +1,13 @@
-# Despliegue en Render. Con este archivo en la raíz, Render puede crear el
-# servicio solo (Blueprint) en vez de configurarlo a mano.
+# Despliegue en Render. Con este archivo en la raíz del repositorio, Render
+# arma el servicio solo: panel → New → Blueprint.
 services:
   - type: web
     name: crm-migratorio
     runtime: node
-    plan: starter
+    # Plan gratuito para empezar. Ojo: el servicio se duerme tras unos minutos
+    # sin uso y la siguiente visita tarda cerca de un minuto en responder.
+    # Para uso diario del despacho, cámbialo a "starter".
+    plan: free
     region: oregon
     buildCommand: npm ci && npx prisma generate && npx prisma migrate deploy && npm run build
     startCommand: npm run start
@@ -12,21 +15,29 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
-      # La cadena de conexión de PostgreSQL. Se captura en el panel de Render;
-      # nunca se escribe aquí.
+      # Cadena de conexión de PostgreSQL. Se captura en el panel de Render;
+      # nunca se escribe en este archivo, que sí viaja al repositorio.
       - key: DATABASE_URL
         sync: false
       # Clave con la que se firman las sesiones. Render la genera sola.
       - key: AUTH_SECRET
         generateValue: true
-      # Dirección pública del servicio, para que el login redirija bien.
+      # Dirección pública del servicio, ej. https://crm-migratorio.onrender.com
       - key: AUTH_URL
         sync: false
-      # Carpeta de documentos. Debe caer en el disco persistente: sin esto,
-      # los archivos subidos se borran en cada despliegue.
-      - key: RUTA_ARCHIVOS
-        value: /var/data/archivos
-    disk:
-      name: documentos
-      mountPath: /var/data
-      sizeGB: 1
+
+# ── Documentos de los clientes ────────────────────────────────────
+# IMPORTANTE: el disco de la aplicación se borra en cada despliegue, así que
+# los documentos subidos (pasaportes, actas) se perderían al actualizar el
+# sistema. Mientras esto no se resuelva, no subas documentos reales.
+#
+# Los discos persistentes de Render requieren plan de pago. Cuando pases a uno,
+# descomenta lo siguiente y agrega la variable RUTA_ARCHIVOS=/var/data/archivos:
+#
+#    disk:
+#      name: documentos
+#      mountPath: /var/data
+#      sizeGB: 1
+#
+# La alternativa definitiva es almacenamiento tipo S3 (Cloudflare R2, Backblaze
+# B2 o AWS S3); solo hay que cambiar lib/archivos.ts.
