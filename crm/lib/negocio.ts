@@ -435,6 +435,15 @@ const NOMBRE_MEDIO: Record<MedioContacto, string> = {
   PRESENCIAL: 'en persona',
 };
 
+/** Fecha larga en español: "19 de agosto de 2026". */
+function fechaLarga(f: Date): string {
+  return new Intl.DateTimeFormat('es-MX', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(f);
+}
+
 /**
  * Marca el presupuesto como entregado al cliente y adelanta la venta.
  *
@@ -455,16 +464,23 @@ export async function enviarPresupuesto(
     throw new Error('Ese presupuesto ya fue aceptado.');
   }
 
+  const enviadoEn = new Date();
   await prisma.presupuesto.update({
     where: { id: presupuestoId },
-    data: { estatus: 'ENVIADO', fechaEnvio: new Date(), medioEnvio: medio },
+    data: { estatus: 'ENVIADO', fechaEnvio: enviadoEn, medioEnvio: medio },
   });
 
+  // La fecha va dentro del texto, además de la que la pantalla muestra al
+  // lado: así la nota se entiende sola si alguien la copia a un correo o la
+  // lee fuera del sistema.
   await prisma.interaccion.create({
     data: {
       clienteId: presupuesto.venta.clienteId,
+      fecha: enviadoEn,
       medio,
-      resultado: `Se le envió ${NOMBRE_MEDIO[medio]} el presupuesto ${presupuesto.folio}.`,
+      resultado:
+        `Presupuesto ${presupuesto.folio} enviado ${NOMBRE_MEDIO[medio]} ` +
+        `el ${fechaLarga(enviadoEn)}.`,
       usuarioId: actor.id,
     },
   });
