@@ -15,14 +15,13 @@ import { confirmarDocumento, guardarDetalleDocumento } from '../../casos/accione
 import { AvanceChecklist, CasillaEntrega } from '@/componentes/checklist';
 import { pagarComision, registrarPago } from '../../cobros/acciones';
 
-type Pestana = 'general' | 'presupuestos' | 'documentos' | 'pagos' | 'comisiones' | 'notas';
+type Pestana = 'general' | 'presupuestos' | 'documentos' | 'pagos' | 'notas';
 
 const PESTANAS: { clave: Pestana; nombre: string }[] = [
   { clave: 'general', nombre: 'Información general' },
   { clave: 'presupuestos', nombre: 'Presupuestos' },
   { clave: 'documentos', nombre: 'Documentos' },
   { clave: 'pagos', nombre: 'Plan de pagos' },
-  { clave: 'comisiones', nombre: 'Comisiones' },
   { clave: 'notas', nombre: 'Notas e interacciones' },
 ];
 
@@ -49,7 +48,7 @@ export default async function FichaCliente({
   searchParams: Promise<{ pestana?: Pestana }>;
 }) {
   const { id } = await params;
-  const { pestana = 'general' } = await searchParams;
+  const { pestana: pedida = 'general' } = await searchParams;
   const sesion = await exigir('clientes');
 
   const cliente = await prisma.cliente.findFirst({
@@ -68,7 +67,6 @@ export default async function FichaCliente({
             orderBy: { creadoEn: 'desc' },
           },
           cuotas: { include: { metodoPago: true }, orderBy: { numero: 'asc' } },
-          comisiones: { include: { participante: true }, orderBy: { rol: 'asc' } },
           caso: {
             include: {
               etapaActual: true,
@@ -107,13 +105,6 @@ export default async function FichaCliente({
   const planCuadra =
     totalAprobado === null || Math.abs(totalAprobado - resumen.total) <= 1;
 
-  // Un vendedor no debe ver el reparto de sus compañeros: se filtra igual que
-  // en el módulo de comisiones, aunque aquí sea "su" cliente.
-  const filtroCom = filtroComisiones(sesion);
-  const comisiones = (ventaActiva?.comisiones ?? []).filter(
-    (c) => !filtroCom.participanteId || c.participanteId === sesion.id
-  );
-
   // Los presupuestos de todas las ventas del cliente, del más reciente al más
   // antiguo: un cliente puede haber pedido varias cotizaciones con el tiempo.
   const presupuestos = cliente.ventas.flatMap((v) =>
@@ -121,12 +112,17 @@ export default async function FichaCliente({
   );
 
   const pestanasVisibles = PESTANAS.filter((p) => {
-    if (p.clave === 'comisiones') return puede(sesion.rol, 'comisiones', 'ver');
     if (p.clave === 'pagos') return puede(sesion.rol, 'cobros', 'ver') || puede(sesion.rol, 'ventas', 'ver');
     if (p.clave === 'notas') return puede(sesion.rol, 'notas', 'ver');
     if (p.clave === 'documentos') return puede(sesion.rol, 'documentos', 'ver') || puede(sesion.rol, 'casos', 'ver');
     return true;
   });
+
+  // Un enlace viejo puede apuntar a una pestaña retirada: se cae a la primera
+  // visible en vez de dejar la pantalla en blanco.
+  const pestana = pestanasVisibles.some((p) => p.clave === pedida)
+    ? pedida
+    : (pestanasVisibles[0]?.clave ?? 'general');
 
   return (
     <>
@@ -472,61 +468,6 @@ export default async function FichaCliente({
             </>
           )}
         </div>
-      )}
-
-      {/* ── Comisiones ── */}
-      {pestana === 'comisiones' && (
-        <Tarjeta className="overflow-x-auto">
-          {!comisiones.length ? (
-            <div className="p-6">
-              <Vacio>
-                Las comisiones se generan al cerrar la venta, con la plantilla de reparto elegida.
-              </Vacio>
-            </div>
-          ) : (
-            <>
-              <p className="border-b border-borde px-4 py-3 text-xs text-tenue">
-                Cada participante cobra su porcentaje directo sobre el total de la venta
-                ({pesos(ventaActiva!.montoTotal)}). No es una bolsa que se reparta entre todos.
-              </p>
-              <table className="w-full min-w-[560px] text-sm">
-                <thead className="border-b border-borde bg-lienzo text-left text-xs uppercase tracking-wide text-tenue">
-                  <tr>
-                    <th className="px-4 py-3">Participante</th>
-                    <th className="px-4 py-3">Rol</th>
-                    <th className="px-4 py-3">%</th>
-                    <th className="px-4 py-3">Monto</th>
-                    <th className="px-4 py-3">Estatus</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-borde">
-                  {comisiones.map((c) => (
-                    <tr key={c.id}>
-                      <td className="px-4 py-3 font-semibold">{c.participante.nombre}</td>
-                      <td className="px-4 py-3 text-suave">{c.rol.toLowerCase()}</td>
-                      <td className="px-4 py-3">{Number(c.porcentaje)}%</td>
-                      <td className="px-4 py-3">{pesos(c.montoCalculado, true)}</td>
-                      <td className="px-4 py-3">
-                        {c.estatus === 'PAGADA' ? (
-                          <Insignia tono="exito">Pagada {fecha(c.fechaPago)}</Insignia>
-                        ) : puede(sesion.rol, 'comisiones', 'editar') ? (
-                          <form action={pagarComision}>
-                            <input type="hidden" name="comisionId" value={c.id} />
-                            <Boton type="submit" estilo="suave" className="px-3 py-1 text-xs">
-                              Marcar pagada
-                            </Boton>
-                          </form>
-                        ) : (
-                          <Insignia tono="aviso">Pendiente</Insignia>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
-        </Tarjeta>
       )}
 
       {/* ── Notas e interacciones ── */}
