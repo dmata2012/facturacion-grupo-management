@@ -1,0 +1,32 @@
+# Despliegue en Render. Con este archivo en la raíz, Render puede crear el
+# servicio solo (Blueprint) en vez de configurarlo a mano.
+services:
+  - type: web
+    name: crm-migratorio
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: npm ci && npx prisma generate && npx prisma migrate deploy && npm run build
+    startCommand: npm run start
+    healthCheckPath: /ingresar
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # La cadena de conexión de PostgreSQL. Se captura en el panel de Render;
+      # nunca se escribe aquí.
+      - key: DATABASE_URL
+        sync: false
+      # Clave con la que se firman las sesiones. Render la genera sola.
+      - key: AUTH_SECRET
+        generateValue: true
+      # Dirección pública del servicio, para que el login redirija bien.
+      - key: AUTH_URL
+        sync: false
+      # Carpeta de documentos. Debe caer en el disco persistente: sin esto,
+      # los archivos subidos se borran en cada despliegue.
+      - key: RUTA_ARCHIVOS
+        value: /var/data/archivos
+    disk:
+      name: documentos
+      mountPath: /var/data
+      sizeGB: 1

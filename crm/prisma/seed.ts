@@ -144,9 +144,18 @@ async function main() {
     });
   }
 
+  // Los usuarios de prueba comparten una contraseña conocida. Sembrarlos en
+  // producción sería abrir la puerta de par en par, así que ahí no se crean
+  // salvo que se pida a propósito con SEMBRAR_USUARIOS_DEMO=1.
+  const enProduccion = process.env.NODE_ENV === 'production';
+  if (enProduccion && process.env.SEMBRAR_USUARIOS_DEMO !== '1') {
+    console.log('Producción: se omiten los usuarios de prueba.');
+    console.log('Crea el primer usuario con: npm run crear-usuario');
+    console.log('Listo.');
+    return;
+  }
+
   console.log('Sembrando usuarios de prueba…');
-  // Contraseña única para todos en desarrollo. En producción se cambia al
-  // primer ingreso: está anotado en el README.
   const hash = await bcrypt.hash('demo1234', 10);
   const usuarios = [
     { nombre: 'Dirección General', correo: 'director@despacho.mx', rol: 'DIRECTOR' as const },

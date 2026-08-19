@@ -180,3 +180,62 @@ Se resuelven en dos niveles, porque uno solo no alcanza:
    despacho y sus documentos.
 4. Configura respaldos de la base de datos.
 5. Mueve los documentos a almacenamiento dedicado (punto anterior).
+
+---
+
+## 8. Publicar en Render
+
+El repositorio trae un `render.yaml`, así que Render puede crear el servicio
+solo. En el panel: **New → Blueprint**, eliges este repositorio y él lee el
+archivo. Si prefieres crearlo a mano (**New → Web Service**), estos son los
+valores:
+
+| Campo | Valor |
+|---|---|
+| Runtime | Node |
+| Build Command | `npm ci && npx prisma generate && npx prisma migrate deploy && npm run build` |
+| Start Command | `npm run start` |
+| Health Check Path | `/ingresar` |
+
+Las migraciones corren dentro del build: cada despliegue deja la base al día
+sin que nadie ejecute nada a mano.
+
+### Variables de entorno
+
+| Variable | Valor |
+|---|---|
+| `DATABASE_URL` | La cadena de PostgreSQL (Neon, Supabase o la base de Render) |
+| `AUTH_SECRET` | Una clave larga y aleatoria, **distinta** a la de tu computadora |
+| `AUTH_URL` | La dirección pública, ej. `https://crm-migratorio.onrender.com` |
+| `RUTA_ARCHIVOS` | `/var/data/archivos` (ver disco, abajo) |
+| `NODE_VERSION` | `22` |
+
+### Tres cosas que hay que atender, o duelen después
+
+1. **El disco de Render se borra en cada despliegue.** Los documentos de los
+   clientes (pasaportes, actas) desaparecerían con cada actualización del
+   sistema. Por eso el `render.yaml` monta un disco persistente en `/var/data`
+   y apunta ahí `RUTA_ARCHIVOS`. Los discos persistentes **requieren plan de
+   pago**; en el plan gratuito no existen. Si vas a empezar en el plan
+   gratuito, no subas documentos reales hasta resolver esto — la alternativa
+   definitiva es almacenamiento tipo S3 (Cloudflare R2, Backblaze B2 o AWS S3),
+   y solo hay que cambiar `lib/archivos.ts`.
+
+2. **No corras `prisma db seed` en producción con los usuarios de prueba.** El
+   seed ya se protege solo: en producción no los crea. Para dar de alta el
+   primer acceso real, desde tu computadora y apuntando a la base de
+   producción:
+
+   ```
+   npm run crear-usuario
+   ```
+
+3. **El plan gratuito de Render duerme el servicio** tras unos minutos sin uso,
+   y la primera visita después tarda cerca de un minuto en responder. Para un
+   despacho que lo usa todos los días conviene el plan de pago.
+
+### Respaldos
+
+La base de datos es el sistema: si se pierde, se perdieron los expedientes, la
+cobranza y las comisiones. Activa los respaldos automáticos de tu proveedor de
+PostgreSQL desde el primer día y comprueba una vez que sabes restaurarlos.

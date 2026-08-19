@@ -11,7 +11,13 @@ import path from 'node:path';
  * Al pasar a producción esto se cambia por almacenamiento tipo S3; la única
  * pieza a reemplazar es este archivo.
  */
-export const CARPETA_ARCHIVOS = path.join(process.cwd(), 'archivos');
+/**
+ * En Render (y en cualquier contenedor) el disco de la aplicación se borra en
+ * cada despliegue. Por eso la ruta es configurable: en producción debe apuntar
+ * a un disco persistente montado, por ejemplo RUTA_ARCHIVOS=/var/data/archivos.
+ */
+export const CARPETA_ARCHIVOS =
+  process.env.RUTA_ARCHIVOS ?? path.join(process.cwd(), 'archivos');
 
 const TIPOS_PERMITIDOS = new Set([
   'application/pdf',
