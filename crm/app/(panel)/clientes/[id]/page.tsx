@@ -92,6 +92,16 @@ export default async function FichaCliente({
   const cuotas = ventaActiva?.cuotas ?? [];
   const resumen = resumenCobranza(cuotas);
 
+  // El plan debe coincidir con el presupuesto aprobado. Si no cuadra, se dice:
+  // un descuadre silencioso entre lo firmado y lo que se cobra es de los
+  // errores que más caros salen.
+  const aprobado = ventaActiva?.presupuestos.find((p) => p.estatus === 'ACEPTADO') ?? null;
+  const totalAprobado = aprobado
+    ? aprobado.conceptos.reduce((t, c) => t + Number(c.monto), 0)
+    : null;
+  const planCuadra =
+    totalAprobado === null || Math.abs(totalAprobado - resumen.total) <= 1;
+
   // Un vendedor no debe ver el reparto de sus compañeros: se filtra igual que
   // en el módulo de comisiones, aunque aquí sea "su" cliente.
   const filtroCom = filtroComisiones(sesion);
@@ -353,6 +363,35 @@ export default async function FichaCliente({
             <Vacio>El plan de pagos se captura al cerrar la venta como ganada.</Vacio>
           ) : (
             <>
+              {aprobado && (
+                <div
+                  className={`rounded-sm border-l-4 px-3 py-2 text-sm ${
+                    planCuadra
+                      ? 'border-green-500 bg-green-50 text-green-800'
+                      : 'border-red-500 bg-red-50 text-red-700'
+                  }`}
+                >
+                  {planCuadra ? (
+                    <>
+                      Cuadra con el presupuesto{' '}
+                      <Link href={`/presupuestos/${aprobado.id}`} className="font-semibold underline">
+                        {aprobado.folio}
+                      </Link>{' '}
+                      aprobado por {pesos(totalAprobado ?? 0)}.
+                    </>
+                  ) : (
+                    <>
+                      <strong>El plan no cuadra con el presupuesto aprobado.</strong> El presupuesto{' '}
+                      <Link href={`/presupuestos/${aprobado.id}`} className="font-semibold underline">
+                        {aprobado.folio}
+                      </Link>{' '}
+                      dice {pesos(totalAprobado ?? 0)} y el plan suma {pesos(resumen.total)}. Hay que
+                      corregirlo antes de seguir cobrando.
+                    </>
+                  )}
+                </div>
+              )}
+
               <div className="grid gap-4 sm:grid-cols-4">
                 <ResumenMonto etiqueta="Total del plan" valor={resumen.total} />
                 <ResumenMonto etiqueta="Cobrado" valor={resumen.pagado} tono="exito" />

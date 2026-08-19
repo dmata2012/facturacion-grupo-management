@@ -122,10 +122,15 @@ export async function aprobarPresupuesto(datos: FormData) {
   const id = String(datos.get('presupuestoId'));
   const { sesion, presupuesto } = await presupuestoPropio(id);
 
-  await aceptarPresupuesto(id, sesion, {
-    abogadoId: String(datos.get('abogadoId') ?? '') || null,
-    plantillaComisionId: String(datos.get('plantillaComisionId') ?? '') || null,
-  });
+  try {
+    await aceptarPresupuesto(id, sesion, {
+      abogadoId: String(datos.get('abogadoId') ?? '') || null,
+      plantillaComisionId: String(datos.get('plantillaComisionId') ?? '') || null,
+    });
+  } catch (e) {
+    const motivo = e instanceof Error ? e.message : 'No se pudo aprobar el presupuesto.';
+    redirect(`/presupuestos/${id}?error=${encodeURIComponent(motivo)}`);
+  }
 
   const venta = await prisma.venta.findUniqueOrThrow({ where: { id: presupuesto.ventaId } });
   revalidatePath(`/presupuestos/${id}`);

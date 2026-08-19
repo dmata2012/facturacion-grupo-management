@@ -505,7 +505,11 @@ export async function aceptarPresupuesto(
 ) {
   const presupuesto = await prisma.presupuesto.findUniqueOrThrow({
     where: { id: presupuestoId },
-    include: { conceptos: true, pagos: { orderBy: { numero: 'asc' } }, venta: true },
+    include: {
+      conceptos: true,
+      pagos: { orderBy: { numero: 'asc' } },
+      venta: { include: { caso: true } },
+    },
   });
   if (presupuesto.estatus === 'ACEPTADO') return presupuesto;
   if (!presupuesto.pagos.length) {
@@ -513,6 +517,26 @@ export async function aceptarPresupuesto(
   }
 
   const total = presupuesto.conceptos.reduce((t, c) => t + Number(c.monto), 0);
+  const cuotasDelPresupuesto = presupuesto.pagos.map((p) => ({
+    fechaPactada: p.fechaPropuesta,
+    monto: Number(p.monto),
+  }));
+
+  // Si la venta ya estaba cerrada, el expediente y el plan de pagos existen.
+  // Aceptar aquí sin tocarlos dejaría al cliente con un acuerdo firmado por
+  // una cifra y una cobranza por otra.
+  const yaCerrada = Boolean(presupuesto.venta.caso);
+  if (yaCerrada) {
+    const cobradas = await prisma.cuota.count({
+      where: { ventaId: presupuesto.ventaId, pagadoEn: { not: null } },
+    });
+    if (cobradas > 0) {
+      throw new Error(
+        'Ese caso ya tiene pagos cobrados sobre el plan actual. Cancela esos pagos antes de ' +
+          'aprobar un presupuesto distinto, o el plan dejaría de cuadrar con lo ya recibido.'
+      );
+    }
+  }
 
   await prisma.presupuesto.update({
     where: { id: presupuestoId },
@@ -526,17 +550,18 @@ export async function aceptarPresupuesto(
     data: { estatus: 'RECHAZADO', fechaRespuesta: new Date(), motivoRechazo: 'Se aprobó otro presupuesto' },
   });
 
-  await moverEtapaVenta(presupuesto.ventaId, 'CERRADO_GANADO', actor, {
-    cierre: {
-      montoTotal: total,
-      abogadoId: extra.abogadoId ?? null,
-      plantillaComisionId: extra.plantillaComisionId ?? null,
-      cuotas: presupuesto.pagos.map((p) => ({
-        fechaPactada: p.fechaPropuesta,
-        monto: Number(p.monto),
-      })),
-    },
-  });
+  if (yaCerrada) {
+    await reemplazarPlanDePagos(presupuesto.ventaId, total, cuotasDelPresupuesto, actor);
+  } else {
+    await moverEtapaVenta(presupuesto.ventaId, 'CERRADO_GANADO', actor, {
+      cierre: {
+        montoTotal: total,
+        abogadoId: extra.abogadoId ?? null,
+        plantillaComisionId: extra.plantillaComisionId ?? null,
+        cuotas: cuotasDelPresupuesto,
+      },
+    });
+  }
 
   return presupuesto;
 }
@@ -615,6 +640,54 @@ export async function enviarPresupuestoPorCorreo(
   }
 
   return { enviado: true, destinatario };
+}
+
+/**
+ * Pone el plan de pagos y el monto de la venta a lo que dice el presupuesto
+ * recién aprobado, cuando el expediente ya existía.
+ *
+ * Las comisiones se recalculan sobre el nuevo total, salvo las que ya se
+ * pagaron: ese dinero ya salió y corregirlo aquí solo escondería el
+ * desajuste. Quedan a la vista para ajustarlas a mano.
+ */
+async function reemplazarPlanDePagos(
+  ventaId: string,
+  total: number,
+  cuotas: { fechaPactada: Date; monto: number }[],
+  actor: Actor
+) {
+  await prisma.$transaction(async (tx) => {
+    await tx.venta.update({
+      where: { id: ventaId },
+      data: { montoTotal: new Prisma.Decimal(total) },
+    });
+
+    // Ninguna estaba cobrada: se comprobó antes de llegar aquí.
+    await tx.cuota.deleteMany({ where: { ventaId } });
+    await tx.cuota.createMany({
+      data: cuotas.map((c, i) => ({
+        ventaId,
+        numero: i + 1,
+        esInicial: i === 0,
+        fechaPactada: c.fechaPactada,
+        monto: new Prisma.Decimal(c.monto),
+      })),
+    });
+
+    const comisiones = await tx.comision.findMany({ where: { ventaId } });
+    for (const comision of comisiones) {
+      if (comision.estatus === 'PAGADA') continue;
+      await tx.comision.update({
+        where: { id: comision.id },
+        data: { montoCalculado: new Prisma.Decimal(total).mul(comision.porcentaje).div(100) },
+      });
+    }
+
+    await auditar(tx, 'Venta', ventaId, 'plan_de_pagos_reemplazado_por_presupuesto', actor.id, {
+      total,
+      cuotas: cuotas.length,
+    });
+  });
 }
 
 export async function rechazarPresupuesto(presupuestoId: string, motivo: string, actor: Actor) {
