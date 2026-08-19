@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { exigir } from '@/lib/sesion';
 import { filtroVentas } from '@/lib/permisos';
 import { pesos } from '@/lib/formato';
-import { BotonEnlace, Insignia, Tarjeta, TituloSeccion, Vacio } from '@/componentes/ui';
+import { Avatar, BotonEnlace, Insignia, Tarjeta, TituloSeccion, Vacio } from '@/componentes/ui';
 import { moverVenta } from './acciones';
 
 export const metadata = { title: 'Pipeline de ventas — CRM' };
@@ -74,16 +74,21 @@ export default async function Pipeline() {
             <Columna key={etapa.clave} nombre={etapa.nombre} cantidad={delEtapa.length}>
               {delEtapa.map((v) => (
                 <Tarjeta key={v.id} className="p-3">
-                  <Link
-                    href={`/clientes/${v.clienteId}`}
-                    className="text-sm font-semibold text-tinta hover:text-marca"
-                  >
-                    {v.cliente.nombre}
-                  </Link>
-                  <p className="mt-0.5 text-xs text-suave">
-                    {v.cliente.nacionalidad} · {v.tipoTramite.nombre}
-                  </p>
-                  <p className="mt-1 text-xs text-tenue">Vendedor: {v.vendedor.nombre}</p>
+                  <div className="flex items-start gap-2.5">
+                    <Avatar nombre={v.cliente.nombre} fotoUrl={v.cliente.fotoUrl} />
+                    <div className="min-w-0">
+                      <Link
+                        href={`/clientes/${v.clienteId}`}
+                        className="block truncate text-sm font-semibold text-tinta hover:text-marca"
+                      >
+                        {v.cliente.nombre}
+                      </Link>
+                      <p className="mt-0.5 text-xs text-suave">
+                        {v.cliente.nacionalidad} · {v.tipoTramite.nombre}
+                      </p>
+                      <p className="mt-0.5 text-xs text-tenue">Vendedor: {v.vendedor.nombre}</p>
+                    </div>
+                  </div>
                   <p className="mt-2 text-sm font-bold text-tinta">{pesos(v.montoTotal)}</p>
 
                   {v.motivoPerdida && (
@@ -159,7 +164,7 @@ function TarjetaLead({
   lead: {
     id: string;
     clienteId: string;
-    cliente: { nombre: string; nacionalidad: string };
+    cliente: { nombre: string; nacionalidad: string; fotoUrl: string | null };
     tipoTramite: { nombre: string };
     vendedor: { nombre: string };
     resultadoEntrevista: string | null;
@@ -167,16 +172,21 @@ function TarjetaLead({
 }) {
   return (
     <Tarjeta className="p-3">
-      <Link
-        href={`/clientes/${lead.clienteId}`}
-        className="text-sm font-semibold text-tinta hover:text-marca"
-      >
-        {lead.cliente.nombre}
-      </Link>
-      <p className="mt-0.5 text-xs text-suave">
-        {lead.cliente.nacionalidad} · {lead.tipoTramite.nombre}
-      </p>
-      <p className="mt-1 text-xs text-tenue">Vendedor: {lead.vendedor.nombre}</p>
+      <div className="flex items-start gap-2.5">
+        <Avatar nombre={lead.cliente.nombre} fotoUrl={lead.cliente.fotoUrl} />
+        <div className="min-w-0">
+          <Link
+            href={`/clientes/${lead.clienteId}`}
+            className="block truncate text-sm font-semibold text-tinta hover:text-marca"
+          >
+            {lead.cliente.nombre}
+          </Link>
+          <p className="mt-0.5 text-xs text-suave">
+            {lead.cliente.nacionalidad} · {lead.tipoTramite.nombre}
+          </p>
+          <p className="mt-0.5 text-xs text-tenue">Vendedor: {lead.vendedor.nombre}</p>
+        </div>
+      </div>
       {lead.resultadoEntrevista === 'REQUIERE_INFO' && (
         <p className="mt-2">
           <Insignia tono="aviso">Requiere más información</Insignia>

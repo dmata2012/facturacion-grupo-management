@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
@@ -192,5 +193,54 @@ export function Aviso({ children, tono = 'alerta' }: { children: ReactNode; tono
     <p className={`mb-4 rounded-sm border-l-4 px-3 py-2 text-sm ${estilo}`} role="status">
       {children}
     </p>
+  );
+}
+
+/** Iniciales del nombre: "María Fernanda Rojas" → "MR". */
+function iniciales(nombre: string): string {
+  const partes = nombre.trim().split(/\s+/).filter(Boolean);
+  if (!partes.length) return '?';
+  const primera = partes[0][0];
+  // Se toma el apellido, no el segundo nombre, que distingue mejor entre
+  // clientes que comparten nombre de pila.
+  const segunda = partes.length > 2 ? partes[2][0] : partes[1]?.[0] ?? '';
+  return (primera + segunda).toUpperCase();
+}
+
+/**
+ * Fotografía del cliente en formato redondo. Cuando no hay foto muestra las
+ * iniciales, para que la tarjeta no quede con un hueco ni con un icono
+ * genérico repetido en todas.
+ */
+export function Avatar({
+  nombre,
+  fotoUrl,
+  tamano = 40,
+}: {
+  nombre: string;
+  fotoUrl?: string | null;
+  tamano?: number;
+}) {
+  if (fotoUrl) {
+    return (
+      <Image
+        src={fotoUrl}
+        alt={`Fotografía de ${nombre}`}
+        width={tamano}
+        height={tamano}
+        unoptimized
+        style={{ width: tamano, height: tamano }}
+        className="shrink-0 rounded-full border border-borde object-cover"
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden="true"
+      style={{ width: tamano, height: tamano, fontSize: Math.round(tamano * 0.36) }}
+      className="flex shrink-0 items-center justify-center rounded-full bg-marca-tenue font-bold text-marca ring-1 ring-inset ring-red-100"
+    >
+      {iniciales(nombre)}
+    </span>
   );
 }
