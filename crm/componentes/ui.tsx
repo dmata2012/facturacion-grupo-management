@@ -12,16 +12,36 @@ export function Tarjeta({
   className?: string;
 }) {
   return (
-    <div className={`rounded-xl border border-borde bg-white shadow-sm ${className}`}>{children}</div>
+    <div className={`rounded-tarjeta border border-borde bg-white shadow-suave ${className}`}>{children}</div>
   );
 }
 
-export function TituloSeccion({ children, accion }: { children: ReactNode; accion?: ReactNode }) {
+export function TituloSeccion({
+  children,
+  accion,
+  etiqueta,
+}: {
+  children: ReactNode;
+  accion?: ReactNode;
+  etiqueta?: string;
+}) {
   return (
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-      <h1 className="text-2xl font-bold tracking-tight text-tinta">{children}</h1>
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+      <div>
+        {etiqueta && <Etiqueta>{etiqueta}</Etiqueta>}
+        <h1 className="text-2xl font-bold text-tinta">{children}</h1>
+      </div>
       {accion}
     </div>
+  );
+}
+
+/** Rótulo en versalitas rojas que el sitio usa sobre cada título. */
+export function Etiqueta({ children }: { children: ReactNode }) {
+  return (
+    <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[1.6px] text-marca">
+      {children}
+    </span>
   );
 }
 
@@ -47,15 +67,16 @@ export function Insignia({ children, tono = 'neutro' }: { children: ReactNode; t
 }
 
 const BOTONES = {
-  principal: 'bg-marca text-white hover:bg-marca-clara shadow-sm',
-  suave: 'bg-white text-tinta ring-1 ring-borde hover:bg-slate-50',
+  principal: 'grad-marca text-white shadow-marca hover:shadow-marca-alta hover:-translate-y-0.5',
+  suave: 'bg-white text-tinta ring-1 ring-borde hover:border-marca hover:text-marca hover:-translate-y-0.5',
   peligro: 'bg-white text-red-700 ring-1 ring-red-200 hover:bg-red-50',
 } as const;
 
 type EstiloBoton = keyof typeof BOTONES;
 
 const BASE_BOTON =
-  'inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed';
+  'inline-flex items-center justify-center gap-2 rounded-sm px-4 py-2 text-sm font-semibold ' +
+  'transition duration-150 active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed';
 
 export function Boton({
   children,
@@ -111,11 +132,12 @@ export function Campo({
 }
 
 export const claseInput =
-  'w-full rounded-lg border border-borde bg-white px-3 py-2 text-sm text-tinta placeholder:text-tenue focus:border-marca focus:outline-none focus:ring-2 focus:ring-marca/15';
+  'w-full rounded-sm border border-borde bg-white px-3 py-2 text-sm text-tinta ' +
+  'placeholder:text-tenue transition focus:border-marca focus:outline-none focus:ring-2 focus:ring-marca/15';
 
 export function Vacio({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-dashed border-borde bg-white/60 px-6 py-10 text-center text-sm text-tenue">
+    <div className="rounded-tarjeta border border-dashed border-borde bg-white/60 px-6 py-10 text-center text-sm text-tenue">
       {children}
     </div>
   );
@@ -150,10 +172,12 @@ export function Kpi({
     info: 'text-sky-700',
   }[tono];
   return (
-    <Tarjeta className="p-5">
-      <div className="text-xs font-semibold uppercase tracking-wide text-tenue">{etiqueta}</div>
-      <div className={`mt-2 text-2xl font-bold tracking-tight ${acento}`}>{valor}</div>
-      {detalle && <div className="mt-1 text-xs text-suave">{detalle}</div>}
+    <Tarjeta className="p-5 transition duration-200 hover:-translate-y-1 hover:shadow-media">
+      <div className="text-[11px] font-bold uppercase tracking-[1.2px] text-tenue">{etiqueta}</div>
+      <div className={`mt-2 text-[28px] font-extrabold leading-none tracking-[-0.03em] ${acento}`}>
+        {valor}
+      </div>
+      {detalle && <div className="mt-1.5 text-xs text-suave">{detalle}</div>}
     </Tarjeta>
   );
 }
@@ -165,7 +189,7 @@ export function Aviso({ children, tono = 'alerta' }: { children: ReactNode; tono
       ? 'border-green-500 bg-green-50 text-green-800'
       : 'border-red-500 bg-red-50 text-red-700';
   return (
-    <p className={`mb-4 rounded-lg border-l-4 px-3 py-2 text-sm ${estilo}`} role="status">
+    <p className={`mb-4 rounded-sm border-l-4 px-3 py-2 text-sm ${estilo}`} role="status">
       {children}
     </p>
   );

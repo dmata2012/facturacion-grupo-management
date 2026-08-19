@@ -34,7 +34,7 @@ export default async function Agenda() {
 
   return (
     <>
-      <TituloSeccion>Agenda</TituloSeccion>
+      <TituloSeccion etiqueta="Seguimiento">Agenda</TituloSeccion>
 
       <p className="mb-5 text-sm text-suave">
         Se alimenta sola de los próximos seguimientos que registras en la ficha del cliente. Las

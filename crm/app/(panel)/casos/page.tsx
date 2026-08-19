@@ -24,7 +24,7 @@ export default async function Casos() {
 
   return (
     <>
-      <TituloSeccion>Casos legales</TituloSeccion>
+      <TituloSeccion etiqueta="Legal">Casos legales</TituloSeccion>
 
       {!casos.length ? (
         <Vacio>

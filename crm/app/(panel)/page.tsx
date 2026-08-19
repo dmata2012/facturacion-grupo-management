@@ -11,6 +11,12 @@ export const metadata = { title: 'Reportes — CRM' };
 
 type Periodo = 'semana' | 'mes' | 'anio';
 
+/** "CERRADO_GANADO" → "Cerrado ganado": legible sin deformar el resto. */
+function nombreEtapa(etapa: string): string {
+  const texto = etapa.replaceAll('_', ' ').toLowerCase();
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
 /** Inicio del periodo elegido. Los KPIs de flujo se miden contra esta fecha;
  *  los de saldo (casos activos, cartera) son foto del momento. */
 function desde(periodo: Periodo): Date {
@@ -107,6 +113,7 @@ export default async function Reportes({
             ))}
           </div>
         }
+        etiqueta="Dirección"
       >
         Reportes
       </TituloSeccion>
@@ -133,10 +140,7 @@ export default async function Reportes({
 
         <Panel titulo="Embudo comercial">
           <Barras
-            datos={embudo.map((e) => ({
-              nombre: e.etapa.replaceAll('_', ' ').toLowerCase(),
-              valor: e._count,
-            }))}
+            datos={embudo.map((e) => ({ nombre: nombreEtapa(e.etapa), valor: e._count }))}
           />
         </Panel>
 
@@ -185,7 +189,7 @@ function Barras({ datos }: { datos: { nombre: string; valor: number }[] }) {
       {datos.map((d) => (
         <li key={d.nombre}>
           <div className="mb-1 flex justify-between text-xs">
-            <span className="capitalize text-suave">{d.nombre}</span>
+            <span className="text-suave">{d.nombre}</span>
             <span className="font-semibold text-tinta">{d.valor}</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-slate-100">

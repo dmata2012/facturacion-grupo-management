@@ -49,7 +49,7 @@ export default async function Pipeline() {
 
   return (
     <>
-      <TituloSeccion accion={<BotonEnlace href="/clientes/nuevo">Nuevo cliente</BotonEnlace>}>
+      <TituloSeccion etiqueta="Comercial" accion={<BotonEnlace href="/clientes/nuevo">Nuevo cliente</BotonEnlace>}>
         Pipeline de ventas
       </TituloSeccion>
 

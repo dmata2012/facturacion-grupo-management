@@ -54,7 +54,7 @@ export default async function Configuracion() {
 
   return (
     <>
-      <TituloSeccion>Configuración</TituloSeccion>
+      <TituloSeccion etiqueta="Sistema">Configuración</TituloSeccion>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {secciones.map((s) => (
           <Link key={s.href} href={s.href} className="block">

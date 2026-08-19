@@ -32,7 +32,7 @@ export default async function Clientes({
 
   return (
     <>
-      <TituloSeccion accion={<BotonEnlace href="/clientes/nuevo">Nuevo cliente</BotonEnlace>}>
+      <TituloSeccion etiqueta="Cartera" accion={<BotonEnlace href="/clientes/nuevo">Nuevo cliente</BotonEnlace>}>
         Clientes
       </TituloSeccion>
 

@@ -1,25 +1,41 @@
 @import "tailwindcss";
 
-/* ══ Paleta — despacho migratorio ══════════════════════════════════
-   Tono limpio y poco saturado: neutros fríos para la interfaz y el rojo
-   de la casa reservado para acciones y acentos, nunca como fondo grande. */
+/* ══ Identidad Grupo Management ════════════════════════════════════
+   Los mismos valores del sitio web (sitio-web/public/css/estilos.css):
+   así el sistema interno y el sitio público se leen como la misma casa.
+   Si un color cambia allá, cambia aquí. */
 @theme {
-  --color-tinta: #12121a;
-  --color-tinta-2: #1e2130;
-
+  /* Marca */
   --color-marca: #9b1528;
+  --color-marca-osc: #6b0f1a;
   --color-marca-clara: #c41e3a;
   --color-marca-tenue: #fdf2f4;
 
-  --color-lienzo: #f6f7f9;
-  --color-borde: #e4e6eb;
+  /* Neutros */
+  --color-tinta: #12121a;
+  --color-tinta-2: #1e1e2e;
+  --color-texto: #1a1a2e;
   --color-suave: #5a5f73;
   --color-tenue: #8a8fa8;
+  --color-lienzo: #f5f6f8;
+  --color-borde: #e4e6eb;
 
+  /* Estado */
   --color-exito: #16a34a;
   --color-aviso: #d97706;
   --color-alerta: #dc2626;
   --color-info: #0369a1;
+
+  /* Formas — los radios y sombras del sitio */
+  --radius-sm: 8px;
+  --radius-tarjeta: 14px;
+  --radius-lg: 22px;
+
+  --shadow-suave: 0 2px 8px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  --shadow-media: 0 8px 24px rgba(0, 0, 0, 0.1), 0 2px 6px rgba(0, 0, 0, 0.06);
+  --shadow-alta: 0 20px 60px rgba(0, 0, 0, 0.18);
+  --shadow-marca: 0 6px 18px rgba(155, 21, 40, 0.28);
+  --shadow-marca-alta: 0 10px 26px rgba(155, 21, 40, 0.36);
 
   --font-sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
 }
@@ -27,12 +43,35 @@
 html,
 body {
   background: var(--color-lienzo);
-  color: var(--color-tinta);
+  color: var(--color-texto);
   -webkit-font-smoothing: antialiased;
+}
+
+/* Los títulos del sitio van apretados; el sistema los copia para que la
+   tipografía se sienta igual en ambos lados. */
+h1,
+h2,
+h3 {
+  letter-spacing: -0.02em;
 }
 
 /* Un solo estilo de foco en todo el sistema, visible sobre cualquier fondo. */
 :focus-visible {
-  outline: 2px solid var(--color-marca);
+  outline: 3px solid var(--color-marca-clara);
   outline-offset: 2px;
+}
+
+/* ── Degradados de la casa ───────────────────────────────────── */
+@utility grad-marca {
+  background-image: linear-gradient(135deg, #9b1528 0%, #c41e3a 100%);
+}
+
+@utility grad-tinta {
+  background-image: linear-gradient(160deg, #12121a 0%, #1e1e2e 100%);
+}
+
+/* El resplandor rojo de la portada del sitio, para la barra lateral y el
+   acceso: es lo que hace que se reconozca la marca de un vistazo. */
+@utility resplandor-marca {
+  background-image: radial-gradient(ellipse 90% 45% at 25% 12%, rgba(155, 21, 40, 0.30) 0%, transparent 72%);
 }

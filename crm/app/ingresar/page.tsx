@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import { redirect } from 'next/navigation';
 import { AuthError } from 'next-auth';
 import { signIn } from '@/auth';
@@ -31,20 +32,26 @@ export default async function Ingresar({
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-tinta px-4 py-12">
-      <div
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            'radial-gradient(ellipse 60% 60% at 30% 40%, rgba(155,21,40,.35) 0%, transparent 70%)',
-        }}
-      />
-      <div className="relative w-full max-w-sm rounded-2xl bg-white p-8 shadow-2xl">
-        <h1 className="text-xl font-bold tracking-tight text-tinta">CRM Migratorio</h1>
-        <p className="mt-1 mb-6 text-sm text-tenue">Acceso para el equipo del despacho</p>
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden grad-tinta px-4 py-12">
+      {/* El mismo resplandor rojo de la portada del sitio. */}
+      <div className="resplandor-marca pointer-events-none absolute inset-0" />
+
+      <div className="relative w-full max-w-sm rounded-lg bg-white p-9 shadow-alta">
+        <Image
+          src="/logo.png"
+          alt="Grupo Management"
+          width={180}
+          height={48}
+          className="mb-6 h-11 w-auto"
+          priority
+        />
+        <h1 className="text-xl font-bold text-tinta">CRM Migratorio</h1>
+        <p className="mt-1.5 mb-7 text-[11px] font-bold uppercase tracking-[1.5px] text-tenue">
+          Acceso para el equipo del despacho
+        </p>
 
         {error && (
-          <p className="mb-4 rounded-lg border-l-4 border-red-500 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p className="mb-4 rounded-sm border-l-4 border-red-500 bg-red-50 px-3 py-2 text-sm text-red-700">
             Correo o contraseña incorrectos.
           </p>
         )}

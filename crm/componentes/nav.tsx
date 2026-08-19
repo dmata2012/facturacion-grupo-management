@@ -15,12 +15,16 @@ export function EnlacesMenu({ modulos }: { modulos: { href: string; nombre: stri
             key={m.href}
             href={m.href}
             aria-current={activo ? 'page' : undefined}
-            className={`block rounded-lg px-3 py-2 text-sm transition ${
+            className={`relative block rounded-sm px-3 py-2 text-sm transition ${
               activo
                 ? 'bg-white/10 font-semibold text-white'
                 : 'text-slate-300 hover:bg-white/5 hover:text-white'
             }`}
           >
+            {/* El filo rojo marca dónde estás sin depender del color del texto. */}
+            {activo && (
+              <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-marca-clara" />
+            )}
             {m.nombre}
           </Link>
         );
