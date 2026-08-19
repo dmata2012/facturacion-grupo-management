@@ -6,7 +6,7 @@ import { MedioContacto } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { exigir } from '@/lib/sesion';
 import { filtroClientes } from '@/lib/permisos';
-import { guardarArchivo } from '@/lib/archivos';
+import { borrarArchivo, guardarFotografia } from '@/lib/archivos';
 import { registrarInteraccion } from '@/lib/negocio';
 
 function texto(datos: FormData, campo: string): string {
@@ -32,8 +32,12 @@ export async function crearCliente(datos: FormData) {
   let fotoUrl: string | null = null;
   const foto = datos.get('foto');
   if (foto instanceof File && foto.size > 0) {
-    const guardado = await guardarArchivo(foto);
-    fotoUrl = guardado ? `/api/archivos/${guardado.nombreAlmacenado}` : null;
+    try {
+      const guardado = await guardarFotografia(foto);
+      fotoUrl = guardado ? `/api/archivos/${guardado.nombreAlmacenado}` : null;
+    } catch {
+      redirect('/clientes/nuevo?error=foto');
+    }
   }
 
   const cliente = await prisma.cliente.create({
@@ -88,11 +92,12 @@ export async function actualizarCliente(datos: FormData) {
 
   // La fotografía solo se toca si suben una nueva: dejar el campo vacío
   // significa "conserva la que ya tenía", no "bórrala".
-  let fotoUrl = permitido.fotoUrl;
+  const fotoAnterior = permitido.fotoUrl;
+  let fotoUrl = fotoAnterior;
   const foto = datos.get('foto');
   if (foto instanceof File && foto.size > 0) {
     try {
-      const guardado = await guardarArchivo(foto);
+      const guardado = await guardarFotografia(foto);
       if (guardado) fotoUrl = `/api/archivos/${guardado.nombreAlmacenado}`;
     } catch {
       redirect(`/clientes/${id}/editar?error=foto`);
@@ -116,6 +121,17 @@ export async function actualizarCliente(datos: FormData) {
       fotoUrl,
     },
   });
+
+  // La foto sustituida se retira del disco, pero solo tras comprobar que
+  // ningún otro registro la esté usando: borrar un archivo vivo dejaría una
+  // ficha o un expediente apuntando a la nada.
+  if (fotoAnterior && fotoAnterior !== fotoUrl) {
+    const [otrosClientes, documentos] = await Promise.all([
+      prisma.cliente.count({ where: { fotoUrl: fotoAnterior, NOT: { id } } }),
+      prisma.documento.count({ where: { archivoUrl: fotoAnterior } }),
+    ]);
+    if (otrosClientes + documentos === 0) await borrarArchivo(fotoAnterior);
+  }
 
   await prisma.auditoria.create({
     data: { entidad: 'Cliente', entidadId: id, accion: 'datos_editados', usuarioId: sesion.id },

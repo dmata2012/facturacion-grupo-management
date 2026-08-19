@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import sharp from 'sharp';
 
 /**
  * Almacenamiento de archivos para el MVP: disco local, en una carpeta FUERA
@@ -51,4 +52,62 @@ export async function guardarArchivo(archivo: File): Promise<ArchivoGuardado | n
   );
 
   return { nombreAlmacenado, nombreOriginal: archivo.name };
+}
+
+// ── Fotografías de clientes ───────────────────────────────────────
+
+const TIPOS_IMAGEN = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+  'image/avif',
+]);
+
+/** Lado máximo de la fotografía guardada. De sobra para una ficha. */
+const LADO_FOTO = 800;
+
+/**
+ * Guarda la fotografía de un cliente reducida y comprimida: una foto de
+ * celular de 4 MB queda en unos 80 KB, sin que nadie tenga que encogerla a
+ * mano antes de subirla.
+ *
+ * Esto vale SOLO para la foto del cliente. Los documentos del expediente
+ * (pasaportes, actas, resoluciones) se guardan intactos con guardarArchivo:
+ * son evidencia y deben conservarse tal como se recibieron.
+ */
+export async function guardarFotografia(archivo: File): Promise<ArchivoGuardado | null> {
+  if (!archivo || archivo.size === 0) return null;
+  if (archivo.size > TAMANO_MAXIMO) throw new Error('La imagen excede 10 MB.');
+  if (!TIPOS_IMAGEN.has(archivo.type)) {
+    throw new Error('La fotografía debe ser una imagen: JPG, PNG, WEBP o HEIC.');
+  }
+
+  await mkdir(CARPETA_ARCHIVOS, { recursive: true });
+  const nombreAlmacenado = `${randomUUID()}.jpg`;
+
+  const optimizada = await sharp(Buffer.from(await archivo.arrayBuffer()))
+    // Las fotos de celular traen la orientación en los metadatos; sin esto se
+    // verían acostadas.
+    .rotate()
+    .resize({ width: LADO_FOTO, height: LADO_FOTO, fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 82, mozjpeg: true })
+    .toBuffer();
+
+  await writeFile(path.join(CARPETA_ARCHIVOS, nombreAlmacenado), optimizada);
+  return { nombreAlmacenado, nombreOriginal: archivo.name };
+}
+
+/**
+ * Borra un archivo del almacenamiento. Quien llama debe haber comprobado antes
+ * que ningún registro lo siga usando.
+ */
+export async function borrarArchivo(url: string | null | undefined): Promise<void> {
+  if (!url) return;
+  // basename corta cualquier intento de salir de la carpeta con "../".
+  const nombre = path.basename(url);
+  if (!nombre || nombre === '.' || nombre === '..') return;
+  // Si el archivo ya no está, no hay nada que reportar.
+  await unlink(path.join(CARPETA_ARCHIVOS, nombre)).catch(() => {});
 }

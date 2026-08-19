@@ -35,9 +35,11 @@ export default async function NuevoCliente({
 
         {error && (
           <p className="mb-4 rounded-lg border-l-4 border-red-500 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error === 'vendedor'
-              ? 'Selecciona el vendedor asignado.'
-              : 'Faltan datos obligatorios: nombre, nacionalidad, estado y ciudad.'}
+            {error === 'vendedor' && 'Selecciona el vendedor asignado.'}
+            {error === 'foto' &&
+              'No se pudo guardar la fotografía. Debe ser una imagen (JPG, PNG o HEIC) de menos de 10 MB.'}
+            {error === 'faltan' &&
+              'Faltan datos obligatorios: nombre, nacionalidad, estado y ciudad.'}
           </p>
         )}
 
@@ -133,11 +135,11 @@ export default async function NuevoCliente({
               </select>
             </Campo>
 
-            <Campo etiqueta="Fotografía del cliente" ayuda="Opcional. JPG, PNG o PDF, hasta 10 MB.">
+            <Campo etiqueta="Fotografía del cliente" ayuda="Opcional. JPG, PNG o HEIC. El sistema la reduce y comprime al guardarla.">
               <input
                 name="foto"
                 type="file"
-                accept="image/*,application/pdf"
+                accept="image/*"
                 className="w-full text-sm text-suave file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-semibold"
               />
             </Campo>

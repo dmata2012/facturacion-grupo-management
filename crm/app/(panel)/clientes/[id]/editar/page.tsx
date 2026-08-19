@@ -134,11 +134,11 @@ export default async function EditarCliente({
               )}
 
               <div className="min-w-56 flex-1 space-y-3">
-                <Campo etiqueta="Reemplazar fotografía" ayuda="JPG, PNG o PDF, hasta 10 MB.">
+                <Campo etiqueta="Reemplazar fotografía" ayuda="JPG, PNG o HEIC. Se reduce y comprime al guardarla.">
                   <input
                     name="foto"
                     type="file"
-                    accept="image/*,application/pdf"
+                    accept="image/*"
                     className="w-full text-sm text-suave file:mr-3 file:rounded-sm file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-semibold"
                   />
                 </Campo>
