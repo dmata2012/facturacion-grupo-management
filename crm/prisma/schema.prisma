@@ -1,0 +1,504 @@
+// ══════════════════════════════════════════════════════════════════
+// CRM Migratorio — modelo de datos
+//
+// Cuatro reglas de negocio marcan este esquema y explican por qué está
+// hecho así (ver README):
+//   1. El contacto inicial pasa por una entrevista de valoración antes
+//      de ser prospecto calificado.
+//   2. Las comisiones son multi-participante, cada quien con su % directo
+//      sobre el total de la venta y su propio estatus de pago.
+//   3. La ubicación del cliente y la dependencia del trámite son campos
+//      independientes: nunca se autocompletan entre sí.
+//   4. El estatus de una cuota se calcula contra la fecha de hoy, por eso
+//      NO se guarda en la base (ver nota en el modelo Cuota).
+// ══════════════════════════════════════════════════════════════════
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Prisma 7: la cadena de conexión ya no vive aquí, está en prisma.config.ts
+// (para migraciones) y en el adaptador de lib/prisma.ts (para la app).
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Enumeraciones ─────────────────────────────────────────────────
+
+enum Rol {
+  VENDEDOR
+  ABOGADO
+  DIRECTOR
+  ASISTENTE
+  CONTADOR
+}
+
+/// El orden es intencional y forma el pipeline comercial. No reordenar.
+enum EtapaComercial {
+  CONTACTO_INICIAL
+  ENTREVISTA_VALORACION
+  PROSPECTO_CALIFICADO
+  CONTACTADO
+  CONSULTA_AGENDADA
+  PROPUESTA_ENVIADA
+  NEGOCIACION
+  CERRADO_GANADO
+  CERRADO_PERDIDO
+}
+
+enum ResultadoEntrevista {
+  VIABLE
+  NO_VIABLE
+  REQUIERE_INFO
+}
+
+enum MedioContacto {
+  LLAMADA
+  WHATSAPP
+  CORREO
+  PRESENCIAL
+}
+
+enum Modalidad {
+  PRESENCIAL
+  EN_LINEA
+}
+
+enum EstatusDocumento {
+  PENDIENTE
+  ENTREGADO
+}
+
+enum EstatusComision {
+  PENDIENTE
+  PAGADA
+}
+
+enum TipoCita {
+  CONSULTA_NUEVA
+  ACTUALIZACION_CASO
+  SEGUIMIENTO_SALIENTE
+}
+
+enum EstatusSeguimiento {
+  PENDIENTE
+  COMPLETADO
+}
+
+enum CanalAlerta {
+  WHATSAPP
+  CORREO
+  AMBOS
+}
+
+enum TipoAlerta {
+  CUOTA_POR_VENCER
+  CUOTA_VENCIDA
+  DOCUMENTO_POR_CADUCAR
+  RESOLUCION_PROXIMA
+  PROXIMO_SEGUIMIENTO
+}
+
+// ── Usuarios y permisos ───────────────────────────────────────────
+
+model Usuario {
+  id           String   @id @default(cuid())
+  nombre       String
+  correo       String   @unique
+  passwordHash String
+  rol          Rol
+  activo       Boolean  @default(true)
+  creadoEn     DateTime @default(now())
+
+  leadsAsignados      Lead[]
+  ventasComoVendedor  Venta[]              @relation("VentaVendedor")
+  casosComoAbogado    Caso[]               @relation("CasoAbogado")
+  comisiones          Comision[]
+  documentosSubidos   Documento[]
+  interacciones       Interaccion[]
+  seguimientos        ProximoSeguimiento[]
+  citas               Cita[]
+  cambiosDeEtapa      HistorialEtapa[]
+  movimientos         Auditoria[]
+}
+
+// ── Catálogos configurables (sección 13: sin tocar código) ────────
+
+model OrigenProspecto {
+  id       String    @id @default(cuid())
+  nombre   String    @unique
+  activo   Boolean   @default(true)
+  clientes Cliente[]
+}
+
+model MotivoPerdida {
+  id     String  @id @default(cuid())
+  nombre String  @unique
+  activo Boolean @default(true)
+  ventas Venta[]
+}
+
+/// Plantilla de trámite: define las etapas del caso y los documentos que
+/// se exigen. Al crear un caso se copia de aquí (sección 6).
+model TipoTramite {
+  id         String              @id @default(cuid())
+  nombre     String              @unique
+  activo     Boolean             @default(true)
+  etapas     EtapaPlantilla[]
+  documentos DocumentoPlantilla[]
+  leads      Lead[]
+  ventas     Venta[]
+  casos      Caso[]
+}
+
+model EtapaPlantilla {
+  id            String      @id @default(cuid())
+  tipoTramite   TipoTramite @relation(fields: [tipoTramiteId], references: [id], onDelete: Cascade)
+  tipoTramiteId String
+  nombre        String
+  orden         Int
+  /// Marca la etapa que cuenta como "presentado ante autoridad": de ahí sale
+  /// la fecha de presentación del caso, que no se captura a mano.
+  esPresentacion Boolean    @default(false)
+
+  casosEnEstaEtapa Caso[]
+
+  @@unique([tipoTramiteId, orden])
+}
+
+model DocumentoPlantilla {
+  id            String      @id @default(cuid())
+  tipoTramite   TipoTramite @relation(fields: [tipoTramiteId], references: [id], onDelete: Cascade)
+  tipoTramiteId String
+  nombre        String
+  orden         Int
+  /// Documentos que caducan (pasaporte, visa): piden fecha de vigencia y
+  /// alimentan las alertas de caducidad.
+  requiereVigencia Boolean  @default(false)
+
+  documentos Documento[]
+
+  @@unique([tipoTramiteId, nombre])
+}
+
+// ── Cliente y prospección ─────────────────────────────────────────
+
+model Cliente {
+  id           String   @id @default(cuid())
+  nombre       String
+  fotoUrl      String?
+  nacionalidad String
+  /// Dónde vive el cliente. Independiente de la dependencia donde se
+  /// presenta el trámite (Caso.dependencia): nunca se autocompletan.
+  estado       String
+  ciudad       String
+  correo       String?
+  telefono     String?
+
+  origenProspecto   OrigenProspecto? @relation(fields: [origenProspectoId], references: [id])
+  origenProspectoId String?
+
+  /// Texto fijo siempre visible en la ficha, distinto del historial de
+  /// notas (ej. "prefiere que le llamen por las tardes").
+  observacionesGenerales String?
+
+  archivado Boolean  @default(false)
+  creadoEn  DateTime @default(now())
+
+  leads         Lead[]
+  ventas        Venta[]
+  interacciones Interaccion[]
+  seguimientos  ProximoSeguimiento[]
+  citas         Cita[]
+
+  @@index([nombre])
+}
+
+/// Contacto inicial. Todavía NO es prospecto: lo será cuando la entrevista
+/// de valoración resulte viable (sección 5).
+model Lead {
+  id                  String               @id @default(cuid())
+  cliente             Cliente              @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  clienteId           String
+  vendedor            Usuario              @relation(fields: [vendedorId], references: [id])
+  vendedorId          String
+  medioContacto       MedioContacto
+  fechaPrimerContacto DateTime
+  tipoTramite         TipoTramite          @relation(fields: [tipoTramiteId], references: [id])
+  tipoTramiteId       String
+
+  resultadoEntrevista ResultadoEntrevista?
+  notasEntrevista     String?
+  fechaEntrevista     DateTime?
+
+  venta Venta?
+
+  creadoEn DateTime @default(now())
+}
+
+// ── Venta ─────────────────────────────────────────────────────────
+
+model Venta {
+  id            String         @id @default(cuid())
+  cliente       Cliente        @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  clienteId     String
+  lead          Lead?          @relation(fields: [leadId], references: [id])
+  leadId        String?        @unique
+  tipoTramite   TipoTramite    @relation(fields: [tipoTramiteId], references: [id])
+  tipoTramiteId String
+  vendedor      Usuario        @relation("VentaVendedor", fields: [vendedorId], references: [id])
+  vendedorId    String
+
+  /// Estimado mientras la venta está abierta; el cerrado al ganarla.
+  montoTotal Decimal @db.Decimal(12, 2)
+
+  etapa       EtapaComercial @default(PROSPECTO_CALIFICADO)
+  fechaCierre DateTime?
+
+  motivoPerdida   MotivoPerdida? @relation(fields: [motivoPerdidaId], references: [id])
+  motivoPerdidaId String?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  caso       Caso?
+  cuotas     Cuota[]
+  comisiones Comision[]
+  historial  HistorialEtapa[]
+
+  @@index([etapa])
+  @@index([vendedorId])
+}
+
+// ── Caso legal ────────────────────────────────────────────────────
+
+/// Solo nace de una venta en CERRADO_GANADO. Avanza por su cuenta,
+/// independiente del pipeline comercial (sección 6).
+model Caso {
+  id            String      @id @default(cuid())
+  venta         Venta       @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  ventaId       String      @unique
+  tipoTramite   TipoTramite @relation(fields: [tipoTramiteId], references: [id])
+  tipoTramiteId String
+
+  etapaActual   EtapaPlantilla? @relation(fields: [etapaActualId], references: [id])
+  etapaActualId String?
+
+  abogado   Usuario? @relation("CasoAbogado", fields: [abogadoId], references: [id])
+  abogadoId String?
+
+  /// Oficina o delegación donde se presentó el trámite. Independiente del
+  /// estado/ciudad del cliente: el sistema no debe relacionarlos.
+  dependencia String?
+  modalidad   Modalidad?
+  oficina     String?
+
+  /// Se deriva del historial (entrada a la etapa marcada esPresentacion),
+  /// no se captura a mano.
+  fechaPresentacion DateTime?
+
+  /// Editable por el abogado. La usa el motor de alertas.
+  fechaTentativaResolucion DateTime?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  documentos Documento[]
+  historial  HistorialEtapa[]
+
+  @@index([etapaActualId])
+  @@index([abogadoId])
+}
+
+/// Bitácora automática de cambios de etapa, tanto de venta como de caso.
+/// Guarda los nombres en texto para que sobreviva a cambios de plantilla.
+model HistorialEtapa {
+  id            String   @id @default(cuid())
+  venta         Venta?   @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  ventaId       String?
+  caso          Caso?    @relation(fields: [casoId], references: [id], onDelete: Cascade)
+  casoId        String?
+  etapaAnterior String?
+  etapaNueva    String
+  fecha         DateTime @default(now())
+  usuario       Usuario? @relation(fields: [usuarioId], references: [id])
+  usuarioId     String?
+
+  @@index([ventaId])
+  @@index([casoId])
+}
+
+// ── Documentos del expediente ─────────────────────────────────────
+
+model Documento {
+  id        String @id @default(cuid())
+  caso      Caso   @relation(fields: [casoId], references: [id], onDelete: Cascade)
+  casoId    String
+
+  plantilla   DocumentoPlantilla? @relation(fields: [plantillaId], references: [id])
+  plantillaId String?
+  nombre      String
+
+  archivoUrl  String?
+  archivoNombre String?
+  subidoPor   Usuario?  @relation(fields: [subidoPorId], references: [id])
+  subidoPorId String?
+  fechaSubida DateTime?
+
+  estatus       EstatusDocumento @default(PENDIENTE)
+  /// Para pasaportes, visas y permisos: alimenta la alerta de caducidad.
+  fechaVigencia DateTime?
+
+  @@index([casoId])
+}
+
+// ── Plan de pagos ─────────────────────────────────────────────────
+
+/// El estatus (al corriente / por vencer / vencido / pagado) NO se guarda:
+/// depende de la fecha de hoy, así que un valor almacenado quedaría
+/// desactualizado sin que nadie lo tocara. Se calcula al leer, en
+/// lib/cuotas.ts, a partir de fechaPactada y pagadoEn.
+model Cuota {
+  id          String    @id @default(cuid())
+  venta       Venta     @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  ventaId     String
+  numero      Int
+  esInicial   Boolean   @default(false)
+  fechaPactada DateTime
+  monto       Decimal   @db.Decimal(12, 2)
+  pagadoEn    DateTime?
+  metodoPago  String?
+
+  @@unique([ventaId, numero])
+  @@index([fechaPactada])
+}
+
+// ── Comisiones ────────────────────────────────────────────────────
+
+/// Cada participante cobra su porcentaje DIRECTO sobre el monto total de la
+/// venta. No es una bolsa que se reparte: los porcentajes pueden sumar lo
+/// que sea. Cada quien tiene su propio estatus de pago.
+model Comision {
+  id            String  @id @default(cuid())
+  venta         Venta   @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  ventaId       String
+  participante  Usuario @relation(fields: [participanteId], references: [id])
+  participanteId String
+  rol           Rol
+
+  porcentaje     Decimal @db.Decimal(5, 2)
+  /// Se congela al calcularse: si mañana cambia la plantilla, este monto no
+  /// se mueve (versionado pedido en la sección 7.5).
+  montoCalculado Decimal @db.Decimal(12, 2)
+
+  estatus   EstatusComision @default(PENDIENTE)
+  fechaPago DateTime?
+
+  plantillaOrigen   PlantillaComision? @relation(fields: [plantillaOrigenId], references: [id])
+  plantillaOrigenId String?
+  versionPlantilla  Int?
+
+  @@unique([ventaId, participanteId, rol])
+  @@index([estatus])
+}
+
+model PlantillaComision {
+  id            String                  @id @default(cuid())
+  nombre        String                  @unique
+  version       Int                     @default(1)
+  esPredeterminada Boolean              @default(false)
+  activa        Boolean                 @default(true)
+  items         PlantillaComisionItem[]
+  comisiones    Comision[]
+}
+
+model PlantillaComisionItem {
+  id          String            @id @default(cuid())
+  plantilla   PlantillaComision @relation(fields: [plantillaId], references: [id], onDelete: Cascade)
+  plantillaId String
+  rol         Rol
+  porcentaje  Decimal           @db.Decimal(5, 2)
+
+  @@unique([plantillaId, rol])
+}
+
+// ── Interacciones, seguimientos y agenda ──────────────────────────
+
+model Interaccion {
+  id        String        @id @default(cuid())
+  cliente   Cliente       @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  clienteId String
+  fecha     DateTime      @default(now())
+  medio     MedioContacto
+  resultado String
+  usuario   Usuario?      @relation(fields: [usuarioId], references: [id])
+  usuarioId String?
+
+  @@index([clienteId, fecha])
+}
+
+/// "Llámenme en 15 días". Se captura desde el mismo formulario de la
+/// interacción y alimenta la agenda y el motor de alertas.
+model ProximoSeguimiento {
+  id            String             @id @default(cuid())
+  cliente       Cliente            @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  clienteId     String
+  fecha         DateTime
+  motivo        String
+  responsable   Usuario            @relation(fields: [responsableId], references: [id])
+  responsableId String
+  estatus       EstatusSeguimiento @default(PENDIENTE)
+
+  cita Cita?
+
+  @@index([fecha, estatus])
+}
+
+/// La agenda no se captura dos veces: se alimenta de las consultas
+/// agendadas del pipeline y de los próximos seguimientos (sección 9).
+model Cita {
+  id            String     @id @default(cuid())
+  cliente       Cliente?   @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  clienteId     String?
+  titulo        String
+  inicio        DateTime
+  fin           DateTime?
+  tipo          TipoCita
+  modalidad     Modalidad  @default(PRESENCIAL)
+  responsable   Usuario?   @relation(fields: [responsableId], references: [id])
+  responsableId String?
+
+  seguimiento   ProximoSeguimiento? @relation(fields: [seguimientoId], references: [id], onDelete: Cascade)
+  seguimientoId String?             @unique
+
+  @@index([inicio])
+}
+
+// ── Motor de alertas (configuración) ──────────────────────────────
+
+model ConfigAlerta {
+  id               String      @id @default(cuid())
+  tipo             TipoAlerta  @unique
+  activa           Boolean     @default(true)
+  diasAnticipacion Int         @default(5)
+  canal            CanalAlerta @default(AMBOS)
+  /// A quién se avisa: roles del despacho y, opcionalmente, el cliente.
+  destinatarios    Rol[]
+  notificarCliente Boolean     @default(false)
+}
+
+// ── Auditoría (sección 13) ────────────────────────────────────────
+
+model Auditoria {
+  id         String   @id @default(cuid())
+  entidad    String
+  entidadId  String
+  accion     String
+  detalle    Json?
+  usuario    Usuario? @relation(fields: [usuarioId], references: [id])
+  usuarioId  String?
+  fecha      DateTime @default(now())
+
+  @@index([entidad, entidadId])
+  @@index([fecha])
+}

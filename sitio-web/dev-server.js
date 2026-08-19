@@ -1,12 +1,12 @@
 /**
  * Servidor de desarrollo del sitio público — sin dependencias.
  *
- * Sirve todo lo que está en "CRM Despacho/public" y recarga el navegador solo cuando
+ * Sirve todo lo que está en "sitio-web/public" y recarga el navegador solo cuando
  * un archivo cambia. No hay build ni node_modules: lo que se ve aquí es
  * exactamente lo que se publica.
  *
- *   node "CRM Despacho/dev-server.js"          → http://localhost:5173
- *   PORT=8080 node "CRM Despacho/dev-server.js"
+ *   node "sitio-web/dev-server.js"          → http://localhost:5173
+ *   PORT=8080 node "sitio-web/dev-server.js"
  */
 const http = require('http');
 const fs   = require('fs');
@@ -137,7 +137,7 @@ const servidor = http.createServer((req, res) => {
 servidor.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
     console.error(`\n✖ El puerto ${PUERTO} ya está ocupado.`);
-    console.error(`  Prueba: PORT=${PUERTO + 1} node "CRM Despacho/dev-server.js"\n`);
+    console.error(`  Prueba: PORT=${PUERTO + 1} node "sitio-web/dev-server.js"\n`);
     process.exit(1);
   }
   throw e;

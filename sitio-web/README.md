@@ -1,4 +1,4 @@
-# CRM Despacho — sitio web
+# Sitio web — Grupo Management
 
 Sitio web nuevo, **independiente**. No comparte código, servidor ni base de
 datos con el sistema de facturación de este repositorio: puedes copiar esta
@@ -15,11 +15,11 @@ Para comprobar que lo tienes, abre una terminal y escribe `node --version`.
 
 ## 1. Trabajar en tu computadora
 
-Copia esta carpeta a donde quieras (por ejemplo `C:\Proyectos\CRM Despacho` en
-Windows, o `~/Proyectos/CRM Despacho` en Mac). Después, desde la terminal:
+Copia esta carpeta a donde quieras (por ejemplo `C:\Proyectos\sitio-web` en
+Windows, o `~/Proyectos/sitio-web` en Mac). Después, desde la terminal:
 
 ```bash
-cd "CRM Despacho"
+cd sitio-web
 node dev-server.js
 ```
 
@@ -41,7 +41,7 @@ PORT=5174 node dev-server.js
 ## 2. Qué hay en cada archivo
 
 ```
-CRM Despacho/
+sitio-web/
 ├── dev-server.js        servidor para trabajar en local (no se publica)
 ├── package.json
 ├── README.md            este archivo
