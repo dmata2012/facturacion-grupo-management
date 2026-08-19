@@ -51,8 +51,8 @@ export default async function Inicio() {
   return (
     <div className="relative -mx-4 -my-6 flex min-h-[calc(100vh-3rem)] flex-col overflow-hidden lg:-mx-8 lg:-my-8 lg:min-h-screen">
       <div className="malla pointer-events-none absolute inset-0" />
-      <div className="pointer-events-none absolute -left-40 -top-40 h-[28rem] w-[28rem] rounded-full bg-marca-clara/10 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-48 -right-32 h-[30rem] w-[30rem] rounded-full bg-marca/10 blur-3xl" />
+      <div className="flota pointer-events-none absolute -left-40 -top-40 h-[28rem] w-[28rem] rounded-full bg-marca-clara/10 blur-3xl" />
+      <div className="flota-lento pointer-events-none absolute -bottom-48 -right-32 h-[30rem] w-[30rem] rounded-full bg-marca/10 blur-3xl" />
 
       <div className="relative mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center px-4 py-14 lg:px-8">
         {/* La portada del sistema. */}
@@ -62,20 +62,31 @@ export default async function Inicio() {
           </p>
 
           <div className="relative">
-            <div className="halo-portada pointer-events-none absolute inset-x-0 -inset-y-10" />
+            <div className="halo-portada flota pointer-events-none absolute inset-x-0 -inset-y-10" />
+            {/* Las letras entran una por una. El lector de pantalla lee la
+                palabra completa, no letra por letra. */}
             <h1
-              className="aparece letras-portada relative mt-3 text-[clamp(76px,19vw,190px)] font-extrabold leading-[0.85] tracking-[-0.06em]"
-              style={{ animationDelay: '80ms' }}
+              aria-label="CRM"
+              className="relative mt-3 text-[clamp(76px,19vw,190px)] font-extrabold leading-[0.85] tracking-[-0.06em]"
             >
-              CRM
+              {['C', 'R', 'M'].map((letra, i) => (
+                <span
+                  key={letra}
+                  aria-hidden="true"
+                  className="letra-portada"
+                  style={{ animationDelay: `${120 + i * 130}ms, 0ms` }}
+                >
+                  {letra}
+                </span>
+              ))}
             </h1>
           </div>
 
-          <p className="aparece mt-4 text-lg font-medium text-suave sm:text-xl" style={{ animationDelay: '160ms' }}>
+          <p className="aparece mt-4 text-lg font-medium text-suave sm:text-xl" style={{ animationDelay: '640ms' }}>
             Sistema de gestión — <span className="font-bold text-tinta">Despacho migratorio</span>
           </p>
 
-          <div className="aparece mt-8 flex flex-wrap justify-center gap-3" style={{ animationDelay: '240ms' }}>
+          <div className="aparece mt-8 flex flex-wrap justify-center gap-3" style={{ animationDelay: '760ms' }}>
             <Cifra valor={prospectos} uno="prospecto abierto" varios="prospectos abiertos" />
             <Cifra valor={casosActivos} uno="caso en trámite" varios="casos en trámite" />
             <Cifra
@@ -94,7 +105,7 @@ export default async function Inicio() {
               key={m.href}
               href={m.href}
               className="aparece group rounded-2xl border border-borde bg-white/70 p-5 text-left shadow-suave backdrop-blur transition duration-200 hover:-translate-y-1 hover:border-marca hover:bg-white hover:shadow-media"
-              style={{ animationDelay: `${320 + i * 60}ms` }}
+              style={{ animationDelay: `${880 + i * 70}ms` }}
             >
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-base font-bold text-tinta">{m.nombre}</h2>
