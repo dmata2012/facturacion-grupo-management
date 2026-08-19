@@ -24,16 +24,20 @@ export default async function Cobros({
   const { filtro = 'TODAS' } = await searchParams;
   const sesion = await exigir('cobros');
 
-  const [cuotas, comisiones] = await Promise.all([
+  const [cuotas, comisiones, metodosPago] = await Promise.all([
     prisma.cuota.findMany({
       where: { venta: filtroVentas(sesion) },
-      include: { venta: { include: { cliente: true } } },
+      include: { venta: { include: { cliente: true } }, metodoPago: true },
       orderBy: { fechaPactada: 'asc' },
     }),
     prisma.comision.findMany({
       where: filtroComisiones(sesion),
       include: { participante: true, venta: { include: { cliente: true } } },
       orderBy: { estatus: 'asc' },
+    }),
+    prisma.metodoPago.findMany({
+      where: { activo: true },
+      orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
     }),
   ]);
 
@@ -88,6 +92,7 @@ export default async function Cobros({
                 <th className="px-4 py-3">Fecha pactada</th>
                 <th className="px-4 py-3">Monto</th>
                 <th className="px-4 py-3">Estatus</th>
+                <th className="px-4 py-3">Medio</th>
                 <th className="px-4 py-3">Pago</th>
               </tr>
             </thead>
@@ -109,19 +114,31 @@ export default async function Cobros({
                     <td className="px-4 py-3">
                       <Insignia tono={TONO[estatus]}>{ETIQUETA_CUOTA[estatus]}</Insignia>
                     </td>
+                    <td className="px-4 py-3 text-xs text-suave">{c.metodoPago?.nombre ?? '—'}</td>
                     <td className="px-4 py-3">
                       {c.pagadoEn ? (
                         <span className="text-xs text-suave">{fecha(c.pagadoEn)}</span>
                       ) : puede(sesion.rol, 'cobros', 'editar') ? (
-                        <form action={registrarPago} className="flex items-center gap-2">
+                        <form action={registrarPago} className="flex flex-wrap items-center gap-2">
                           <input type="hidden" name="cuotaId" value={c.id} />
                           <input
                             type="date"
                             name="fechaPago"
                             defaultValue={paraInput(new Date())}
                             aria-label="Fecha de pago"
-                            className="rounded border border-borde px-2 py-1 text-xs"
+                            className="rounded-sm border border-borde px-2 py-1 text-xs"
                           />
+                          <select
+                            name="metodoPagoId"
+                            aria-label="Medio de pago"
+                            defaultValue=""
+                            className="rounded-sm border border-borde px-2 py-1 text-xs"
+                          >
+                            <option value="">Medio de pago…</option>
+                            {metodosPago.map((m) => (
+                              <option key={m.id} value={m.id}>{m.nombre}</option>
+                            ))}
+                          </select>
                           <Boton type="submit" estilo="suave" className="px-3 py-1 text-xs">
                             Registrar pago
                           </Boton>

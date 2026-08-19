@@ -67,7 +67,7 @@ export default async function FichaCliente({
             include: { conceptos: true, pagos: true },
             orderBy: { creadoEn: 'desc' },
           },
-          cuotas: { orderBy: { numero: 'asc' } },
+          cuotas: { include: { metodoPago: true }, orderBy: { numero: 'asc' } },
           comisiones: { include: { participante: true }, orderBy: { rol: 'asc' } },
           caso: {
             include: {
@@ -86,6 +86,11 @@ export default async function FichaCliente({
     },
   });
   if (!cliente) notFound();
+
+  const metodosPago = await prisma.metodoPago.findMany({
+    where: { activo: true },
+    orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
+  });
 
   const ventaActiva = cliente.ventas[0] ?? null;
   const caso = ventaActiva?.caso ?? null;
@@ -426,7 +431,8 @@ export default async function FichaCliente({
                           <td className="px-4 py-3">
                             {c.pagadoEn ? (
                               <span className="text-xs text-suave">
-                                {fecha(c.pagadoEn)} {c.metodoPago && `· ${c.metodoPago}`}
+                                {fecha(c.pagadoEn)}
+                                {c.metodoPago && ` · ${c.metodoPago.nombre}`}
                               </span>
                             ) : puede(sesion.rol, 'cobros', 'editar') ? (
                               <form action={registrarPago} className="flex items-center gap-2">
@@ -438,12 +444,17 @@ export default async function FichaCliente({
                                   aria-label="Fecha de pago"
                                   className="rounded border border-borde px-2 py-1 text-xs"
                                 />
-                                <input
-                                  name="metodoPago"
-                                  placeholder="Método"
-                                  aria-label="Método de pago"
-                                  className="w-24 rounded border border-borde px-2 py-1 text-xs"
-                                />
+                                <select
+                                  name="metodoPagoId"
+                                  aria-label="Medio de pago"
+                                  defaultValue=""
+                                  className="rounded-sm border border-borde px-2 py-1 text-xs"
+                                >
+                                  <option value="">Medio de pago…</option>
+                                  {metodosPago.map((m) => (
+                                    <option key={m.id} value={m.id}>{m.nombre}</option>
+                                  ))}
+                                </select>
                                 <Boton type="submit" estilo="suave" className="px-3 py-1 text-xs">
                                   Registrar
                                 </Boton>

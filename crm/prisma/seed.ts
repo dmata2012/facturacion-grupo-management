@@ -110,6 +110,18 @@ async function main() {
     }
   }
 
+  const MEDIOS_PAGO = [
+    'Transferencia', 'Depósito bancario', 'Efectivo',
+    'Tarjeta de crédito o débito', 'Cheque', 'Otro',
+  ];
+  for (const [i, nombre] of MEDIOS_PAGO.entries()) {
+    await prisma.metodoPago.upsert({
+      where: { nombre },
+      update: {},
+      create: { nombre, orden: i + 1 },
+    });
+  }
+
   console.log('Sembrando plantilla de comisiones…');
   const plantilla = await prisma.plantillaComision.upsert({
     where: { nombre: 'Estándar' },

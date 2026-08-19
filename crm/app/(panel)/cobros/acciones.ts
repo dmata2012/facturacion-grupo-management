@@ -15,9 +15,9 @@ export async function registrarPago(datos: FormData) {
     where: { id: cuotaId },
     data: {
       pagadoEn: fecha ? new Date(fecha) : new Date(),
-      metodoPago: String(datos.get('metodoPago') ?? '').trim() || null,
+      metodoPagoId: String(datos.get('metodoPagoId') ?? '') || null,
     },
-    include: { venta: true },
+    include: { venta: true, metodoPago: true },
   });
 
   await prisma.auditoria.create({
@@ -26,7 +26,7 @@ export async function registrarPago(datos: FormData) {
       entidadId: cuotaId,
       accion: 'pago_registrado',
       usuarioId: sesion.id,
-      detalle: { monto: cuota.monto.toString() },
+      detalle: { monto: cuota.monto.toString(), metodo: cuota.metodoPago?.nombre ?? null },
     },
   });
 
@@ -40,7 +40,7 @@ export async function cancelarPago(datos: FormData) {
 
   const cuota = await prisma.cuota.update({
     where: { id: cuotaId },
-    data: { pagadoEn: null, metodoPago: null },
+    data: { pagadoEn: null, metodoPagoId: null },
     include: { venta: true },
   });
   await prisma.auditoria.create({

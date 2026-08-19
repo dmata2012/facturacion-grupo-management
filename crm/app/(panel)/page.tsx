@@ -53,7 +53,10 @@ export default async function Reportes({
       include: { vendedor: true },
     }),
     prisma.caso.findMany({ where: filtroCasos(sesion), include: { etapaActual: true } }),
-    prisma.cuota.findMany({ where: { venta: filtroVentas(sesion) } }),
+    prisma.cuota.findMany({
+      where: { venta: filtroVentas(sesion) },
+      include: { metodoPago: true },
+    }),
     prisma.comision.findMany({ where: filtroComisiones(sesion) }),
     prisma.cliente.groupBy({ by: ['nacionalidad'], _count: true, orderBy: { _count: { nacionalidad: 'desc' } }, take: 8 }),
     prisma.venta.groupBy({ by: ['etapa'], _count: true, where: filtroVentas(sesion) }),
@@ -73,6 +76,20 @@ export default async function Reportes({
     .reduce((t, c) => t + Number(c.montoCalculado), 0);
 
   const casosActivos = casos.filter((c) => c.etapaActual?.nombre !== 'Cerrado').length;
+
+  // Cómo llegó el dinero cobrado en el periodo. Solo cuenta lo efectivamente
+  // pagado: un plan de pagos todavía no dice nada sobre la forma de cobro.
+  const porMedioDePago = new Map<string, { monto: number; pagos: number }>();
+  for (const cuota of cuotas) {
+    if (!cuota.pagadoEn || cuota.pagadoEn < inicio) continue;
+    const nombre = cuota.metodoPago?.nombre ?? 'Sin especificar';
+    const actual = porMedioDePago.get(nombre) ?? { monto: 0, pagos: 0 };
+    porMedioDePago.set(nombre, {
+      monto: actual.monto + Number(cuota.monto),
+      pagos: actual.pagos + 1,
+    });
+  }
+  const mediosOrdenados = [...porMedioDePago.entries()].sort((a, b) => b[1].monto - a[1].monto);
 
   const porEtapa = new Map<string, number>();
   for (const c of casos) {
@@ -142,6 +159,34 @@ export default async function Reportes({
           <Barras
             datos={embudo.map((e) => ({ nombre: nombreEtapa(e.etapa), valor: e._count }))}
           />
+        </Panel>
+
+        <Panel titulo="Cobros por medio de pago (periodo)">
+          {!mediosOrdenados.length ? (
+            <Vacio>Sin cobros registrados en el periodo.</Vacio>
+          ) : (
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-borde">
+                {mediosOrdenados.map(([nombre, d]) => (
+                  <tr key={nombre}>
+                    <td className="py-2 font-semibold">{nombre}</td>
+                    <td className="py-2 text-right text-suave">
+                      {d.pagos} {d.pagos === 1 ? 'pago' : 'pagos'}
+                    </td>
+                    <td className="py-2 text-right font-semibold">{pesos(d.monto)}</td>
+                    <td className="w-24 py-2 pl-3">
+                      <div className="h-2 overflow-hidden rounded-full bg-borde">
+                        <div
+                          className="h-full rounded-full grad-marca"
+                          style={{ width: `${(d.monto / cobradoPeriodo) * 100}%` }}
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </Panel>
 
         <Panel titulo="Clientes por nacionalidad">

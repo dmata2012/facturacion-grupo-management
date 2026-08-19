@@ -314,6 +314,30 @@ export async function alternarMotivo(datos: FormData) {
   volver('/configuracion/catalogos');
 }
 
+export async function crearMetodoPago(datos: FormData) {
+  const sesion = await exigir('configuracion', 'crear');
+  const nombre = texto(datos, 'nombre');
+  if (!nombre) volver('/configuracion/catalogos', 'nombre');
+  try {
+    const m = await prisma.metodoPago.create({ data: { nombre, orden: 50 } });
+    await registrar('MetodoPago', m.id, 'creado', sesion.id);
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      volver('/configuracion/catalogos', 'duplicado');
+    }
+    throw e;
+  }
+  volver('/configuracion/catalogos');
+}
+
+export async function alternarMetodoPago(datos: FormData) {
+  await exigir('configuracion', 'editar');
+  const id = texto(datos, 'id');
+  const m = await prisma.metodoPago.findUniqueOrThrow({ where: { id } });
+  await prisma.metodoPago.update({ where: { id }, data: { activo: !m.activo } });
+  volver('/configuracion/catalogos');
+}
+
 // ══ Plantillas de comisión ═════════════════════════════════════
 
 const ROLES_COMISION: Rol[] = ['VENDEDOR', 'ABOGADO', 'DIRECTOR', 'ASISTENTE', 'CONTADOR'];

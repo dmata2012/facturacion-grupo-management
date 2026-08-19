@@ -8,10 +8,11 @@ export const metadata = { title: 'Configuración — CRM' };
 export default async function Configuracion() {
   await exigir('configuracion');
 
-  const [tramites, origenes, motivos, plantillas, alertas, usuarios] = await Promise.all([
+  const [tramites, origenes, motivos, metodos, plantillas, alertas, usuarios] = await Promise.all([
     prisma.tipoTramite.count(),
     prisma.origenProspecto.count({ where: { activo: true } }),
     prisma.motivoPerdida.count({ where: { activo: true } }),
+    prisma.metodoPago.count({ where: { activo: true } }),
     prisma.plantillaComision.count({ where: { activa: true } }),
     prisma.configAlerta.count({ where: { activa: true } }),
     prisma.usuario.count({ where: { activo: true } }),
@@ -28,8 +29,9 @@ export default async function Configuracion() {
     {
       href: '/configuracion/catalogos',
       titulo: 'Catálogos',
-      detalle: `${origenes} orígenes · ${motivos} motivos de pérdida`,
-      texto: 'Las opciones que aparecen al capturar un cliente y al cerrar una venta como perdida.',
+      detalle: `${origenes} orígenes · ${motivos} motivos · ${metodos} medios de pago`,
+      texto:
+        'Las opciones que aparecen al capturar un cliente, al cerrar una venta como perdida y al registrar un cobro.',
     },
     {
       href: '/configuracion/comisiones',

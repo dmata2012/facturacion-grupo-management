@@ -139,6 +139,17 @@ model OrigenProspecto {
   clientes Cliente[]
 }
 
+/// Formas de pago que acepta el despacho. Es catálogo y no texto libre para
+/// que la estadística por medio de pago sea fiable: escrito a mano,
+/// "Transferencia" y "transferencia " se contarían por separado.
+model MetodoPago {
+  id     String  @id @default(cuid())
+  nombre String  @unique
+  activo Boolean @default(true)
+  orden  Int     @default(1)
+  cuotas Cuota[]
+}
+
 model MotivoPerdida {
   id     String  @id @default(cuid())
   nombre String  @unique
@@ -399,9 +410,12 @@ model Cuota {
   fechaPactada DateTime
   monto       Decimal   @db.Decimal(12, 2)
   pagadoEn    DateTime?
-  metodoPago  String?
+
+  metodoPago   MetodoPago? @relation(fields: [metodoPagoId], references: [id])
+  metodoPagoId String?
 
   @@unique([ventaId, numero])
+  @@index([metodoPagoId])
   @@index([fechaPactada])
 }
 
