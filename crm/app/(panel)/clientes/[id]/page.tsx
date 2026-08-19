@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { prisma } from '@/lib/prisma';
@@ -92,8 +93,18 @@ export default async function FichaCliente({
   return (
     <>
       <TituloSeccion
+        etiqueta="Cartera"
         accion={
-          caso ? <BotonEnlace href={`/casos/${caso.id}`} estilo="suave">Ver expediente legal</BotonEnlace> : undefined
+          <div className="flex flex-wrap gap-2">
+            {caso && (
+              <BotonEnlace href={`/casos/${caso.id}`} estilo="suave">
+                Ver expediente legal
+              </BotonEnlace>
+            )}
+            {puede(sesion.rol, 'clientes', 'editar') && (
+              <BotonEnlace href={`/clientes/${cliente.id}/editar`}>Editar datos</BotonEnlace>
+            )}
+          </div>
         }
       >
         {cliente.nombre}
@@ -145,11 +156,13 @@ export default async function FichaCliente({
               <Dato etiqueta="Vendedor" valor={ventaActiva?.vendedor.nombre ?? cliente.leads[0]?.vendedor.nombre} />
             </dl>
             {cliente.fotoUrl && (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
+              <Image
                 src={cliente.fotoUrl}
                 alt={`Fotografía de ${cliente.nombre}`}
-                className="mt-5 h-32 w-32 rounded-lg border border-borde object-cover"
+                width={128}
+                height={128}
+                unoptimized
+                className="mt-5 h-32 w-32 rounded-tarjeta border border-borde object-cover"
               />
             )}
           </Tarjeta>

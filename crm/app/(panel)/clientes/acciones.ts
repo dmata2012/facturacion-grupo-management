@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { MedioContacto } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { exigir } from '@/lib/sesion';
+import { filtroClientes } from '@/lib/permisos';
 import { guardarArchivo } from '@/lib/archivos';
 import { registrarInteraccion } from '@/lib/negocio';
 
@@ -60,6 +61,69 @@ export async function crearCliente(datos: FormData) {
   revalidatePath('/clientes');
   revalidatePath('/pipeline');
   redirect(`/clientes/${cliente.id}`);
+}
+
+/**
+ * Editar los datos del cliente. El permiso se comprueba dos veces: que el rol
+ * pueda editar clientes, y que ESE cliente esté dentro de lo que ese usuario
+ * tiene permitido ver — un vendedor no debe poder editar la ficha de un
+ * cliente de otro vendedor escribiendo su dirección a mano.
+ */
+export async function actualizarCliente(datos: FormData) {
+  const sesion = await exigir('clientes', 'editar');
+  const id = String(datos.get('id'));
+
+  const permitido = await prisma.cliente.findFirst({
+    where: { AND: [{ id }, filtroClientes(sesion)] },
+  });
+  if (!permitido) redirect('/sin-permiso');
+
+  const nombre = texto(datos, 'nombre');
+  const nacionalidad = texto(datos, 'nacionalidad');
+  const estado = texto(datos, 'estado');
+  const ciudad = texto(datos, 'ciudad');
+  if (!nombre || !nacionalidad || !estado || !ciudad) {
+    redirect(`/clientes/${id}/editar?error=faltan`);
+  }
+
+  // La fotografía solo se toca si suben una nueva: dejar el campo vacío
+  // significa "conserva la que ya tenía", no "bórrala".
+  let fotoUrl = permitido.fotoUrl;
+  const foto = datos.get('foto');
+  if (foto instanceof File && foto.size > 0) {
+    try {
+      const guardado = await guardarArchivo(foto);
+      if (guardado) fotoUrl = `/api/archivos/${guardado.nombreAlmacenado}`;
+    } catch {
+      redirect(`/clientes/${id}/editar?error=foto`);
+    }
+  }
+  if (datos.get('quitarFoto') === 'on') fotoUrl = null;
+
+  await prisma.cliente.update({
+    where: { id },
+    data: {
+      nombre,
+      nacionalidad,
+      // La ubicación del cliente no tiene relación con la dependencia donde se
+      // presenta su trámite: se editan por separado y ninguna toca a la otra.
+      estado,
+      ciudad,
+      correo: texto(datos, 'correo') || null,
+      telefono: texto(datos, 'telefono') || null,
+      origenProspectoId: texto(datos, 'origenProspectoId') || null,
+      observacionesGenerales: texto(datos, 'observaciones') || null,
+      fotoUrl,
+    },
+  });
+
+  await prisma.auditoria.create({
+    data: { entidad: 'Cliente', entidadId: id, accion: 'datos_editados', usuarioId: sesion.id },
+  });
+
+  revalidatePath(`/clientes/${id}`);
+  revalidatePath('/clientes');
+  redirect(`/clientes/${id}`);
 }
 
 export async function guardarObservaciones(datos: FormData) {
