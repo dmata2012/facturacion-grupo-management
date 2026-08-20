@@ -598,6 +598,7 @@ router.get('/concentrado', async (req, res) => {
 
     const gas = await query(`
       SELECT COALESCE(k.bloque,'operacion')          AS bloque,
+             c.id                                    AS concepto_id,
              COALESCE(c.nombre,'Sin clasificar')     AS concepto,
              COALESCE(c.orden, 999)                  AS orden,
              COALESCE(k.nombre,'Sin categoría')      AS categoria,
@@ -607,7 +608,7 @@ router.get('/concentrado', async (req, res) => {
         LEFT JOIN fac_gastos_conceptos  c ON c.id = g.concepto_id
         LEFT JOIN fac_gastos_categorias k ON k.id = c.categoria_id
        WHERE EXTRACT(YEAR FROM ${campoFecha}) = $1 ${filtroPago}
-       GROUP BY 1, 2, 3, 4, 5
+       GROUP BY 1, 2, 3, 4, 5, 6
     `, [anio]);
 
     const armaBloque = (titulo, clave) => {
@@ -615,7 +616,8 @@ router.get('/concentrado', async (req, res) => {
       gas.rows.filter(r => r.bloque === clave).forEach(r => {
         const v = parseFloat(r.monto) || 0;
         const f = porConcepto[r.concepto] ||
-          (porConcepto[r.concepto] = { nombre: r.concepto, categoria: r.categoria, orden: r.orden, meses: vacio(), total: 0 });
+          (porConcepto[r.concepto] = { id: r.concepto_id, nombre: r.concepto,
+                                       categoria: r.categoria, orden: r.orden, meses: vacio(), total: 0 });
         f.meses[r.mes - 1] += v;
         f.total += v;
       });

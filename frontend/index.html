@@ -2770,7 +2770,15 @@ async function guardarGasto(id) {
     else    await api('/gastos',       { method:'POST', body: JSON.stringify(body) });
     toast(id ? 'Gasto actualizado.' : 'Gasto registrado.');
     closeModal('modal-gasto');
-    cargarGastos();
+    // Se puede haber abierto desde el desglose del Concentrado, donde la pantalla
+    // de Gastos no esta montada: se refresca lo que si exista.
+    if (window._gtVolverA === 'concentrado') {
+      window._gtVolverA = null;
+      await cargarDetalleConcepto();
+      if ($('cc-body')) cargarConcentrado();
+    } else if ($('gt-body')) {
+      cargarGastos();
+    }
     gtActualizarBadgePendientes();
   } catch(e) {
     toast(e.message, 'err');
@@ -13550,8 +13558,18 @@ function renderConcentrado(d) {
     html += `<tr class="cc-sec"><td class="concepto">${b.titulo}</td>
              ${MESES_CON.map(()=>'<td></td>').join('')}<td></td></tr>`;
     b.filas.forEach((f, i) => {
+      // El nombre abre el desglose del concepto; los gastos sin clasificar no
+      // tienen concepto que abrir, asi que ese renglon no es clicable.
+      const abrible = !!f.id;
       html += `<tr>
-        <td class="concepto"><span style="color:var(--muted);display:inline-block;width:22px">${i+1}</span>${f.nombre}</td>
+        <td class="concepto">
+          <span style="color:var(--muted);display:inline-block;width:22px">${i+1}</span>
+          ${abrible
+            ? `<a href="#" onclick="event.preventDefault();abrirDetalleConcepto(${f.id},'${(f.nombre||'').replace(/'/g,"\\'")}',${d.anio})"
+                   style="color:var(--dark);text-decoration:none;border-bottom:1px dotted #cbd5e1"
+                   title="Ver los gastos de este concepto mes a mes">${f.nombre}</a>`
+            : f.nombre}
+        </td>
         ${f.meses.map(v => ccNum(v)).join('')}
         ${ccNum(f.total, 'cc-tot-col')}
       </tr>`;
@@ -13603,6 +13621,9 @@ function renderConcentrado(d) {
 
     <details class="card" style="margin-top:10px;font-size:11.5px;color:var(--muted);line-height:1.6;padding:10px 14px">
       <summary style="cursor:pointer;font-weight:800;color:var(--dark);font-size:11.5px">Cómo se calcula este reporte</summary>
+      <div style="margin-top:7px;color:#b45309">
+        Haz clic en el nombre de cualquier concepto de gasto para ver sus movimientos mes a mes.
+      </div>
       <div style="margin-top:7px">El ingreso no es lo facturado: de cada factura solo se
       toman los conceptos de <strong>Comisiones</strong> y <strong>Otros</strong> del desglose,
       porque el resto (sueldos, IMSS, ISN) es dinero que pasa por la empresa y no le pertenece.
@@ -13613,6 +13634,142 @@ function renderConcentrado(d) {
         : ' Los gastos cuentan por la fecha del gasto, se hayan pagado o no.'}
       </div>
     </details>`;
+}
+
+// ── Desglose de un concepto de gasto desde el Concentrado ──
+// Al hacer clic en un renglón se abren sus gastos del año, con el resumen mes a
+// mes y el detalle. Editar y borrar solo para administradores: desde aquí no se
+// ve el contexto de captura, así que un cambio a la ligera descuadra el reporte.
+async function abrirDetalleConcepto(conceptoId, nombre, anio) {
+  if (!conceptoId) return toast('Los gastos sin clasificar no tienen concepto que abrir. Clasifícalos en Gastos → Bandeja de pendientes.', 'warn');
+  window._ccDrill = { conceptoId, nombre, anio };
+  $('modal-gt-cats-body').innerHTML = '<p class="empty">Cargando…</p>';
+  openModal('modal-gt-cats');
+  await cargarDetalleConcepto();
+}
+
+async function cargarDetalleConcepto() {
+  const { conceptoId, nombre, anio } = window._ccDrill;
+  try {
+    const r = await api(`/gastos?concepto_id=${conceptoId}&desde=${anio}-01-01&hasta=${anio}-12-31`);
+    window._ccDrill.datos = r;
+    // El modal de captura busca el gasto en esta lista al editar
+    window._gtData = r;
+    pintarDetalleConcepto();
+  } catch(e) {
+    $('modal-gt-cats-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`;
+  }
+}
+
+function pintarDetalleConcepto() {
+  const { nombre, anio, datos: r } = window._ccDrill;
+  const M = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const meses = Array(12).fill(0);
+  r.gastos.forEach(g => {
+    const m = parseInt(String(g.fecha).slice(5,7)) - 1;
+    if (m >= 0 && m < 12) meses[m] += parseFloat(g.monto) || 0;
+  });
+  const maxM = Math.max(...meses, 1);
+  const puedeEditar = canAdmin();
+
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 16px;padding:18px 26px;background:linear-gradient(135deg,#7c2d12,#d97706);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Concepto de gasto · ${anio}</div>
+      <div style="font-size:19px;font-weight:900;margin-top:3px">${nombre}</div>
+      <div style="font-size:12px;opacity:.88;margin-top:4px">
+        ${r.totales.n_gastos} gasto${r.totales.n_gastos!=1?'s':''} · ${fmt(r.totales.total)} en el año
+        ${parseFloat(r.totales.por_pagar||0) > 0 ? ` · <strong>${fmt(r.totales.por_pagar)} por pagar</strong>` : ''}
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:14px">
+      ${meses.map((v,i) => `
+        <div style="text-align:center;padding:7px 4px;border-radius:9px;
+             background:${v ? '#fffbeb' : '#f8fafc'};border:1px solid ${v ? '#fcd34d' : 'var(--border)'}">
+          <div style="font-size:9px;font-weight:800;text-transform:uppercase;color:var(--muted)">${M[i]}</div>
+          <div style="font-size:11.5px;font-weight:900;color:${v?'#b45309':'#cbd5e1'};margin-top:2px">
+            ${v ? fmt(v) : '–'}</div>
+          <div style="height:3px;background:#f1f5f9;border-radius:99px;margin-top:4px;overflow:hidden">
+            <i style="display:block;height:100%;width:${v/maxM*100}%;background:#d97706"></i></div>
+        </div>`).join('')}
+    </div>
+
+    ${r.gastos.length ? `
+    <div class="tscroll" style="max-height:42vh;overflow:auto">
+      <table style="font-size:12px">
+        <thead><tr>
+          <th>Fecha</th><th>Proveedor / Descripción</th><th>Referencia</th>
+          <th style="text-align:right">Monto</th>${puedeEditar?'<th></th>':''}
+        </tr></thead>
+        <tbody>${r.gastos.map(g => `<tr>
+          <td style="white-space:nowrap">${fmtDate(g.fecha)}</td>
+          <td style="max-width:230px">
+            <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g.nombre_proveedor||g.proveedor||'—'}</div>
+            ${g.descripcion ? `<div style="font-size:10.5px;color:var(--muted);overflow:hidden;
+              text-overflow:ellipsis;white-space:nowrap">${g.descripcion}</div>` : ''}
+          </td>
+          <td style="font-family:monospace;font-size:10.5px;color:var(--muted)">${g.referencia||g.serie_folio||'—'}</td>
+          <td style="text-align:right;font-weight:800;color:#b45309;white-space:nowrap">${fmt(g.monto)}</td>
+          ${puedeEditar ? `<td style="white-space:nowrap;text-align:right">
+            <button class="btn bg bsm" style="padding:3px 7px" onclick="editarGastoDesdeConcentrado(${g.id})" title="Editar">✏️</button>
+            <button class="btn bd bsm" style="padding:3px 7px" onclick="eliminarGastoDesdeConcentrado(${g.id})" title="Eliminar">🗑</button>
+          </td>` : ''}
+        </tr>`).join('')}</tbody>
+        <tfoot><tr style="border-top:2px solid var(--dark);background:var(--bg-alt);font-weight:900">
+          <td colspan="3" style="padding:8px;text-align:right">TOTAL ${anio}:</td>
+          <td style="text-align:right;padding:8px;color:#b45309">${fmt(r.totales.total)}</td>
+          ${puedeEditar?'<td></td>':''}
+        </tr></tfoot>
+      </table>
+    </div>` : `<p class="empty">Sin gastos de este concepto en ${anio}.</p>`}
+
+    ${!puedeEditar ? `
+    <div style="margin-top:12px;background:var(--bg-alt);border-radius:9px;padding:9px 12px;
+         font-size:11.5px;color:var(--muted);line-height:1.5">
+      Solo consulta. Modificar o eliminar gastos desde aquí está reservado a administradores;
+      en <em>Gastos (CxP)</em> puedes hacerlo con los permisos que tengas.
+    </div>` : ''}
+
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button>
+      <button class="btn bs" onclick="closeModal('modal-gt-cats');gtIrAConcepto(${window._ccDrill.conceptoId})">
+        🧾 Ver en Gastos (CxP)</button>
+    </div>`;
+}
+
+// Salta a la pantalla de Gastos con el concepto ya filtrado
+function gtIrAConcepto(conceptoId) {
+  const anio = window._ccDrill?.anio || new Date().getFullYear();
+  nav('gastos');
+  let intentos = 0;
+  const t = setInterval(() => {
+    if ($('gt-concepto') || ++intentos > 40) {
+      clearInterval(t);
+      if (!$('gt-concepto')) return;
+      $('gt-desde').value = `${anio}-01-01`;
+      $('gt-hasta').value = `${anio}-12-31`;
+      $('gt-categoria').value = ''; gtLlenarSelectConceptos();
+      $('gt-concepto').value = conceptoId;
+      cargarGastos();
+    }
+  }, 50);
+}
+
+// Editar desde el desglose: se reusa el modal de captura, pero al guardar hay que
+// refrescar este desglose y el reporte, no la pantalla de Gastos —que no está abierta.
+async function editarGastoDesdeConcentrado(id) {
+  window._gtVolverA = 'concentrado';
+  await openGasto(id);
+}
+
+async function eliminarGastoDesdeConcentrado(id) {
+  if (!await confirm2('¿Eliminar este gasto?\nEl Concentrado se recalcula al cerrar.')) return;
+  try {
+    await api(`/gastos/${id}`, { method:'DELETE' });
+    toast('Gasto eliminado.');
+    await cargarDetalleConcepto();
+    if ($('cc-body')) cargarConcentrado();
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 function exportarConcentradoExcel() {
