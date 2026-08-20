@@ -361,7 +361,7 @@ export default async function FichaCliente({
       {pestana === 'pagos' && (
         <div className="space-y-5">
           {!cuotas.length ? (
-            <Vacio>El plan de pagos se captura al cerrar la venta como ganada.</Vacio>
+            <PlanVacio venta={ventaActiva} />
           ) : (
             <>
               {aprobado && (
@@ -544,6 +544,64 @@ export default async function FichaCliente({
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * Qué decir cuando todavía no hay plan de cobranza.
+ *
+ * El plan no se captura a mano: sale de los pagos del presupuesto que el
+ * cliente aprueba. Así que aquí no basta con avisar que está vacío, hay que
+ * señalar el presupuesto que falta aprobar —o el que falta hacer— y llevar
+ * hasta él de un clic.
+ */
+function PlanVacio({
+  venta,
+}: {
+  venta: { id: string; etapa: string; presupuestos: { id: string; folio: string; estatus: string }[] } | null;
+}) {
+  if (!venta) {
+    return (
+      <Vacio>
+        Este cliente todavía no tiene una venta abierta. El plan de pagos nace del presupuesto que
+        apruebe, y el presupuesto nace de la venta.
+      </Vacio>
+    );
+  }
+
+  // El último que sigue vivo: es el que el cliente tiene en la mano.
+  const pendiente = venta.presupuestos.find((p) => p.estatus === 'ENVIADO')
+    ?? venta.presupuestos.find((p) => p.estatus === 'BORRADOR');
+
+  return (
+    <Vacio>
+      {pendiente ? (
+        <>
+          <p className="text-tinta">
+            El plan de pagos sale del presupuesto que apruebe el cliente.
+          </p>
+          <p className="mt-1">
+            {pendiente.estatus === 'ENVIADO'
+              ? `${pendiente.folio} ya está con el cliente. En cuanto lo apruebes, sus pagos se vuelven el plan de cobranza.`
+              : `${pendiente.folio} sigue en borrador: hay que enviárselo y, cuando responda, aprobarlo.`}
+          </p>
+          <div className="mt-4">
+            <BotonEnlace href={`/presupuestos/${pendiente.id}`}>Abrir {pendiente.folio}</BotonEnlace>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="text-tinta">Todavía no hay presupuesto que aprobar.</p>
+          <p className="mt-1">
+            Hazle uno con los pagos que se acordaron: al aprobarlo, esos pagos se vuelven el plan de
+            cobranza, sin recapturar nada.
+          </p>
+          <div className="mt-4">
+            <BotonEnlace href={`/presupuestos/nuevo?venta=${venta.id}`}>Nuevo presupuesto</BotonEnlace>
+          </div>
+        </>
+      )}
+    </Vacio>
   );
 }
 
