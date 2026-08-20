@@ -97,8 +97,11 @@ export default async function VerPresupuesto({
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-        {/* El documento tal como lo verá el cliente. */}
-        <Tarjeta className="p-6">
+        {/* El documento tal como lo verá el cliente. En celular va debajo de
+            las decisiones: quien abre un presupuesto en el teléfono viene a
+            aprobarlo o rechazarlo, y ese botón quedaba a página y media de
+            desplazamiento, escondido detrás de conceptos y condiciones. */}
+        <Tarjeta className="order-2 p-6 lg:order-1">
           <table className="w-full text-sm">
             <thead className="border-b border-borde text-left text-xs uppercase tracking-wide text-tenue">
               <tr>
@@ -150,41 +153,7 @@ export default async function VerPresupuesto({
           )}
         </Tarjeta>
 
-        <div className="space-y-5">
-          <Tarjeta className="p-5">
-            <h2 className="mb-3 text-sm font-bold text-tinta">Seguimiento</h2>
-            <dl className="space-y-2 text-sm">
-              <div className="flex justify-between gap-2">
-                <dt className="text-tenue">Elaborado</dt>
-                <dd>{fecha(presupuesto.creadoEn)}</dd>
-              </div>
-              {presupuesto.creadoPor && (
-                <div className="flex justify-between gap-2">
-                  <dt className="text-tenue">Por</dt>
-                  <dd>{presupuesto.creadoPor.nombre}</dd>
-                </div>
-              )}
-              {presupuesto.fechaEnvio && (
-                <div className="flex justify-between gap-2">
-                  <dt className="text-tenue">Enviado</dt>
-                  <dd>
-                    {fecha(presupuesto.fechaEnvio)}
-                    {presupuesto.medioEnvio && ` ${MEDIO[presupuesto.medioEnvio]}`}
-                  </dd>
-                </div>
-              )}
-              {presupuesto.fechaRespuesta && (
-                <div className="flex justify-between gap-2">
-                  <dt className="text-tenue">Respuesta</dt>
-                  <dd>{fecha(presupuesto.fechaRespuesta)}</dd>
-                </div>
-              )}
-            </dl>
-            {presupuesto.motivoRechazo && (
-              <p className="mt-3 text-xs text-red-700">Motivo: {presupuesto.motivoRechazo}</p>
-            )}
-          </Tarjeta>
-
+        <div className="order-1 space-y-5 lg:order-2">
           {!cerrado && (
             <>
               {presupuesto.estatus === 'BORRADOR' && (
@@ -279,6 +248,41 @@ export default async function VerPresupuesto({
               </p>
             </Tarjeta>
           )}
+          {/* Las fechas van al final: son consulta, no decisión. Arriba
+              queda lo que se viene a hacer. */}
+          <Tarjeta className="p-5">
+            <h2 className="mb-3 text-sm font-bold text-tinta">Seguimiento</h2>
+            <dl className="space-y-2 text-sm">
+              <div className="flex justify-between gap-2">
+                <dt className="text-tenue">Elaborado</dt>
+                <dd>{fecha(presupuesto.creadoEn)}</dd>
+              </div>
+              {presupuesto.creadoPor && (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-tenue">Por</dt>
+                  <dd>{presupuesto.creadoPor.nombre}</dd>
+                </div>
+              )}
+              {presupuesto.fechaEnvio && (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-tenue">Enviado</dt>
+                  <dd>
+                    {fecha(presupuesto.fechaEnvio)}
+                    {presupuesto.medioEnvio && ` ${MEDIO[presupuesto.medioEnvio]}`}
+                  </dd>
+                </div>
+              )}
+              {presupuesto.fechaRespuesta && (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-tenue">Respuesta</dt>
+                  <dd>{fecha(presupuesto.fechaRespuesta)}</dd>
+                </div>
+              )}
+            </dl>
+            {presupuesto.motivoRechazo && (
+              <p className="mt-3 text-xs text-red-700">Motivo: {presupuesto.motivoRechazo}</p>
+            )}
+          </Tarjeta>
         </div>
       </div>
     </>

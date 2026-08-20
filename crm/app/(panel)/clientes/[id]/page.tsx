@@ -277,6 +277,14 @@ export default async function FichaCliente({
                     >
                       PDF
                     </a>
+                    {/* El que está con el cliente lleva su atajo: la respuesta
+                        se registra desde el presupuesto, y sin esto había que
+                        adivinar que se entraba por el folio. */}
+                    {p.estatus === 'ENVIADO' && (
+                      <BotonEnlace href={`/presupuestos/${p.id}`} className="px-3 py-1.5 text-xs">
+                        Registrar respuesta
+                      </BotonEnlace>
+                    )}
                   </li>
                 );
               })}
