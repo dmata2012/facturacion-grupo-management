@@ -117,17 +117,17 @@ model Usuario {
   activo       Boolean  @default(true)
   creadoEn     DateTime @default(now())
 
-  leadsAsignados      Lead[]
-  ventasComoVendedor  Venta[]              @relation("VentaVendedor")
-  casosComoAbogado    Caso[]               @relation("CasoAbogado")
-  comisiones          Comision[]
+  leadsAsignados        Lead[]
+  ventasComoVendedor    Venta[]              @relation("VentaVendedor")
+  casosComoAbogado      Caso[]               @relation("CasoAbogado")
+  comisiones            Comision[]
   documentosConfirmados Documento[]
-  interacciones       Interaccion[]
-  seguimientos        ProximoSeguimiento[]
-  citas               Cita[]
-  cambiosDeEtapa      HistorialEtapa[]
-  movimientos         Auditoria[]
-  presupuestos        Presupuesto[]
+  interacciones         Interaccion[]
+  seguimientos          ProximoSeguimiento[]
+  citas                 Cita[]
+  cambiosDeEtapa        HistorialEtapa[]
+  movimientos           Auditoria[]
+  presupuestos          Presupuesto[]
 }
 
 // ── Catálogos configurables (sección 13: sin tocar código) ────────
@@ -160,9 +160,9 @@ model MotivoPerdida {
 /// Plantilla de trámite: define las etapas del caso y los documentos que
 /// se exigen. Al crear un caso se copia de aquí (sección 6).
 model TipoTramite {
-  id         String              @id @default(cuid())
-  nombre     String              @unique
-  activo     Boolean             @default(true)
+  id         String               @id @default(cuid())
+  nombre     String               @unique
+  activo     Boolean              @default(true)
   etapas     EtapaPlantilla[]
   documentos DocumentoPlantilla[]
   leads      Lead[]
@@ -171,14 +171,14 @@ model TipoTramite {
 }
 
 model EtapaPlantilla {
-  id            String      @id @default(cuid())
-  tipoTramite   TipoTramite @relation(fields: [tipoTramiteId], references: [id], onDelete: Cascade)
-  tipoTramiteId String
-  nombre        String
-  orden         Int
+  id             String      @id @default(cuid())
+  tipoTramite    TipoTramite @relation(fields: [tipoTramiteId], references: [id], onDelete: Cascade)
+  tipoTramiteId  String
+  nombre         String
+  orden          Int
   /// Marca la etapa que cuenta como "presentado ante autoridad": de ahí sale
   /// la fecha de presentación del caso, que no se captura a mano.
-  esPresentacion Boolean    @default(false)
+  esPresentacion Boolean     @default(false)
 
   casosEnEstaEtapa Caso[]
 
@@ -186,14 +186,14 @@ model EtapaPlantilla {
 }
 
 model DocumentoPlantilla {
-  id            String      @id @default(cuid())
-  tipoTramite   TipoTramite @relation(fields: [tipoTramiteId], references: [id], onDelete: Cascade)
-  tipoTramiteId String
-  nombre        String
-  orden         Int
+  id               String      @id @default(cuid())
+  tipoTramite      TipoTramite @relation(fields: [tipoTramiteId], references: [id], onDelete: Cascade)
+  tipoTramiteId    String
+  nombre           String
+  orden            Int
   /// Documentos que caducan (pasaporte, visa): piden fecha de vigencia y
   /// alimentan las alertas de caducidad.
-  requiereVigencia Boolean  @default(false)
+  requiereVigencia Boolean     @default(false)
 
   documentos Documento[]
 
@@ -203,7 +203,7 @@ model DocumentoPlantilla {
 // ── Cliente y prospección ─────────────────────────────────────────
 
 model Cliente {
-  id           String   @id @default(cuid())
+  id           String  @id @default(cuid())
   nombre       String
   fotoUrl      String?
   nacionalidad String
@@ -248,14 +248,14 @@ model FotoCliente {
 /// Contacto inicial. Todavía NO es prospecto: lo será cuando la entrevista
 /// de valoración resulte viable (sección 5).
 model Lead {
-  id                  String               @id @default(cuid())
-  cliente             Cliente              @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  id                  String        @id @default(cuid())
+  cliente             Cliente       @relation(fields: [clienteId], references: [id], onDelete: Cascade)
   clienteId           String
-  vendedor            Usuario              @relation(fields: [vendedorId], references: [id])
+  vendedor            Usuario       @relation(fields: [vendedorId], references: [id])
   vendedorId          String
   medioContacto       MedioContacto
   fechaPrimerContacto DateTime
-  tipoTramite         TipoTramite          @relation(fields: [tipoTramiteId], references: [id])
+  tipoTramite         TipoTramite   @relation(fields: [tipoTramiteId], references: [id])
   tipoTramiteId       String
 
   resultadoEntrevista ResultadoEntrevista?
@@ -270,14 +270,14 @@ model Lead {
 // ── Venta ─────────────────────────────────────────────────────────
 
 model Venta {
-  id            String         @id @default(cuid())
-  cliente       Cliente        @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  id            String      @id @default(cuid())
+  cliente       Cliente     @relation(fields: [clienteId], references: [id], onDelete: Cascade)
   clienteId     String
-  lead          Lead?          @relation(fields: [leadId], references: [id])
-  leadId        String?        @unique
-  tipoTramite   TipoTramite    @relation(fields: [tipoTramiteId], references: [id])
+  lead          Lead?       @relation(fields: [leadId], references: [id])
+  leadId        String?     @unique
+  tipoTramite   TipoTramite @relation(fields: [tipoTramiteId], references: [id])
   tipoTramiteId String
-  vendedor      Usuario        @relation("VentaVendedor", fields: [vendedorId], references: [id])
+  vendedor      Usuario     @relation("VentaVendedor", fields: [vendedorId], references: [id])
   vendedorId    String
 
   /// Estimado mientras la venta está abierta; el cerrado al ganarla.
@@ -292,7 +292,7 @@ model Venta {
   creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt
 
-  caso       Caso?
+  caso         Caso?
   cuotas       Cuota[]
   comisiones   Comision[]
   historial    HistorialEtapa[]
@@ -373,10 +373,10 @@ model Documento {
   plantillaId String?
   nombre      String
 
-  estatus EstatusDocumento @default(PENDIENTE)
+  estatus         EstatusDocumento @default(PENDIENTE)
   /// Quién confirmó la entrega y cuándo. Sirve para saber a quién preguntarle
   /// si después aparece una duda sobre ese documento.
-  confirmadoPor   Usuario?  @relation(fields: [confirmadoPorId], references: [id])
+  confirmadoPor   Usuario?         @relation(fields: [confirmadoPorId], references: [id])
   confirmadoPorId String?
   fechaEntrega    DateTime?
 
@@ -402,14 +402,14 @@ model Documento {
 /// desactualizado sin que nadie lo tocara. Se calcula al leer, en
 /// lib/cuotas.ts, a partir de fechaPactada y pagadoEn.
 model Cuota {
-  id          String    @id @default(cuid())
-  venta       Venta     @relation(fields: [ventaId], references: [id], onDelete: Cascade)
-  ventaId     String
-  numero      Int
-  esInicial   Boolean   @default(false)
+  id           String    @id @default(cuid())
+  venta        Venta     @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  ventaId      String
+  numero       Int
+  esInicial    Boolean   @default(false)
   fechaPactada DateTime
-  monto       Decimal   @db.Decimal(12, 2)
-  pagadoEn    DateTime?
+  monto        Decimal   @db.Decimal(12, 2)
+  pagadoEn     DateTime?
 
   metodoPago   MetodoPago? @relation(fields: [metodoPagoId], references: [id])
   metodoPagoId String?
@@ -425,12 +425,12 @@ model Cuota {
 /// venta. No es una bolsa que se reparte: los porcentajes pueden sumar lo
 /// que sea. Cada quien tiene su propio estatus de pago.
 model Comision {
-  id            String  @id @default(cuid())
-  venta         Venta   @relation(fields: [ventaId], references: [id], onDelete: Cascade)
-  ventaId       String
-  participante  Usuario @relation(fields: [participanteId], references: [id])
+  id             String  @id @default(cuid())
+  venta          Venta   @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  ventaId        String
+  participante   Usuario @relation(fields: [participanteId], references: [id])
   participanteId String
-  rol           Rol
+  rol            Rol
 
   porcentaje     Decimal @db.Decimal(5, 2)
   /// Se congela al calcularse: si mañana cambia la plantilla, este monto no
@@ -449,13 +449,13 @@ model Comision {
 }
 
 model PlantillaComision {
-  id            String                  @id @default(cuid())
-  nombre        String                  @unique
-  version       Int                     @default(1)
-  esPredeterminada Boolean              @default(false)
-  activa        Boolean                 @default(true)
-  items         PlantillaComisionItem[]
-  comisiones    Comision[]
+  id               String                  @id @default(cuid())
+  nombre           String                  @unique
+  version          Int                     @default(1)
+  esPredeterminada Boolean                 @default(false)
+  activa           Boolean                 @default(true)
+  items            PlantillaComisionItem[]
+  comisiones       Comision[]
 }
 
 model PlantillaComisionItem {
@@ -495,23 +495,29 @@ model ProximoSeguimiento {
   responsableId String
   estatus       EstatusSeguimiento @default(PENDIENTE)
 
+  /// Si lo generó el envío de un presupuesto, de cuál. Sirve para no apilar un
+  /// seguimiento nuevo cada vez que se reenvía el mismo presupuesto.
+  presupuesto   Presupuesto? @relation(fields: [presupuestoId], references: [id], onDelete: SetNull)
+  presupuestoId String?
+
   cita Cita?
 
+  @@index([presupuestoId])
   @@index([fecha, estatus])
 }
 
 /// La agenda no se captura dos veces: se alimenta de las consultas
 /// agendadas del pipeline y de los próximos seguimientos (sección 9).
 model Cita {
-  id            String     @id @default(cuid())
-  cliente       Cliente?   @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  id            String    @id @default(cuid())
+  cliente       Cliente?  @relation(fields: [clienteId], references: [id], onDelete: SetNull)
   clienteId     String?
   titulo        String
   inicio        DateTime
   fin           DateTime?
   tipo          TipoCita
-  modalidad     Modalidad  @default(PRESENCIAL)
-  responsable   Usuario?   @relation(fields: [responsableId], references: [id])
+  modalidad     Modalidad @default(PRESENCIAL)
+  responsable   Usuario?  @relation(fields: [responsableId], references: [id])
   responsableId String?
 
   seguimiento   ProximoSeguimiento? @relation(fields: [seguimientoId], references: [id], onDelete: Cascade)
@@ -536,14 +542,14 @@ model ConfigAlerta {
 // ── Auditoría (sección 13) ────────────────────────────────────────
 
 model Auditoria {
-  id         String   @id @default(cuid())
-  entidad    String
-  entidadId  String
-  accion     String
-  detalle    Json?
-  usuario    Usuario? @relation(fields: [usuarioId], references: [id])
-  usuarioId  String?
-  fecha      DateTime @default(now())
+  id        String   @id @default(cuid())
+  entidad   String
+  entidadId String
+  accion    String
+  detalle   Json?
+  usuario   Usuario? @relation(fields: [usuarioId], references: [id])
+  usuarioId String?
+  fecha     DateTime @default(now())
 
   @@index([entidad, entidadId])
   @@index([fecha])
@@ -577,13 +583,14 @@ model Presupuesto {
   condiciones String?
   notas       String?
 
-  creadoPor   Usuario? @relation(fields: [creadoPorId], references: [id])
-  creadoPorId String?
-  creadoEn    DateTime @default(now())
+  creadoPor     Usuario? @relation(fields: [creadoPorId], references: [id])
+  creadoPorId   String?
+  creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt
 
-  conceptos PresupuestoConcepto[]
-  pagos     PresupuestoPago[]
+  conceptos    PresupuestoConcepto[]
+  pagos        PresupuestoPago[]
+  seguimientos ProximoSeguimiento[]
 
   @@index([ventaId])
   @@index([estatus])
@@ -603,13 +610,13 @@ model PresupuestoConcepto {
 /// Pago propuesto. Al aceptarse el presupuesto, cada uno se convierte en una
 /// cuota del plan de pagos.
 model PresupuestoPago {
-  id            String      @id @default(cuid())
-  presupuesto   Presupuesto @relation(fields: [presupuestoId], references: [id], onDelete: Cascade)
-  presupuestoId String
-  numero        Int
-  descripcion   String?
+  id             String      @id @default(cuid())
+  presupuesto    Presupuesto @relation(fields: [presupuestoId], references: [id], onDelete: Cascade)
+  presupuestoId  String
+  numero         Int
+  descripcion    String?
   fechaPropuesta DateTime
-  monto         Decimal     @db.Decimal(12, 2)
+  monto          Decimal     @db.Decimal(12, 2)
 
   @@unique([presupuestoId, numero])
 }

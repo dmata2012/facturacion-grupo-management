@@ -445,6 +445,110 @@ function fechaLarga(f: Date): string {
 }
 
 /**
+ * Días que el despacho se da para volver a marcarle al cliente después de
+ * mandarle el presupuesto. Es un máximo: un presupuesto que se enfría dos días
+ * ya perdió la mitad de su fuerza.
+ */
+const DIAS_SEGUIMIENTO_PRESUPUESTO = 2;
+
+/**
+ * Día del seguimiento, a medianoche UTC.
+ *
+ * La agenda agrupa las citas por su fecha UTC y las imprime en esa misma zona,
+ * igual que las que se capturan a mano desde la ficha. Si aquí se guardara la
+ * hora del envío, un presupuesto mandado de noche caería un día después en el
+ * calendario.
+ */
+function diaDeSeguimiento(desde: Date, dias: number): Date {
+  const d = new Date(desde);
+  d.setUTCDate(d.getUTCDate() + dias);
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+}
+
+/**
+ * Todo lo que arrastra dar un presupuesto por entregado, en un solo lugar:
+ * marcarlo, dejarlo en la línea de tiempo del cliente, agendar el seguimiento
+ * y adelantar la venta.
+ *
+ * Vive aparte porque hay dos maneras de enviar —a mano y por correo— y las dos
+ * tienen que dejar el mismo rastro. Cuando estaba duplicado, cualquier regla
+ * nueva se aplicaba a una y se olvidaba en la otra.
+ */
+async function registrarEnvioDePresupuesto(
+  presupuesto: { id: string; folio: string; ventaId: string; venta: { clienteId: string; etapa: string; vendedorId: string } },
+  medio: MedioContacto,
+  comoLlego: string,
+  actor: Actor
+) {
+  const enviadoEn = new Date();
+  const fechaSeguimiento = diaDeSeguimiento(enviadoEn, DIAS_SEGUIMIENTO_PRESUPUESTO);
+  const motivo = `Confirmar respuesta del presupuesto ${presupuesto.folio}`;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.presupuesto.update({
+      where: { id: presupuesto.id },
+      data: { estatus: 'ENVIADO', fechaEnvio: enviadoEn, medioEnvio: medio },
+    });
+
+    // Reenviar el mismo presupuesto no debe dejar dos recordatorios: se
+    // reemplaza el pendiente anterior, y con él se va su cita.
+    await tx.proximoSeguimiento.deleteMany({
+      where: { presupuestoId: presupuesto.id, estatus: 'PENDIENTE' },
+    });
+
+    const cliente = await tx.cliente.findUniqueOrThrow({
+      where: { id: presupuesto.venta.clienteId },
+    });
+    const seguimiento = await tx.proximoSeguimiento.create({
+      data: {
+        clienteId: cliente.id,
+        presupuestoId: presupuesto.id,
+        fecha: fechaSeguimiento,
+        motivo,
+        // Responde quien lleva la venta, no quien apretó el botón: el correo
+        // lo puede mandar la asistente y el cliente contesta con su vendedor.
+        responsableId: presupuesto.venta.vendedorId,
+      },
+    });
+    await tx.cita.create({
+      data: {
+        clienteId: cliente.id,
+        titulo: `Seguimiento presupuesto ${presupuesto.folio}: ${cliente.nombre}`,
+        inicio: fechaSeguimiento,
+        tipo: 'SEGUIMIENTO_SALIENTE',
+        modalidad: 'EN_LINEA',
+        responsableId: presupuesto.venta.vendedorId,
+        seguimientoId: seguimiento.id,
+      },
+    });
+
+    // La fecha va dentro del texto, además de la que la pantalla muestra al
+    // lado: así la nota se entiende sola si alguien la copia a un correo o la
+    // lee fuera del sistema.
+    await tx.interaccion.create({
+      data: {
+        clienteId: cliente.id,
+        fecha: enviadoEn,
+        medio,
+        resultado:
+          `Presupuesto ${presupuesto.folio} enviado ${comoLlego} el ${fechaLarga(enviadoEn)}. ` +
+          `Seguimiento agendado para el ${fechaLarga(fechaSeguimiento)}.`,
+        usuarioId: actor.id,
+      },
+    });
+  });
+
+  // La venta refleja lo que pasó: ya hay propuesta con el cliente. Va fuera de
+  // la transacción porque mover la etapa escribe su propio historial.
+  const etapasPrevias = ['PROSPECTO_CALIFICADO', 'CONTACTADO', 'CONSULTA_AGENDADA'];
+  if (etapasPrevias.includes(presupuesto.venta.etapa)) {
+    await moverEtapaVenta(presupuesto.ventaId, 'PROPUESTA_ENVIADA', actor);
+  }
+  return { enviadoEn, fechaSeguimiento };
+}
+
+/**
  * Marca el presupuesto como entregado al cliente y adelanta la venta.
  *
  * Además deja el envío en el historial del cliente: cuando alguien abra la
@@ -464,32 +568,7 @@ export async function enviarPresupuesto(
     throw new Error('Ese presupuesto ya fue aceptado.');
   }
 
-  const enviadoEn = new Date();
-  await prisma.presupuesto.update({
-    where: { id: presupuestoId },
-    data: { estatus: 'ENVIADO', fechaEnvio: enviadoEn, medioEnvio: medio },
-  });
-
-  // La fecha va dentro del texto, además de la que la pantalla muestra al
-  // lado: así la nota se entiende sola si alguien la copia a un correo o la
-  // lee fuera del sistema.
-  await prisma.interaccion.create({
-    data: {
-      clienteId: presupuesto.venta.clienteId,
-      fecha: enviadoEn,
-      medio,
-      resultado:
-        `Presupuesto ${presupuesto.folio} enviado ${NOMBRE_MEDIO[medio]} ` +
-        `el ${fechaLarga(enviadoEn)}.`,
-      usuarioId: actor.id,
-    },
-  });
-
-  // La venta refleja lo que pasó: ya hay propuesta con el cliente.
-  const etapasPrevias = ['PROSPECTO_CALIFICADO', 'CONTACTADO', 'CONSULTA_AGENDADA'];
-  if (etapasPrevias.includes(presupuesto.venta.etapa)) {
-    await moverEtapaVenta(presupuesto.ventaId, 'PROPUESTA_ENVIADA', actor);
-  }
+  await registrarEnvioDePresupuesto(presupuesto, medio, NOMBRE_MEDIO[medio], actor);
   return presupuesto;
 }
 
@@ -616,28 +695,7 @@ export async function enviarPresupuestoPorCorreo(
 
   if (!resultado.enviado) return { enviado: false, motivo: resultado.motivo };
 
-  const enviadoEn = new Date();
-  await prisma.presupuesto.update({
-    where: { id: presupuestoId },
-    data: { estatus: 'ENVIADO', fechaEnvio: enviadoEn, medioEnvio: 'CORREO' },
-  });
-
-  await prisma.interaccion.create({
-    data: {
-      clienteId: presupuesto.venta.clienteId,
-      fecha: enviadoEn,
-      medio: 'CORREO',
-      resultado:
-        `Presupuesto ${presupuesto.folio} enviado por correo a ${destinatario} ` +
-        `el ${fechaLarga(enviadoEn)}.`,
-      usuarioId: actor.id,
-    },
-  });
-
-  const etapasPrevias = ['PROSPECTO_CALIFICADO', 'CONTACTADO', 'CONSULTA_AGENDADA'];
-  if (etapasPrevias.includes(presupuesto.venta.etapa)) {
-    await moverEtapaVenta(presupuesto.ventaId, 'PROPUESTA_ENVIADA', actor);
-  }
+  await registrarEnvioDePresupuesto(presupuesto, 'CORREO', `por correo a ${destinatario}`, actor);
 
   return { enviado: true, destinatario };
 }
