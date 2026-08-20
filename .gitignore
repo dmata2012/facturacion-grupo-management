@@ -16,6 +16,11 @@ uploads/
 *.sql
 respaldos/
 
+# ...pero las migraciones del CRM sí son código: sin ellas, quien clone el
+# repo no puede levantar la base. La regla de arriba, pensada para los
+# respaldos del sistema de facturación, se las estaba tragando.
+!crm/prisma/migrations/**/*.sql
+
 # Logs
 *.log
 npm-debug.log*
