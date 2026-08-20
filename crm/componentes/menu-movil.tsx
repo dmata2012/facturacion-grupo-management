@@ -4,6 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { IconoModulo } from '@/componentes/iconos';
 
 type Modulo = { href: string; nombre: string };
 
@@ -50,7 +51,7 @@ export function MenuMovil({
 
   return (
     <>
-      <header className="relative flex items-center gap-3 overflow-hidden grad-tinta px-4 py-3 lg:hidden">
+      <header className="relative flex items-center gap-3 overflow-hidden grad-tinta px-4 py-3 md:hidden">
         <div className="resplandor-marca pointer-events-none absolute inset-0" />
 
         <button
@@ -84,7 +85,7 @@ export function MenuMovil({
       <div
         onClick={() => setAbierto(false)}
         aria-hidden="true"
-        className={`fixed inset-0 z-40 bg-black/50 transition-opacity lg:hidden ${
+        className={`fixed inset-0 z-40 bg-black/50 transition-opacity md:hidden ${
           abierto ? 'opacity-100' : 'pointer-events-none opacity-0'
         }`}
       />
@@ -92,7 +93,7 @@ export function MenuMovil({
       <aside
         id="menu-lateral"
         aria-hidden={!abierto}
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col overflow-y-auto grad-tinta shadow-alta transition-transform duration-200 lg:hidden ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col overflow-y-auto grad-tinta shadow-alta transition-transform duration-200 md:hidden ${
           abierto ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -131,11 +132,12 @@ export function MenuMovil({
                 key={m.href}
                 href={m.href}
                 aria-current={activo ? 'page' : undefined}
-                className={`relative block rounded-sm px-3 py-2.5 text-sm transition ${
+                className={`relative flex items-center gap-2.5 rounded-sm px-3 py-2.5 text-sm transition ${
                   activo ? 'bg-white/10 font-semibold text-white' : 'text-slate-300 hover:bg-white/5 hover:text-white'
                 }`}
               >
                 {activo && <span className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-marca-clara" />}
+                <IconoModulo href={m.href} />
                 {m.nombre}
               </Link>
             );

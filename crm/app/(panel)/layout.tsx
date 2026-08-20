@@ -16,10 +16,10 @@ export default async function PanelLayout({ children }: { children: React.ReactN
 
   return (
     <div className="flex min-h-screen">
-      {/* La barra lateral fija aparece a partir de escritorio. En celular y
-          tableta el mismo menú vive detrás del botón hamburguesa, para no
-          comerse el ancho útil de la pantalla. */}
-      <aside className="relative hidden w-60 shrink-0 flex-col overflow-hidden grad-tinta py-6 lg:flex">
+      {/* La barra lateral fija aparece desde tableta. Solo en celular, donde
+          240 px de menú se comerían el ancho útil, el mismo menú se guarda
+          detrás del botón hamburguesa. */}
+      <aside className="relative hidden w-60 shrink-0 flex-col overflow-hidden grad-tinta py-6 md:flex">
         <div className="resplandor-marca pointer-events-none absolute inset-0" />
 
         <div className="relative px-6 pb-6">
@@ -57,7 +57,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
           rol={ETIQUETA_ROL[sesion.rol]}
           salir={salir}
         />
-        <main className="grad-lienzo min-w-0 flex-1 px-4 py-6 lg:px-8 lg:py-8">{children}</main>
+        <main className="grad-lienzo min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">{children}</main>
       </div>
     </div>
   );

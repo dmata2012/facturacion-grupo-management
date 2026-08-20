@@ -98,12 +98,11 @@ h3 {
   animation: aparecer 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* Malla geométrica tenue, como el papel de fondo de una portada impresa. */
-@utility malla {
-  background-image:
-    linear-gradient(to right, rgba(11, 31, 58, 0.045) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(11, 31, 58, 0.045) 1px, transparent 1px);
-  background-size: 44px 44px;
+/* Retícula de cubos isométricos: el fondo de la portada, apenas insinuado.
+   Va como SVG embebido para que el mosaico case sin costuras al repetirse. */
+@utility cubos {
+  background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='41.57' height='72.00' viewBox='0 0 41.57 72.00'><path d='M0.00 -24.00L20.78 -12.00L20.78 12.00L0.00 24.00L-20.78 12.00L-20.78 -12.00ZM0.00 0.00L0.00 -24.00M0.00 0.00L20.78 12.00M0.00 0.00L-20.78 12.00M41.57 -24.00L62.35 -12.00L62.35 12.00L41.57 24.00L20.78 12.00L20.78 -12.00ZM41.57 0.00L41.57 -24.00M41.57 0.00L62.35 12.00M41.57 0.00L20.78 12.00M0.00 48.00L20.78 60.00L20.78 84.00L0.00 96.00L-20.78 84.00L-20.78 60.00ZM0.00 72.00L0.00 48.00M0.00 72.00L20.78 84.00M0.00 72.00L-20.78 84.00M41.57 48.00L62.35 60.00L62.35 84.00L41.57 96.00L20.78 84.00L20.78 60.00ZM41.57 72.00L41.57 48.00M41.57 72.00L62.35 84.00M41.57 72.00L20.78 84.00M20.78 12.00L41.57 24.00L41.57 48.00L20.78 60.00L0.00 48.00L0.00 24.00ZM20.78 36.00L20.78 12.00M20.78 36.00L41.57 48.00M20.78 36.00L0.00 48.00M20.78 -60.00L41.57 -48.00L41.57 -24.00L20.78 -12.00L0.00 -24.00L0.00 -48.00ZM20.78 -36.00L20.78 -60.00M20.78 -36.00L41.57 -24.00M20.78 -36.00L0.00 -24.00M20.78 84.00L41.57 96.00L41.57 120.00L20.78 132.00L0.00 120.00L0.00 96.00ZM20.78 108.00L20.78 84.00M20.78 108.00L41.57 120.00M20.78 108.00L0.00 120.00' fill='none' stroke='%230b1f3a' stroke-opacity='0.07' stroke-width='1'/></svg>");
+  background-size: 41.57px 72.00px;
 }
 
 /* Las letras gigantes de la portada: el degradado se desplaza despacio, lo
