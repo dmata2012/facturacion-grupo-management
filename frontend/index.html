@@ -2774,6 +2774,7 @@ async function guardarGasto(id) {
     // de Gastos no esta montada: se refresca lo que si exista.
     if (window._gtVolverA === 'concentrado') {
       window._gtVolverA = null;
+      openModal('modal-gt-cats');          // se había cerrado para no tapar al editor
       await cargarDetalleConcepto();
       if ($('cc-body')) cargarConcentrado();
     } else if ($('gt-body')) {
@@ -13766,7 +13767,18 @@ function gtIrAConcepto(conceptoId) {
 // refrescar este desglose y el reporte, no la pantalla de Gastos —que no está abierta.
 async function editarGastoDesdeConcentrado(id) {
   window._gtVolverA = 'concentrado';
+  // Los dos modales comparten capa y el desglose va después en el documento, así
+  // que taparía al editor. Se cierra y se vuelve a él al guardar o cancelar.
+  closeModal('modal-gt-cats');
   await openGasto(id);
+  // Cancelar debe devolver al desglose, no dejar la pantalla vacía
+  const cancelar = $('modal-gasto-body')?.querySelector('.form-actions .btn.bo');
+  if (cancelar) cancelar.setAttribute('onclick', "closeModal('modal-gasto');volverAlDesglose()");
+}
+
+function volverAlDesglose() {
+  window._gtVolverA = null;
+  if (window._ccDrill) openModal('modal-gt-cats');
 }
 
 async function eliminarGastoDesdeConcentrado(id) {
