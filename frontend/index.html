@@ -13444,6 +13444,13 @@ async function concentrado() {
         border-right:1.5px solid var(--border)}
       .cc-tabla tr:hover td{background:#f8fafc}
       .cc-tabla tr:hover td.concepto{background:#f1f5f9}
+      /* Renglones que se pueden abrir: el color, el hover y la lupa lo hacen evidente */
+      .cc-tabla tr.cc-abre{cursor:pointer}
+      .cc-tabla tr.cc-abre td.concepto{color:#b45309}
+      .cc-tabla tr.cc-abre:hover td{background:#fffbeb}
+      .cc-tabla tr.cc-abre:hover td.concepto{background:#fef3c7;box-shadow:inset 3px 0 0 #d97706}
+      .cc-lupa{opacity:0;font-size:10px;margin-left:6px;transition:opacity .15s}
+      .cc-tabla tr.cc-abre:hover .cc-lupa{opacity:.8}
       .cc-sec td{background:#0f172a;color:#fff;font-weight:900;font-size:11px;
         text-transform:uppercase;letter-spacing:1px;padding:8px 6px}
       .cc-sec td.concepto{background:#0f172a;color:#fff}
@@ -13558,17 +13565,17 @@ function renderConcentrado(d) {
     html += `<tr class="cc-sec"><td class="concepto">${b.titulo}</td>
              ${MESES_CON.map(()=>'<td></td>').join('')}<td></td></tr>`;
     b.filas.forEach((f, i) => {
-      // El nombre abre el desglose del concepto; los gastos sin clasificar no
-      // tienen concepto que abrir, asi que ese renglon no es clicable.
+      // El renglón entero abre el desglose. Antes solo el nombre llevaba un
+      // subrayado punteado: pasaba desapercibido y nadie descubría que se podía
+      // abrir. Los gastos sin clasificar no tienen concepto, así que no se abren.
       const abrible = !!f.id;
-      html += `<tr>
+      html += `<tr class="${abrible ? 'cc-abre' : ''}"${abrible
+        ? ` onclick="abrirDetalleConcepto(${f.id},&quot;${(f.nombre||'').replace(/"/g,'')}&quot;,${d.anio})" title="Clic para ver los movimientos de este concepto mes a mes"`
+        : ''}>
         <td class="concepto">
           <span style="color:var(--muted);display:inline-block;width:22px">${i+1}</span>
-          ${abrible
-            ? `<a href="#" onclick="event.preventDefault();abrirDetalleConcepto(${f.id},'${(f.nombre||'').replace(/'/g,"\\'")}',${d.anio})"
-                   style="color:var(--dark);text-decoration:none;border-bottom:1px dotted #cbd5e1"
-                   title="Ver los gastos de este concepto mes a mes">${f.nombre}</a>`
-            : f.nombre}
+          <span style="font-weight:${abrible ? '600' : '400'}">${f.nombre}</span>
+          ${abrible ? '<span class="cc-lupa">🔍</span>' : ''}
         </td>
         ${f.meses.map(v => ccNum(v)).join('')}
         ${ccNum(f.total, 'cc-tot-col')}
