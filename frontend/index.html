@@ -2061,6 +2061,7 @@ function renderPendientes(d) {
       <div style="font-size:12px;opacity:.92;text-align:right;max-width:330px;line-height:1.5">
         Asigna la cuenta de gasto de cada uno. Marca <strong>“Recordar proveedor”</strong> y
         la próxima factura de ese RFC entrará clasificada sola.
+        Si alguno no debería estar aquí, <strong>Eliminar</strong> lo quita del sistema.
       </div>
     </div>
 
@@ -2120,12 +2121,47 @@ function renderPendientes(d) {
           <button class="btn bs bsm" id="gtc-btn-${g.id}" onclick="guardarClasificacion(${g.id})"
                   style="white-space:nowrap;height:37px">💾 Guardar</button>
         </div>
-        <label style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;font-size:11.5px;
-                      color:#78350f;cursor:pointer;font-weight:600">
-          <input type="checkbox" id="gtc-rec-${g.id}" ${g.rfc_proveedor?'checked':''} ${g.rfc_proveedor?'':'disabled'}>
-          🤖 Recordar proveedor ${g.rfc_proveedor ? `<span style="font-family:monospace">${g.rfc_proveedor}</span> para la próxima` : '(este gasto no trae RFC)'}
-        </label>` : ''}
+        <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;
+                        color:#78350f;cursor:pointer;font-weight:600">
+            <input type="checkbox" id="gtc-rec-${g.id}" ${g.rfc_proveedor?'checked':''} ${g.rfc_proveedor?'':'disabled'}>
+            🤖 Recordar proveedor ${g.rfc_proveedor ? `<span style="font-family:monospace">${g.rfc_proveedor}</span> para la próxima` : '(este gasto no trae RFC)'}
+          </label>
+          <button class="btn bd bsm" onclick="eliminarPendiente(${g.id})"
+                  style="margin-left:auto;padding:4px 10px;font-size:11px"
+                  title="Quitar este gasto del sistema">🗑 Eliminar</button>
+        </div>` : ''}
       </div>`).join('')}</div>`;
+}
+
+// Eliminar desde la bandeja. Se enumeran los datos del comprobante antes de
+// borrar porque aquí no se ve el contexto de captura, y estos suelen ser CFDI
+// reales: uno borrado por descuido descuadra el Concentrado sin dejar rastro.
+async function eliminarPendiente(id) {
+  const g = (window._gtPend?.gastos || []).find(x => x.id === id);
+  if (!g) return;
+  const quien = g.nombre_proveedor || g.proveedor || 'Proveedor sin nombre';
+  const detalle = [
+    quien,
+    g.rfc_proveedor || '',
+    g.serie_folio ? 'Folio ' + g.serie_folio : '',
+    fmtDate(g.fecha),
+    fmt(g.monto)
+  ].filter(Boolean).join('\n');
+  // Si vino de XML el archivo sigue existiendo y el UUID queda libre al borrar,
+  // así que se puede reimportar. Capturado a mano no hay de dónde recuperarlo.
+  const vuelta = (g.origen === 'XML' && g.uuid)
+    ? 'Vino de un XML: si te arrepientes, vuelve a importar el archivo y regresa igual.'
+    : 'Se capturó a mano: no hay forma de recuperarlo.';
+  if (!await confirm2(`¿Eliminar este gasto?\n\n${detalle}\n\n${vuelta}`)) return;
+  try {
+    await api(`/gastos/${id}`, { method: 'DELETE' });
+    toast('Gasto eliminado.');
+    // Se recarga en vez de solo quitar la tarjeta: el encabezado naranja trae el
+    // conteo y el total, y se quedaría diciendo de más.
+    await cargarPendientes();
+    if ($('gt-body')) cargarGastos();
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 // Cascada: al elegir categoría se acotan las cuentas de gasto de esa fila
