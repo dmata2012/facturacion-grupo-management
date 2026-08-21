@@ -13502,7 +13502,7 @@ async function concentrado() {
             <option value="devengado">Por fecha del gasto</option>
             <option value="pagado">Por fecha de pago</option>
           </select>
-          <button id="cc-todo" onclick="ccTodo(!this.dataset.abierto)" title="Expandir todo">⊞</button>
+          <button id="cc-todo" onclick="concTodo(!this.dataset.abierto)" title="Expandir todo">⊞</button>
           <button onclick="exportarConcentradoExcel()" title="Descargar Excel">⬇</button>
           <button onclick="imprimirConcentrado()" title="Imprimir">🖨</button>
         </div>
@@ -13531,15 +13531,18 @@ function ccNum(v, clase) {
   return `<td class="cc-num ${clase||''}${n<0?' cc-neg':''}">${fmt(n)}</td>`;
 }
 
+// Prefijo conc*, no cc*: Cortes de Caja ya tiene su propio ccToggleCat y, al
+// declararse despues en el mismo script, se quedaba con el nombre. El clic en la
+// categoria llamaba a la funcion del otro modulo y no pasaba nada.
 // Que categorías quedan abiertas. Se guarda fuera del render porque el reporte
 // se repinta al editar un gasto desde el desglose: sin esto se cerraría todo y
 // perderías dónde ibas.
 window._ccAbiertas = window._ccAbiertas || new Set();
-const ccLlaveCat = (bloque, catId) => `${bloque}:${catId == null ? 'sin' : catId}`;
+const concLlaveCat = (bloque, catId) => `${bloque}:${catId == null ? 'sin' : catId}`;
 
 // Abrir y cerrar no vuelve a consultar nada: los conceptos ya vinieron en la
 // misma respuesta, solo se muestran u ocultan.
-function ccToggleCat(llave) {
+function concToggleCat(llave) {
   const abrir = !window._ccAbiertas.has(llave);
   if (abrir) window._ccAbiertas.add(llave); else window._ccAbiertas.delete(llave);
   const cab = document.querySelector(`tr[data-cc-cat="${llave}"]`);
@@ -13551,7 +13554,7 @@ function ccToggleCat(llave) {
     .forEach(tr => tr.classList.toggle('abierta', abrir));
 }
 
-function ccTodo(abrir) {
+function concTodo(abrir) {
   window._ccAbiertas = new Set();
   document.querySelectorAll('tr[data-cc-cat]').forEach(tr => {
     if (abrir) window._ccAbiertas.add(tr.getAttribute('data-cc-cat'));
@@ -13640,10 +13643,10 @@ function renderConcentrado(d) {
 
     if (b.categorias && b.categorias.length) {
       b.categorias.forEach(c => {
-        const llave = ccLlaveCat(b.clave, c.id);
+        const llave = concLlaveCat(b.clave, c.id);
         const ab = window._ccAbiertas.has(llave);
         html += `<tr class="cc-cat${ab ? ' abierta' : ''}" data-cc-cat="${llave}"
-                     onclick="ccToggleCat('${llave}')"
+                     onclick="concToggleCat('${llave}')"
                      title="${ab ? 'Clic para cerrar' : 'Clic para ver los conceptos que la forman'}">
           <td class="concepto">
             <span class="cc-chev">▶</span>
@@ -13954,7 +13957,7 @@ function imprimirConcentrado() {
     if (b.categorias && b.categorias.length) {
       b.categorias.forEach(c => {
         filas += fila(c.nombre, c.meses, c.total, 'cat');
-        if (abiertas.has(ccLlaveCat(b.clave, c.id)))
+        if (abiertas.has(concLlaveCat(b.clave, c.id)))
           c.conceptos.forEach(f => { filas += fila(`${f.num}. ${f.nombre}`, f.meses, f.total, '', true); });
       });
     } else {
