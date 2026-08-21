@@ -596,19 +596,24 @@ router.get('/concentrado', async (req, res) => {
       ? 'AND g.fecha_pago IS NOT NULL AND COALESCE(g.pagado,0) > 0' : '';
     const montoCol = baseGasto === 'pagado' ? 'LEAST(COALESCE(g.pagado,0), g.monto)' : 'g.monto';
 
+    // Se agrupa por el id de la categoría, no por su nombre: renombrarla desde el
+    // catálogo no debe partir el renglón en dos.
     const gas = await query(`
       SELECT COALESCE(k.bloque,'operacion')          AS bloque,
+             k.id                                    AS categoria_id,
+             COALESCE(k.nombre,'Sin categoría')      AS categoria,
+             COALESCE(k.orden, 999)                  AS cat_orden,
+             COALESCE(k.color, '#94a3b8')            AS cat_color,
              c.id                                    AS concepto_id,
              COALESCE(c.nombre,'Sin clasificar')     AS concepto,
              COALESCE(c.orden, 999)                  AS orden,
-             COALESCE(k.nombre,'Sin categoría')      AS categoria,
              EXTRACT(MONTH FROM ${campoFecha})::int  AS mes,
              SUM(${montoCol})                        AS monto
         FROM fac_gastos g
         LEFT JOIN fac_gastos_conceptos  c ON c.id = g.concepto_id
         LEFT JOIN fac_gastos_categorias k ON k.id = c.categoria_id
        WHERE EXTRACT(YEAR FROM ${campoFecha}) = $1 ${filtroPago}
-       GROUP BY 1, 2, 3, 4, 5, 6
+       GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
     `, [anio]);
 
     const armaBloque = (titulo, clave) => {
@@ -617,14 +622,46 @@ router.get('/concentrado', async (req, res) => {
         const v = parseFloat(r.monto) || 0;
         const f = porConcepto[r.concepto] ||
           (porConcepto[r.concepto] = { id: r.concepto_id, nombre: r.concepto,
-                                       categoria: r.categoria, orden: r.orden, meses: vacio(), total: 0 });
+                                       categoria_id: r.categoria_id, categoria: r.categoria,
+                                       cat_orden: r.cat_orden, cat_color: r.cat_color,
+                                       orden: r.orden, meses: vacio(), total: 0 });
         f.meses[r.mes - 1] += v;
         f.total += v;
       });
       const filas = Object.values(porConcepto).sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre));
+
+      // Agrupado por categoría. El subtotal sale de sumar los conceptos que ya
+      // están en la fila, nunca de una segunda consulta: calculado aparte,
+      // cualquier diferencia de filtro lo dejaría sin cuadrar contra su propio
+      // detalle, que es justo lo que destruye la confianza en el reporte.
+      const porCat = new Map();
+      filas.forEach(f => {
+        const llave = f.categoria_id == null ? 'sin' : String(f.categoria_id);
+        let c = porCat.get(llave);
+        if (!c) porCat.set(llave, c = {
+          id: f.categoria_id, nombre: f.categoria, color: f.cat_color,
+          // "Sin categoría" siempre al final, sin importar el orden de las demás.
+          // No se esconde: si no apareciera, la suma de las categorías dejaría de
+          // dar el total del bloque y nadie sabría por qué.
+          orden: f.categoria_id == null ? 9e9 : f.cat_orden,
+          sin_categoria: f.categoria_id == null,
+          conceptos: [], meses: vacio(), total: 0
+        });
+        c.conceptos.push(f);
+        f.meses.forEach((v, i) => { c.meses[i] += v; });
+        c.total += f.total;
+      });
+      const categorias = [...porCat.values()]
+        .sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre));
+
+      // Numeración corrida del bloque, ya en el orden en que se pinta, para que la
+      // pantalla, el Excel y la impresión citen el mismo número de concepto.
+      let n = 0;
+      categorias.forEach(c => c.conceptos.forEach(f => { f.num = ++n; }));
+
       const meses = vacio();
       filas.forEach(f => f.meses.forEach((v, i) => { meses[i] += v; }));
-      return { titulo, clave, filas, meses, total: meses.reduce((a, b) => a + b, 0) };
+      return { titulo, clave, categorias, filas, meses, total: meses.reduce((a, b) => a + b, 0) };
     };
     const bloques = [
       armaBloque('GASTOS DE OPERACIÓN', 'operacion'),

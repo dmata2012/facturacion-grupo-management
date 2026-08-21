@@ -13452,6 +13452,21 @@ async function concentrado() {
       .cc-tabla tr.cc-abre:hover td.concepto{background:#fef3c7;box-shadow:inset 3px 0 0 #d97706}
       .cc-lupa{opacity:0;font-size:10px;margin-left:6px;transition:opacity .15s}
       .cc-tabla tr.cc-abre:hover .cc-lupa{opacity:.8}
+      /* Categorías de gasto: la fila se abre y muestra los conceptos que la forman */
+      .cc-tabla tr.cc-cat{cursor:pointer}
+      .cc-tabla tr.cc-cat td{background:#eef2f7;font-weight:800;border-bottom:1px solid #cbd5e1}
+      .cc-tabla tr.cc-cat td.concepto{background:#eef2f7;padding-left:8px}
+      .cc-tabla tr.cc-cat:hover td,.cc-tabla tr.cc-cat.abierta td{background:#e2e8f0}
+      .cc-tabla tr.cc-cat:hover td.concepto,.cc-tabla tr.cc-cat.abierta td.concepto{background:#e2e8f0}
+      .cc-chev{display:inline-block;width:13px;font-size:8.5px;color:var(--muted);
+        transition:transform .15s;transform-origin:45% 50%}
+      .cc-cat.abierta .cc-chev{transform:rotate(90deg)}
+      .cc-pill{display:inline-block;width:8px;height:8px;border-radius:3px;
+        margin-right:7px;vertical-align:middle}
+      .cc-catn{font-size:9.5px;color:var(--muted);font-weight:700;margin-left:7px}
+      /* Arrancan cerradas: 13 categorías caben sin scroll, que es la gracia */
+      .cc-tabla tr.cc-hijo{display:none}
+      .cc-tabla tr.cc-hijo.abierta{display:table-row}
       .cc-sec td{background:#0f172a;color:#fff;font-weight:900;font-size:11px;
         text-transform:uppercase;letter-spacing:1px;padding:8px 6px}
       .cc-sec td.concepto{background:#0f172a;color:#fff}
@@ -13487,6 +13502,7 @@ async function concentrado() {
             <option value="devengado">Por fecha del gasto</option>
             <option value="pagado">Por fecha de pago</option>
           </select>
+          <button id="cc-todo" onclick="ccTodo(!this.dataset.abierto)" title="Expandir todo">⊞</button>
           <button onclick="exportarConcentradoExcel()" title="Descargar Excel">⬇</button>
           <button onclick="imprimirConcentrado()" title="Imprimir">🖨</button>
         </div>
@@ -13513,6 +13529,41 @@ function ccNum(v, clase) {
   const n = parseFloat(v) || 0;
   if (!n) return `<td class="cc-num cc-cero ${clase||''}">–</td>`;
   return `<td class="cc-num ${clase||''}${n<0?' cc-neg':''}">${fmt(n)}</td>`;
+}
+
+// Que categorías quedan abiertas. Se guarda fuera del render porque el reporte
+// se repinta al editar un gasto desde el desglose: sin esto se cerraría todo y
+// perderías dónde ibas.
+window._ccAbiertas = window._ccAbiertas || new Set();
+const ccLlaveCat = (bloque, catId) => `${bloque}:${catId == null ? 'sin' : catId}`;
+
+// Abrir y cerrar no vuelve a consultar nada: los conceptos ya vinieron en la
+// misma respuesta, solo se muestran u ocultan.
+function ccToggleCat(llave) {
+  const abrir = !window._ccAbiertas.has(llave);
+  if (abrir) window._ccAbiertas.add(llave); else window._ccAbiertas.delete(llave);
+  const cab = document.querySelector(`tr[data-cc-cat="${llave}"]`);
+  if (cab) {
+    cab.classList.toggle('abierta', abrir);
+    cab.title = abrir ? 'Clic para cerrar' : 'Clic para ver los conceptos que la forman';
+  }
+  document.querySelectorAll(`tr[data-cc-hijo="${llave}"]`)
+    .forEach(tr => tr.classList.toggle('abierta', abrir));
+}
+
+function ccTodo(abrir) {
+  window._ccAbiertas = new Set();
+  document.querySelectorAll('tr[data-cc-cat]').forEach(tr => {
+    if (abrir) window._ccAbiertas.add(tr.getAttribute('data-cc-cat'));
+    tr.classList.toggle('abierta', abrir);
+  });
+  document.querySelectorAll('tr[data-cc-hijo]').forEach(tr => tr.classList.toggle('abierta', abrir));
+  const btn = $('cc-todo');
+  if (btn) {
+    btn.textContent = abrir ? '⊟' : '⊞';
+    btn.title = abrir ? 'Contraer todo' : 'Expandir todo';
+    btn.dataset.abierto = abrir ? '1' : '';
+  }
 }
 
 function renderConcentrado(d) {
@@ -13562,26 +13613,53 @@ function renderConcentrado(d) {
   html += fila('TOTAL DE INGRESOS', d.ingresos.meses, d.ingresos.total, 'cc-tot');
 
   // ── GASTOS ──
+  // El renglón del concepto abre su desglose. Antes solo el nombre llevaba un
+  // subrayado punteado: pasaba desapercibido y nadie descubría que se podía
+  // abrir. Los gastos sin clasificar no tienen concepto, así que no se abren.
+  const filaConcepto = (f, num, llaveCat, abierta) => {
+    const abrible = !!f.id;
+    const clases = [];
+    if (llaveCat) clases.push('cc-hijo', abierta ? 'abierta' : '');
+    if (abrible) clases.push('cc-abre');
+    return `<tr class="${clases.filter(Boolean).join(' ')}"${llaveCat ? ` data-cc-hijo="${llaveCat}"` : ''}${abrible
+      ? ` onclick="abrirDetalleConcepto(${f.id},&quot;${(f.nombre||'').replace(/"/g,'')}&quot;,${d.anio})" title="Clic para ver los movimientos de este concepto mes a mes"`
+      : ''}>
+      <td class="concepto"${llaveCat ? ' style="padding-left:22px"' : ''}>
+        <span style="color:var(--muted);display:inline-block;width:24px">${num}</span>
+        <span style="font-weight:${abrible ? '600' : '400'}">${f.nombre}</span>
+        ${abrible ? '<span class="cc-lupa">🔍</span>' : ''}
+      </td>
+      ${f.meses.map(v => ccNum(v)).join('')}
+      ${ccNum(f.total, 'cc-tot-col')}
+    </tr>`;
+  };
+
   d.gastos.bloques.forEach(b => {
     html += `<tr class="cc-sec"><td class="concepto">${b.titulo}</td>
              ${MESES_CON.map(()=>'<td></td>').join('')}<td></td></tr>`;
-    b.filas.forEach((f, i) => {
-      // El renglón entero abre el desglose. Antes solo el nombre llevaba un
-      // subrayado punteado: pasaba desapercibido y nadie descubría que se podía
-      // abrir. Los gastos sin clasificar no tienen concepto, así que no se abren.
-      const abrible = !!f.id;
-      html += `<tr class="${abrible ? 'cc-abre' : ''}"${abrible
-        ? ` onclick="abrirDetalleConcepto(${f.id},&quot;${(f.nombre||'').replace(/"/g,'')}&quot;,${d.anio})" title="Clic para ver los movimientos de este concepto mes a mes"`
-        : ''}>
-        <td class="concepto">
-          <span style="color:var(--muted);display:inline-block;width:22px">${i+1}</span>
-          <span style="font-weight:${abrible ? '600' : '400'}">${f.nombre}</span>
-          ${abrible ? '<span class="cc-lupa">🔍</span>' : ''}
-        </td>
-        ${f.meses.map(v => ccNum(v)).join('')}
-        ${ccNum(f.total, 'cc-tot-col')}
-      </tr>`;
-    });
+
+    if (b.categorias && b.categorias.length) {
+      b.categorias.forEach(c => {
+        const llave = ccLlaveCat(b.clave, c.id);
+        const ab = window._ccAbiertas.has(llave);
+        html += `<tr class="cc-cat${ab ? ' abierta' : ''}" data-cc-cat="${llave}"
+                     onclick="ccToggleCat('${llave}')"
+                     title="${ab ? 'Clic para cerrar' : 'Clic para ver los conceptos que la forman'}">
+          <td class="concepto">
+            <span class="cc-chev">▶</span>
+            <span class="cc-pill" style="background:${c.color || '#94a3b8'}"></span>${c.nombre}
+            <span class="cc-catn">${c.conceptos.length}</span>
+          </td>
+          ${c.meses.map(v => ccNum(v)).join('')}
+          ${ccNum(c.total, 'cc-tot-col')}
+        </tr>`;
+        c.conceptos.forEach(f => { html += filaConcepto(f, f.num, llave, ab); });
+      });
+    } else {
+      // Respuesta de una versión anterior del backend: se dibuja plano
+      b.filas.forEach((f, i) => { html += filaConcepto(f, i + 1, null, true); });
+    }
+
     if (!b.filas.length) {
       const aviso = b.clave === 'impuestos' && !d.categorias_impuestos
         ? 'Ninguna categoría está marcada como impuestos. Márcala en Gastos → Catálogo → ✏️ de la categoría.'
@@ -13630,7 +13708,9 @@ function renderConcentrado(d) {
     <details class="card" style="margin-top:10px;font-size:11.5px;color:var(--muted);line-height:1.6;padding:10px 14px">
       <summary style="cursor:pointer;font-weight:800;color:var(--dark);font-size:11.5px">Cómo se calcula este reporte</summary>
       <div style="margin-top:7px;color:#b45309">
-        Haz clic en el nombre de cualquier concepto de gasto para ver sus movimientos mes a mes.
+        Haz clic en una <strong>categoría</strong> para ver los conceptos que la forman,
+        y en un <strong>concepto</strong> para ver sus movimientos mes a mes.
+        El total de cada categoría es la suma de sus conceptos.
       </div>
       <div style="margin-top:7px">El ingreso no es lo facturado: de cada factura solo se
       toman los conceptos de <strong>Comisiones</strong> y <strong>Otros</strong> del desglose,
@@ -13825,9 +13905,18 @@ function exportarConcentradoExcel() {
   }
   push('TOTAL DE INGRESOS', d.ingresos.meses, d.ingresos.total);
   aoa.push([]);
+  // El Excel se lleva siempre el detalle completo, esté abierto o no en pantalla:
+  // ese archivo es para trabajar los datos, no para leerlos de un vistazo.
   d.gastos.bloques.forEach(b => {
     aoa.push([b.titulo]);
-    b.filas.forEach((f, i) => push(`${i+1}. ${f.nombre}`, f.meses, f.total));
+    if (b.categorias && b.categorias.length) {
+      b.categorias.forEach(c => {
+        push('  ' + c.nombre, c.meses, c.total);
+        c.conceptos.forEach(f => push(`     ${f.num}. ${f.nombre}`, f.meses, f.total));
+      });
+    } else {
+      b.filas.forEach((f, i) => push(`${i+1}. ${f.nombre}`, f.meses, f.total));
+    }
     push(`TOTAL ${b.titulo}`, b.meses, b.total);
     aoa.push([]);
   });
@@ -13857,9 +13946,20 @@ function imprimirConcentrado() {
     g.filas.forEach(f => { filas += fila(f.nombre, f.meses, f.total, '', true); });
   });
   filas += fila('TOTAL DE INGRESOS', d.ingresos.meses, d.ingresos.total, 'tot');
+  // Se imprime lo que está abierto en pantalla: cerrado da un resumen de una
+  // cuartilla, y con "Expandir todo" antes de imprimir sale el detalle completo.
+  const abiertas = window._ccAbiertas || new Set();
   d.gastos.bloques.forEach(b => {
     filas += `<tr class="sec"><td class="c" colspan="14">${b.titulo}</td></tr>`;
-    b.filas.forEach((f,i) => { filas += fila(`${i+1}. ${f.nombre}`, f.meses, f.total, '', true); });
+    if (b.categorias && b.categorias.length) {
+      b.categorias.forEach(c => {
+        filas += fila(c.nombre, c.meses, c.total, 'cat');
+        if (abiertas.has(ccLlaveCat(b.clave, c.id)))
+          c.conceptos.forEach(f => { filas += fila(`${f.num}. ${f.nombre}`, f.meses, f.total, '', true); });
+      });
+    } else {
+      b.filas.forEach((f,i) => { filas += fila(`${i+1}. ${f.nombre}`, f.meses, f.total, '', true); });
+    }
     filas += fila(`TOTAL ${b.titulo}`, b.meses, b.total, 'sub');
   });
   filas += fila('TOTAL DE GASTOS', d.gastos.meses, d.gastos.total, 'tot');
@@ -13881,6 +13981,8 @@ function imprimirConcentrado() {
       td.c{text-align:left}
       .sec td{background:#111;color:#fff;font-weight:800;letter-spacing:1px;padding:4px}
       .sub td{background:#e5e7eb;font-weight:800}
+      .cat td{background:#f3f4f6;font-weight:800}
+      .cat td.c{padding-left:8px}
       .tot td{background:#374151;color:#fff;font-weight:800}
       .util td{background:#0f766e;color:#fff;font-weight:800;font-size:9px}
       .tt{font-weight:800}
