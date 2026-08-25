@@ -14182,6 +14182,10 @@ async function misVacaciones() {
         <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:10px">
           Mis solicitudes
         </div>
+        <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;line-height:1.5">
+          Cuando una solicitud quede <strong>aprobada</strong> aparece el botón 🖨 para
+          imprimir tu formato firmado.
+        </div>
         ${d.solicitudes.length ? `<div class="tscroll" style="max-height:52vh;overflow:auto"><table style="font-size:12px">
           <thead><tr><th>Del</th><th>Al</th><th style="text-align:center">Días</th><th>Estatus</th><th></th></tr></thead>
           <tbody>${d.solicitudes.map(s => {
@@ -14191,8 +14195,13 @@ async function misVacaciones() {
               <td style="white-space:nowrap">${fmtDate(s.fecha_fin)}</td>
               <td style="text-align:center;font-weight:800">${s.dias_solicitados}</td>
               <td><span class="gt-pill ${/aprob/i.test(s.estatus)?'vig':/rechaz/i.test(s.estatus)?'can':'sin'}">${s.estatus||'pendiente'}</span></td>
-              <td style="text-align:right">${futura
-                ? `<button class="btn bd bsm" style="padding:3px 7px" onclick="cancelarMiSolicitud(${s.id})" title="Cancelar">✕</button>` : ''}</td>
+              <td style="text-align:right;white-space:nowrap">
+                ${/aprob/i.test(s.estatus||'')
+                  ? `<button class="btn bo bsm" style="padding:3px 7px" onclick="imprimirSolicitudVac(${s.id})"
+                             title="Imprimir mi solicitud autorizada">🖨</button>` : ''}
+                ${futura
+                  ? `<button class="btn bd bsm" style="padding:3px 7px" onclick="cancelarMiSolicitud(${s.id})" title="Cancelar">✕</button>` : ''}
+              </td>
             </tr>`;
           }).join('')}</tbody>
         </table></div>` : '<p class="empty">Aún no has solicitado vacaciones.</p>'}
@@ -15329,7 +15338,9 @@ async function eliminarSolicitudVac(id, empId) {
 async function imprimirSolicitudVac(id) {
   try {
     const s = await api(`/vacaciones/solicitudes/${id}`);
-    const emp = await api(`/vacaciones/empleados/${s.empleado_id}`);
+    // El detalle ya trae al empleado y sus periodos. Se conserva la consulta
+    // aparte por si la respuesta viene de un backend anterior al cambio.
+    const emp = s.empleado || await api(`/vacaciones/empleados/${s.empleado_id}`);
     const periodos = emp.periodos || [];
     const totDias = periodos.reduce((a,p)=>a+parseFloat(p.dias_correspondientes||0),0);
     const totTom = periodos.reduce((a,p)=>a+parseFloat(p.dias_tomados||0),0);

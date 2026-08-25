@@ -601,11 +601,25 @@ router.patch('/solicitudes/:id/rechazar', autorizaVacaciones, async (req, res) =
   } finally { client.release(); }
 });
 
+// ¿Puede ver expedientes ajenos? Se replica la decision de permiso(), valvula
+// incluida: mientras las tablas de permisos no existan ese middleware deja pasar
+// a todos, y aqui hay que hacer lo mismo o Recursos Humanos se quedaria fuera.
+async function vePlantilla(req) {
+  const p = await permisosDeUsuario(req.usuario.id, req.usuario.rol);
+  if (!p.listo) return true;
+  return (p.niveles.vacaciones ?? 0) >= NIVEL.CAPTURAR;
+}
+
 // ── GET SOLICITUD ──
-router.get('/solicitudes/:id', verPlantilla, async (req, res) => {
+// Sin middleware de plantilla: el colaborador tiene que poder abrir la suya para
+// imprimirla, y se filtra por dueno aqui dentro. Devuelve tambien empleado y
+// periodos para que el formato se arme con una sola llamada; si no, tendria que
+// pegarle a /empleados/:id, que es justo el expediente ajeno que no debe ver.
+router.get('/solicitudes/:id', async (req, res) => {
   try {
     const r = await query(`
       SELECT s.*, e.nombre, e.puesto, e.departamento, e.fecha_ingreso,
+             e.numero_colaborador,
              a.nombre AS autorizante
       FROM fac_vacaciones_solicitudes s
       JOIN fac_empleados e ON e.id = s.empleado_id
@@ -613,7 +627,30 @@ router.get('/solicitudes/:id', verPlantilla, async (req, res) => {
       WHERE s.id=$1
     `, [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Solicitud no encontrada.' });
-    res.json(r.rows[0]);
+    const sol = r.rows[0];
+
+    if (!await vePlantilla(req)) {
+      const mi = await miEmpleadoId(req.usuario.id);
+      if (!mi || sol.empleado_id !== mi)
+        return res.status(403).json({ error: 'Esa solicitud no es tuya.' });
+    }
+
+    const per = await query(
+      `SELECT id, num_periodo, dias_correspondientes, dias_tomados,
+              (dias_correspondientes - dias_tomados) AS pendientes
+         FROM fac_vacaciones_periodos WHERE empleado_id=$1 ORDER BY num_periodo`,
+      [sol.empleado_id]);
+
+    res.json({
+      ...sol,
+      empleado: {
+        id: sol.empleado_id, nombre: sol.nombre, puesto: sol.puesto,
+        departamento: sol.departamento, numero_colaborador: sol.numero_colaborador,
+        fecha_ingreso: sol.fecha_ingreso,
+        antiguedad_anios: anios(sol.fecha_ingreso),
+        periodos: per.rows
+      }
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
