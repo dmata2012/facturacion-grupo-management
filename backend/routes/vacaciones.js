@@ -29,7 +29,7 @@ async function distribuirDiasFIFO(client, empleadoId, diasTotales) {
   return { ok, asignaciones, resumen, faltantes: faltan };
 }
 const { verificarToken, requireRol } = require('../middleware/auth');
-const { permiso, NIVEL } = require('../middleware/permiso');
+const { permiso, NIVEL, permisosDeUsuario } = require('../middleware/permiso');
 
 // Primer modulo migrado al motor de permisos. El nivel Ver deja al colaborador
 // solo con lo suyo; para ver a toda la plantilla hace falta Capturar o mas.
@@ -42,6 +42,14 @@ router.use(verificarToken);
 (async () => {
   try { await query(`ALTER TABLE fac_vacaciones_solicitudes ADD COLUMN IF NOT EXISTS tipo TEXT DEFAULT 'vacaciones'`); }
   catch (e) { console.warn('Migración tipo solicitudes:', e.message); }
+  // Rastro de la autorización. Sin esto la solicitud cambia de estatus sin que
+  // quede quien lo decidió, y el formato impreso no puede acreditar nada.
+  for (const col of ['autorizado_por INT',
+                     'autorizado_en TIMESTAMP',
+                     'nota_autorizacion TEXT']) {
+    try { await query(`ALTER TABLE fac_vacaciones_solicitudes ADD COLUMN IF NOT EXISTS ${col}`); }
+    catch (e) { console.warn('Migración autorización:', e.message); }
+  }
 })();
 
 // Tabla LFT (post-reforma 2023): años cumplidos → días de vacaciones
@@ -106,12 +114,19 @@ router.get('/mi-info', async (req, res) => {
         WHERE empleado_id=$1 ORDER BY fecha_inicio DESC, id DESC LIMIT 100`, [empId]);
 
     const disponibles = periodos.rows.reduce((a, p) => a + parseFloat(p.pendientes || 0), 0);
+    // Una solicitud pendiente ya descontó sus días del periodo. Hay que decirlo
+    // aparte: si no, el colaborador ve un saldo más bajo del que esperaba y nada
+    // en la pantalla le explica adónde se fueron.
+    const apart = await query(
+      `SELECT COALESCE(SUM(dias_solicitados),0) AS n FROM fac_vacaciones_solicitudes
+        WHERE empleado_id=$1 AND estatus='pendiente'`, [empId]);
     res.json({
       vinculado: true,
       empleado: { ...emp.rows[0], antiguedad_anios: anios(emp.rows[0].fecha_ingreso) },
       periodos: periodos.rows,
       solicitudes: solicitudes.rows,
-      dias_disponibles: +disponibles.toFixed(2)
+      dias_disponibles: +disponibles.toFixed(2),
+      dias_apartados: +parseFloat(apart.rows[0].n).toFixed(2)
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -459,13 +474,142 @@ async function crearSolicitud(req, res) {
   } finally { client.release(); }
 }
 
+// ═══ AUTORIZACIÓN DE SOLICITUDES ════════════════════
+// Autorizar es decidir sobre el saldo de otro, no capturar: por eso pide nivel
+// Editar y no Capturar.
+const autorizaVacaciones = permiso('vacaciones', NIVEL.EDITAR);
+
+// Nadie autoriza lo suyo, ni el administrador. Si se permitiera, el paso de
+// autorización no controlaría nada para justamente quien más acceso tiene.
+async function noEsMia(req, solicitudId) {
+  const mi = await miEmpleadoId(req.usuario.id);
+  if (!mi) return true;
+  const r = await query(
+    `SELECT empleado_id FROM fac_vacaciones_solicitudes WHERE id=$1`, [solicitudId]);
+  return !r.rows.length || r.rows[0].empleado_id !== mi;
+}
+
+// ── BANDEJA: lo que espera decisión ──
+router.get('/solicitudes-pendientes', autorizaVacaciones, async (req, res) => {
+  try {
+    const mi = await miEmpleadoId(req.usuario.id);
+    const r = await query(`
+      SELECT s.id, s.empleado_id, s.tipo, s.dias_solicitados, s.observaciones,
+             s.periodos_aplicados,
+             TO_CHAR(s.fecha_solicitud,'YYYY-MM-DD') AS fecha_solicitud,
+             TO_CHAR(s.fecha_inicio,'YYYY-MM-DD')    AS fecha_inicio,
+             TO_CHAR(s.fecha_fin,'YYYY-MM-DD')       AS fecha_fin,
+             TO_CHAR(s.fecha_regreso,'YYYY-MM-DD')   AS fecha_regreso,
+             e.nombre, e.puesto, e.departamento, e.numero_colaborador,
+             (SELECT COALESCE(SUM(dias_correspondientes - dias_tomados),0)
+                FROM fac_vacaciones_periodos WHERE empleado_id = s.empleado_id) AS le_quedan,
+             u.nombre AS capturada_por
+        FROM fac_vacaciones_solicitudes s
+        JOIN fac_empleados e ON e.id = s.empleado_id
+        LEFT JOIN fac_usuarios u ON u.id = s.creado_por
+       WHERE s.estatus = 'pendiente'
+         AND ($1::int IS NULL OR s.empleado_id <> $1::int)
+       ORDER BY s.fecha_inicio, s.id
+    `, [mi]);
+    // Las propias se cuentan aparte para poder explicar por qué no salen en la lista
+    const propias = mi ? await query(
+      `SELECT COUNT(*)::int AS n FROM fac_vacaciones_solicitudes
+        WHERE estatus='pendiente' AND empleado_id=$1`, [mi]) : { rows: [{ n: 0 }] };
+    res.json({ solicitudes: r.rows, propias_en_espera: propias.rows[0].n });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Cuantas esperan: para el contador del menú. Sin él nadie se entera de que hay
+// algo pendiente, y mientras tanto al colaborador le cuenta falta en asistencia.
+router.get('/solicitudes-pendientes/conteo', async (req, res) => {
+  try {
+    // Se replica la decision de permiso(), valvula incluida: mientras las tablas
+    // de permisos no existan, ese middleware deja pasar a todos y el contador
+    // tiene que coincidir o marcaria cero sobre una bandeja que si abre.
+    const perm = await permisosDeUsuario(req.usuario.id, req.usuario.rol);
+    if (perm.listo && (perm.niveles.vacaciones ?? 0) < NIVEL.EDITAR)
+      return res.json({ n: 0 });
+    const mi = await miEmpleadoId(req.usuario.id);
+    const r = await query(
+      `SELECT COUNT(*)::int AS n FROM fac_vacaciones_solicitudes
+        WHERE estatus='pendiente' AND ($1::int IS NULL OR empleado_id <> $1::int)`, [mi]);
+    res.json({ n: r.rows[0].n });
+  } catch (e) { res.json({ n: 0 }); }
+});
+
+// ── AUTORIZAR ──
+// Los días ya se descontaron al crearse la solicitud, así que aquí no se toca el
+// saldo: solo cambia el estatus, que es lo que hace que asistencia deje de
+// contarle falta.
+router.patch('/solicitudes/:id/autorizar', autorizaVacaciones, async (req, res) => {
+  try {
+    if (!await noEsMia(req, req.params.id))
+      return res.status(403).json({ error: 'No puedes autorizar tu propia solicitud. Que la revise alguien más.' });
+    const r = await query(
+      `UPDATE fac_vacaciones_solicitudes
+          SET estatus='aprobada', autorizado_por=$1, autorizado_en=NOW(), nota_autorizacion=$2
+        WHERE id=$3 AND estatus='pendiente' RETURNING *`,
+      [req.usuario.id, (req.body.nota || '').trim() || null, req.params.id]);
+    if (!r.rows.length)
+      return res.status(400).json({ error: 'Esa solicitud ya fue resuelta o no existe.' });
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── RECHAZAR ──
+// Devuelve los días a sus periodos. Si no se devolvieran, un "no" le costaría al
+// colaborador los mismos días que si se hubiera ido de vacaciones.
+const MIN_MOTIVO = 5;
+router.patch('/solicitudes/:id/rechazar', autorizaVacaciones, async (req, res) => {
+  const client = await getClient();
+  try {
+    const nota = (req.body.nota || '').trim();
+    if (nota.length < MIN_MOTIVO)
+      return res.status(400).json({ error: 'Escribe el motivo del rechazo. El colaborador tiene que poder leer por qué.' });
+    if (!await noEsMia(req, req.params.id))
+      return res.status(403).json({ error: 'No puedes rechazar tu propia solicitud.' });
+
+    await client.query('BEGIN');
+    const s = await client.query(
+      `SELECT id FROM fac_vacaciones_solicitudes WHERE id=$1 AND estatus='pendiente' FOR UPDATE`,
+      [req.params.id]);
+    if (!s.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Esa solicitud ya fue resuelta o no existe.' });
+    }
+    const asig = await client.query(
+      `SELECT periodo_id, dias_aplicados FROM fac_vacaciones_solicitud_periodos WHERE solicitud_id=$1`,
+      [req.params.id]);
+    for (const a of asig.rows) {
+      await client.query(
+        `UPDATE fac_vacaciones_periodos SET dias_tomados = GREATEST(0, dias_tomados - $1), actualizado_en=NOW()
+          WHERE id = $2`, [parseFloat(a.dias_aplicados), a.periodo_id]);
+    }
+    // Se borra el reparto: los días ya volvieron y dejarlo haría que un segundo
+    // rechazo los devolviera otra vez.
+    await client.query(`DELETE FROM fac_vacaciones_solicitud_periodos WHERE solicitud_id=$1`, [req.params.id]);
+    const r = await client.query(
+      `UPDATE fac_vacaciones_solicitudes
+          SET estatus='rechazada', autorizado_por=$1, autorizado_en=NOW(), nota_autorizacion=$2
+        WHERE id=$3 RETURNING *`,
+      [req.usuario.id, nota, req.params.id]);
+    await client.query('COMMIT');
+    res.json({ ...r.rows[0], dias_devueltos: asig.rows.reduce((a, x) => a + parseFloat(x.dias_aplicados), 0) });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+
 // ── GET SOLICITUD ──
 router.get('/solicitudes/:id', verPlantilla, async (req, res) => {
   try {
     const r = await query(`
-      SELECT s.*, e.nombre, e.puesto, e.departamento, e.fecha_ingreso
+      SELECT s.*, e.nombre, e.puesto, e.departamento, e.fecha_ingreso,
+             a.nombre AS autorizante
       FROM fac_vacaciones_solicitudes s
       JOIN fac_empleados e ON e.id = s.empleado_id
+      LEFT JOIN fac_usuarios a ON a.id = s.autorizado_por
       WHERE s.id=$1
     `, [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Solicitud no encontrada.' });

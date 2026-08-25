@@ -13500,6 +13500,9 @@ async function concentrado() {
       .cc-pill{display:inline-block;width:8px;height:8px;border-radius:3px;
         margin-right:7px;vertical-align:middle}
       .cc-catn{font-size:9.5px;color:var(--muted);font-weight:700;margin-left:7px}
+      .vac-badge{background:#dc2626;color:#fff;border-radius:99px;padding:1px 7px;
+        font-size:10px;font-weight:900;margin-left:5px;vertical-align:middle}
+      .vac-aut{margin-bottom:11px;border-left:4px solid #0d9488}
       /* Control de vista: el ⌘ chiquito de la barra oscura pasaba desapercibido */
       .cc-vista{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:14px}
       .cc-vista-l{font-size:10px;font-weight:800;text-transform:uppercase;
@@ -14175,7 +14178,8 @@ function openMiSolicitud() {
       <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Solicitud</div>
       <div style="font-size:20px;font-weight:900;margin-top:3px">🏖 Solicitar vacaciones</div>
       <div style="font-size:11.5px;opacity:.88;margin-top:4px">
-        Tienes <strong>${d.dias_disponibles}</strong> día${d.dias_disponibles!=1?'s':''} disponible${d.dias_disponibles!=1?'s':''}
+        Tienes <strong>${d.dias_disponibles}</strong> día${d.dias_disponibles!=1?'s':''} disponible${d.dias_disponibles!=1?'s':''}${
+          d.dias_apartados > 0 ? ` · ${d.dias_apartados} apartado${d.dias_apartados!=1?'s':''} esperando autorización` : ''}
       </div>
     </div>
     <div class="fg" style="gap:11px">
@@ -14288,9 +14292,18 @@ async function vacaciones() {
 
     <div class="tabs">
       <div class="tab active" onclick="showTab(this,'vtab-lista')">📋 Colaboradores</div>
+      ${puede('vacaciones', NIVEL.EDITAR) !== false ? `
+      <div class="tab" onclick="showTab(this,'vtab-autorizar');loadVacPorAutorizar()">
+        ✅ Por autorizar <span id="vac-badge-aut" class="vac-badge" style="display:none"></span>
+      </div>` : ''}
       <div class="tab" onclick="showTab(this,'vtab-grafica');renderGraficaVac()">📊 Gráfica de pendientes</div>
       <div class="tab" onclick="showTab(this,'vtab-vencer');loadVacPorVencer()">⏰ Por vencer</div>
     </div>
+
+    ${puede('vacaciones', NIVEL.EDITAR) !== false ? `
+    <div class="tab-panel" id="vtab-autorizar">
+      <div id="vac-autorizar-body"><p class="empty">Cargando…</p></div>
+    </div>` : ''}
 
     <div class="tab-panel active" id="vtab-lista">
       <div class="card">
@@ -14316,6 +14329,160 @@ async function vacaciones() {
       </div>
     </div>`;
   await loadVacEmpleados();
+}
+
+// ══ BANDEJA DE AUTORIZACIÓN ════════════════════
+async function loadVacPorAutorizar() {
+  const cont = $('vac-autorizar-body');
+  if (!cont) return;
+  cont.innerHTML = '<p class="empty">Cargando…</p>';
+  try {
+    const d = await api('/vacaciones/solicitudes-pendientes');
+    window._vacAut = d;
+    renderVacPorAutorizar(d);
+    vacActualizarBadge(d.solicitudes.length);
+  } catch(e) { cont.innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function vacActualizarBadge(n) {
+  const b = $('vac-badge-aut');
+  if (!b) return;
+  b.textContent = n;
+  b.style.display = n > 0 ? 'inline-block' : 'none';
+}
+
+function renderVacPorAutorizar(d) {
+  const cont = $('vac-autorizar-body');
+  // Las propias no salen en la lista; se dice por qué para que no parezca que se
+  // perdieron.
+  const nota = d.propias_en_espera > 0 ? `
+    <div class="card" style="margin-bottom:12px;background:#eff6ff;border-color:#bfdbfe;
+         font-size:12px;color:#1e40af;line-height:1.5">
+      Tienes ${d.propias_en_espera} solicitud${d.propias_en_espera!=1?'es':''} tuya${d.propias_en_espera!=1?'s':''}
+      esperando. No aparece${d.propias_en_espera!=1?'n':''} aquí porque nadie autoriza lo suyo:
+      tiene que revisarla${d.propias_en_espera!=1?'s':''} alguien más.
+    </div>` : '';
+
+  if (!d.solicitudes.length) {
+    cont.innerHTML = nota + `
+      <div style="background:linear-gradient(160deg,#ecfdf5,#d1fae5);border:2px dashed #6ee7b7;
+                  border-radius:18px;padding:44px 30px;text-align:center">
+        <div style="font-size:54px;margin-bottom:10px">✅</div>
+        <h3 style="margin:0 0 6px;font-size:19px;font-weight:900;color:#047857">Nada por autorizar</h3>
+        <p style="font-size:13px;color:#065f46;max-width:430px;margin:0 auto;line-height:1.55">
+          Cuando un colaborador envíe su solicitud desde <em>Mis vacaciones</em>, aparecerá aquí
+          para que la autorices o la rechaces.
+        </p>
+      </div>`;
+    return;
+  }
+
+  const hoy = new Date().toISOString().slice(0,10);
+  cont.innerHTML = nota + `
+    <div class="card" style="margin-bottom:14px;background:linear-gradient(135deg,#0f766e,#14b8a6);color:#fff">
+      <div style="font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.4px;opacity:.9">Esperando tu decisión</div>
+      <div style="font-size:26px;font-weight:900;line-height:1.15">
+        ${d.solicitudes.length} solicitud${d.solicitudes.length!=1?'es':''}
+      </div>
+      <div style="font-size:12px;opacity:.9;margin-top:3px">
+        Mientras no se autoricen, esos días ya están apartados del saldo del colaborador
+        pero la asistencia le sigue contando falta.
+      </div>
+    </div>
+    ${d.solicitudes.map(x => {
+      const yaEmpezo = x.fecha_inicio <= hoy;
+      const tipo = x.tipo === 'permiso_goce' ? 'Permiso con goce'
+                 : x.tipo === 'incapacidad'  ? 'Incapacidad' : 'Vacaciones';
+      return `
+      <div class="card vac-aut" id="vac-aut-${x.id}">
+        <div style="display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap">
+          <div style="min-width:0;flex:1">
+            <div style="font-weight:900;font-size:15px;color:var(--dark)">${x.nombre}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">
+              ${x.numero_colaborador ? '#' + x.numero_colaborador + ' · ' : ''}${x.puesto || 'Sin puesto'}
+              ${x.departamento ? ' · ' + x.departamento : ''}
+            </div>
+            <div style="margin-top:8px;font-size:12.5px;color:var(--dark)">
+              <strong>${fmtDate(x.fecha_inicio)}</strong> al <strong>${fmtDate(x.fecha_fin)}</strong>
+              ${x.fecha_regreso ? ` · regresa el ${fmtDate(x.fecha_regreso)}` : ''}
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">
+              ${tipo} · solicitada el ${fmtDate(x.fecha_solicitud)}
+              ${x.periodos_aplicados ? ' · ' + x.periodos_aplicados : ''}
+            </div>
+            ${x.observaciones ? `<div style="margin-top:7px;background:var(--bg-alt);border-radius:8px;
+              padding:7px 10px;font-size:12px;color:#334155;line-height:1.45">${x.observaciones}</div>` : ''}
+            ${yaEmpezo ? `<div style="margin-top:7px;font-size:11.5px;color:#b45309;font-weight:700">
+              ⚠ Ya empezó — lleva días contando como falta en asistencia.</div>` : ''}
+          </div>
+          <div style="text-align:right;white-space:nowrap">
+            <div style="font-size:26px;font-weight:900;color:#0d9488">${x.dias_solicitados}</div>
+            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">días</div>
+            <div style="font-size:10.5px;color:var(--muted);margin-top:6px">
+              le quedan ${parseFloat(x.le_quedan||0).toFixed(1)}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">
+          <button class="btn bo bsm" onclick="imprimirSolicitudVac(${x.id})">🖨 Ver formato</button>
+          <button class="btn bd bsm" onclick="rechazarSolicitudVac(${x.id})">✕ Rechazar</button>
+          <button class="btn bs bsm" onclick="autorizarSolicitudVac(${x.id})">✓ Autorizar</button>
+        </div>
+      </div>`;
+    }).join('')}`;
+}
+
+async function autorizarSolicitudVac(id) {
+  const x = (window._vacAut?.solicitudes || []).find(v => v.id === id);
+  if (!x) return;
+  if (!await confirm2(`¿Autorizar las vacaciones de ${x.nombre}?\n\n` +
+      `${fmtDate(x.fecha_inicio)} al ${fmtDate(x.fecha_fin)} · ${x.dias_solicitados} días\n\n` +
+      `A partir de aquí la asistencia dejará de contarle falta en esos días.`)) return;
+  try {
+    await api(`/vacaciones/solicitudes/${id}/autorizar`, { method:'PATCH', body: JSON.stringify({}) });
+    toast('Solicitud autorizada.');
+    await loadVacPorAutorizar();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+// El motivo es obligatorio: un "no" sin explicación acaba en una plática de
+// pasillo y el sistema se queda sin memoria de por qué se rechazó.
+function rechazarSolicitudVac(id) {
+  const x = (window._vacAut?.solicitudes || []).find(v => v.id === id);
+  if (!x) return;
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#991b1b,#dc2626);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Rechazar solicitud</div>
+      <div style="font-size:19px;font-weight:900;margin-top:3px">${x.nombre}</div>
+      <div style="font-size:11.5px;opacity:.9;margin-top:4px">
+        ${fmtDate(x.fecha_inicio)} al ${fmtDate(x.fecha_fin)} · ${x.dias_solicitados} días
+      </div>
+    </div>
+    <div class="fi"><label>Motivo del rechazo <span style="color:var(--red)">*</span></label>
+      <textarea id="vac-rech-nota" rows="3" maxlength="400"
+        placeholder="El colaborador va a leer esto. Explica por qué."></textarea>
+    </div>
+    <div style="font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.5">
+      Los ${x.dias_solicitados} días regresan a sus periodos.
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cancelar</button>
+      <button class="btn bd" onclick="confirmarRechazoVac(${id})">✕ Rechazar</button>
+    </div>`;
+  openModal('modal-gt-cats');
+}
+
+async function confirmarRechazoVac(id) {
+  const nota = ($('vac-rech-nota')?.value || '').trim();
+  if (nota.length < 5) return toast('Escribe el motivo del rechazo.', 'warn');
+  try {
+    const r = await api(`/vacaciones/solicitudes/${id}/rechazar`, {
+      method:'PATCH', body: JSON.stringify({ nota })
+    });
+    closeModal('modal-gt-cats');
+    toast(`Rechazada. Regresaron ${(+r.dias_devueltos||0).toFixed(1)} días a sus periodos.`);
+    await loadVacPorAutorizar();
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 function renderGraficaVac() {
@@ -15224,9 +15391,28 @@ async function imprimirSolicitudVac(id) {
             <td></td>
             <td style="border-top:1px solid #000;padding-top:4px;width:33%">${emp.nombre}<br>Colaborador</td>
             <td></td>
-            <td style="border-top:1px solid #000;padding-top:4px;width:33%">Autorización</td>
+            <td style="border-top:1px solid #000;padding-top:4px;width:33%">
+              ${s.estatus === 'aprobada' && s.autorizante ? `${s.autorizante}<br>` : ''}Autorización</td>
           </tr>
         </table>
+
+        ${/aprob/i.test(s.estatus||'') ? `
+        <div style="margin-top:16px;border:1px solid #888;padding:7px 10px;font-size:11px">
+          <strong>AUTORIZADA</strong>
+          ${s.autorizante ? ' por ' + s.autorizante : ''}
+          ${s.autorizado_en ? ' el ' + new Date(s.autorizado_en).toLocaleString('es-MX') : ''}
+          ${s.nota_autorizacion ? '<br>' + s.nota_autorizacion : ''}
+        </div>` : /rechaz/i.test(s.estatus||'') ? `
+        <div style="margin-top:16px;border:2px solid #991b1b;color:#991b1b;padding:7px 10px;font-size:11px">
+          <strong>RECHAZADA</strong>
+          ${s.autorizante ? ' por ' + s.autorizante : ''}
+          ${s.autorizado_en ? ' el ' + new Date(s.autorizado_en).toLocaleString('es-MX') : ''}
+          ${s.nota_autorizacion ? '<br>Motivo: ' + s.nota_autorizacion : ''}
+        </div>` : `
+        <div style="margin-top:16px;border:2px dashed #b45309;color:#b45309;padding:7px 10px;
+             font-size:11px;font-weight:700;text-align:center">
+          PENDIENTE DE AUTORIZAR — este formato todavía no acredita permiso para ausentarse
+        </div>`}
       </div>
       <div class="form-actions" style="margin-top:14px">
         <button class="btn bo" onclick="closeModal('modal-vac-print')">Cerrar</button>
