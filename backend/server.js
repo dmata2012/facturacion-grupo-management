@@ -73,6 +73,23 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// ── Version desplegada ───────────────────────
+// Existe para responder de un vistazo "¿ya me llegó el cambio?". Sin esto, la
+// unica forma de saberlo era probar la funcion nueva y deducirlo del resultado.
+//
+// arrancado_en es el momento en que este proceso levanto, o sea cuando termino
+// el deploy: es el dato que de verdad importa. El commit lo pone Render solo.
+const ARRANCADO_EN = new Date().toISOString();
+app.get('/api/version', (req, res) => {
+  const sha = process.env.RENDER_GIT_COMMIT || '';
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    commit: sha ? sha.slice(0, 7) : null,
+    rama: process.env.RENDER_GIT_BRANCH || null,
+    arrancado_en: ARRANCADO_EN
+  });
+});
+
 // ── SPA fallback ──────────────────────────────
 app.get('*', (req, res) => {
   // Cualquier ruta SPA devuelve index.html — nunca debe cachearse

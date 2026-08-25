@@ -618,6 +618,13 @@ canvas{max-height:230px}
   <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.8 6.8a8 8 0 1 0 10.4 0"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
 </svg>
+  <style>
+    /* Sello de version: discreto, pero suficiente para saber si el deploy llegó */
+    .sb-version{font-size:9.5px;text-align:center;padding:7px 6px 2px;
+      color:rgba(255,255,255,.34);letter-spacing:.3px;cursor:default;
+      font-variant-numeric:tabular-nums}
+    .sb-version:hover{color:rgba(255,255,255,.62)}
+  </style>
   <div class="sidebar" id="sidebar">
     <div class="sidebar-logo">
       <img src="logo.png" alt="Grupo Management"
@@ -739,6 +746,7 @@ canvas{max-height:230px}
     <div class="sidebar-bottom">
       <button onclick="openCambiarClave()"><svg width="15" height="15" style="stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round"><use href="#i-key"/></svg> Cambiar mi clave</button>
       <button class="salir" onclick="logout()"><svg width="15" height="15" style="stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round"><use href="#i-power"/></svg> Cerrar sesión</button>
+      <div class="sb-version" id="sb-version" title="Cargando…">—</div>
     </div>
   </div>
   <div class="main-wrap">
@@ -942,6 +950,27 @@ function puede(modulo, nivel = NIVEL.VER) {
   return n >= nivel;
 }
 
+// Sello de version al pie del menú. La hora es la del arranque del servidor, es
+// decir el momento en que terminó el deploy: si el cambio que esperas es más
+// nuevo que esa hora, todavía no llegó.
+async function cargarVersionDesplegada() {
+  const el = $('sb-version');
+  if (!el) return;
+  try {
+    const v = await fetch('/api/version', { cache: 'no-store' }).then(r => r.json());
+    const d = v.arrancado_en ? new Date(v.arrancado_en) : null;
+    const cuando = d
+      ? d.toLocaleString('es-MX', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })
+      : '—';
+    el.textContent = `v ${cuando}${v.commit ? ' · ' + v.commit : ''}`;
+    el.title = `Esta versión se publicó el ${d ? d.toLocaleString('es-MX') : '—'}`
+             + (v.commit ? `\nCommit ${v.commit}${v.rama ? ' (' + v.rama + ')' : ''}` : '')
+             + '\n\nSi el cambio que esperas es más nuevo que esta hora, aún no llegó.';
+  } catch (e) {
+    el.textContent = '';
+  }
+}
+
 async function cargarMisPermisos() {
   try { ME.permisos = await api('/permisos/mis-permisos'); }
   catch(e) { ME.permisos = { niveles:{}, listo:false }; }
@@ -1068,6 +1097,7 @@ async function guardarNuevaClave() {
 function initApp() {
   $('login-screen').style.display = 'none';
   $('app').style.display = 'block';
+  cargarVersionDesplegada();
   $('sb-nombre').textContent = ME.nombre;
   $('sb-rol').textContent = ME.rol;
   // Restaurar estado abierto/cerrado de los grupos del menú lateral
