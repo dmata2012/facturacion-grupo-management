@@ -12,6 +12,22 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
+/* ══ ETIQUETAS DE ESTATUS ════════════════════════════ */
+/* Vivian dentro del <style> de la pantalla de Gastos, que solo se inyecta al
+   abrirla. Cualquier otra pantalla que las usara —Mis vacaciones— pintaba el
+   estatus como texto plano sin que nada lo delatara. */
+.gt-pill{display:inline-flex;align-items:center;gap:4px;font-size:9.5px;font-weight:900;
+  padding:2px 8px;border-radius:99px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
+.gt-pill.vig {background:#d1fae5;color:#047857}
+.gt-pill.can {background:#ffe4e6;color:#be123c}
+.gt-pill.nd  {background:#e2e8f0;color:#64748b}
+.gt-pill.xml {background:#dbeafe;color:#1d4ed8}
+.gt-pill.man {background:#f3e8ff;color:#7e22ce}
+.gt-pill.sin {background:#fef3c7;color:#b45309}
+.gt-pill.pgd {background:#d1fae5;color:#047857}
+.gt-pill.prc {background:#dbeafe;color:#1d4ed8}
+.gt-pill.pdt {background:#fef3c7;color:#b45309}
+.gt-pill.ven {background:#ffe4e6;color:#be123c}
 /* ══ VARIABLES — PALETA GRUPO MANAGEMENT ══════════════════════ */
 :root{
   --red:#9B1528;--red-d:#6B0F1A;--red-l:#C41E3A;--red-xs:#fdf2f4;
@@ -1322,18 +1338,6 @@ async function gastos() {
       @keyframes gtPulso{0%,100%{box-shadow:0 0 0 3px rgba(245,158,11,.18)}50%{box-shadow:0 0 0 7px rgba(245,158,11,.06)}}
 
       /* ── Etiquetas de estatus SAT y origen ── */
-      .gt-pill{display:inline-flex;align-items:center;gap:4px;font-size:9.5px;font-weight:900;
-        padding:2px 8px;border-radius:99px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
-      .gt-pill.vig {background:#d1fae5;color:#047857}
-      .gt-pill.can {background:#ffe4e6;color:#be123c}
-      .gt-pill.nd  {background:#e2e8f0;color:#64748b}
-      .gt-pill.xml {background:#dbeafe;color:#1d4ed8}
-      .gt-pill.man {background:#f3e8ff;color:#7e22ce}
-      .gt-pill.sin {background:#fef3c7;color:#b45309}
-      .gt-pill.pgd {background:#d1fae5;color:#047857}
-      .gt-pill.prc {background:#dbeafe;color:#1d4ed8}
-      .gt-pill.pdt {background:#fef3c7;color:#b45309}
-      .gt-pill.ven {background:#ffe4e6;color:#be123c}
 
       /* ── Bandeja de pendientes ── */
       .gt-pend-row{background:#fff;border:1.5px solid #fde68a;border-radius:14px;padding:13px 15px;
@@ -14178,7 +14182,9 @@ async function misVacaciones() {
         }).join('') : '<p class="empty">Todavía no tienes periodos generados. Recursos Humanos los da de alta.</p>'}
       </div>
 
-      <div class="card">
+      <!-- Ancho completo: con la tarjeta a media pantalla la tabla se desborda y
+           la columna de botones queda fuera de vista, sin nada que lo indique. -->
+      <div class="card" style="grid-column:1/-1">
         <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:10px">
           Mis solicitudes
         </div>
@@ -14197,8 +14203,8 @@ async function misVacaciones() {
               <td><span class="gt-pill ${/aprob/i.test(s.estatus)?'vig':/rechaz/i.test(s.estatus)?'can':'sin'}">${s.estatus||'pendiente'}</span></td>
               <td style="text-align:right;white-space:nowrap">
                 ${/aprob/i.test(s.estatus||'')
-                  ? `<button class="btn bo bsm" style="padding:3px 7px" onclick="imprimirSolicitudVac(${s.id})"
-                             title="Imprimir mi solicitud autorizada">🖨</button>` : ''}
+                  ? `<button class="btn bs bsm" onclick="imprimirSolicitudVac(${s.id})"
+                             title="Imprimir mi solicitud autorizada">🖨 Imprimir</button>` : ''}
                 ${futura
                   ? `<button class="btn bd bsm" style="padding:3px 7px" onclick="cancelarMiSolicitud(${s.id})" title="Cancelar">✕</button>` : ''}
               </td>
