@@ -9550,6 +9550,333 @@ async function cargarDetalleEst(tipo) {
 }
 
 // ══ RELOJ CHECADOR ═══════════════════════════
+// ══ BONO DE PUNTUALIDAD Y ASISTENCIA ══════════════════
+// Se gana solo si trabajó todos sus días laborables del periodo y llegó a tiempo
+// en todos. Vacaciones e incapacidad también lo tumban: es un bono de puntualidad
+// Y asistencia.
+function inicializarBono() {
+  if ($('bn-desde').value) return;   // ya se eligió periodo, no pisarlo
+  bnQuincena(new Date().getDate() <= 15 ? 1 : 2);
+}
+
+function bnQuincena(cual) {
+  const base = $('bn-desde').value ? new Date($('bn-desde').value + 'T12:00:00') : new Date();
+  const y = base.getFullYear(), m = base.getMonth();
+  const dosDig = n => String(n).padStart(2, '0');
+  const finMes = new Date(y, m + 1, 0).getDate();
+  $('bn-desde').value = `${y}-${dosDig(m+1)}-${cual === 1 ? '01' : '16'}`;
+  $('bn-hasta').value = `${y}-${dosDig(m+1)}-${cual === 1 ? '15' : dosDig(finMes)}`;
+  cargarBono();
+}
+
+async function cargarBono() {
+  const desde = $('bn-desde').value, hasta = $('bn-hasta').value;
+  if (!desde || !hasta) return;
+  $('bn-body').innerHTML = '<p class="empty">Calculando…</p>';
+  try {
+    const d = await api(`/checador/bono-puntualidad?desde=${desde}&hasta=${hasta}`);
+    window._bnData = d;
+    renderBono(d);
+  } catch(e) { $('bn-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+// Que grupo se esta viendo. Vive fuera del render para que sobreviva al
+// recalculo al cambiar de periodo: si se reiniciara, quien esta revisando solo a
+// los que ganan volveria a la lista completa sin haberlo pedido.
+window._bnFiltro = window._bnFiltro || 'todos';
+
+function bnFiltrar(cual) {
+  window._bnFiltro = cual;
+  if (window._bnData) renderBono(window._bnData);
+}
+
+// La lista que se esta viendo. La usan la tabla, la impresion y el Excel, para
+// que los tres digan lo mismo.
+function bnVisibles(d) {
+  const conDerecho = d.filas.filter(f => f.gana);
+  const perdieron  = d.filas.filter(f => !f.gana && !f.sin_actividad);
+  const fuera      = d.filas.filter(f => f.sin_actividad);
+  if (window._bnFiltro === 'ganan')   return conDerecho;
+  if (window._bnFiltro === 'pierden') return perdieron;
+  return [...conDerecho, ...perdieron, ...fuera];
+}
+
+function renderBono(d) {
+  const r = d.resumen;
+  const conDerecho = d.filas.filter(f => f.gana);
+  const perdieron  = d.filas.filter(f => !f.gana && !f.sin_actividad);
+  const fuera      = d.filas.filter(f => f.sin_actividad);
+  const visibles   = bnVisibles(d);
+  const filtro     = window._bnFiltro;
+  const btnF = (cual, texto, n) =>
+    `<button class="btn ${filtro === cual ? 'bs' : 'bo'} bsm" onclick="bnFiltrar('${cual}')">${texto} (${n})</button>`;
+
+  const motivoCorto = f => {
+    const partes = [];
+    if (f.retardos.length)
+      partes.push(`${f.retardos.length} retardo${f.retardos.length!=1?'s':''} (${f.minutos_retardo} min)`);
+    // Se agrupan por tipo: "3 vacaciones" se lee mejor que tres renglones iguales
+    const porTipo = {};
+    f.motivos.forEach(m => { porTipo[m.etiqueta] = (porTipo[m.etiqueta] || 0) + 1; });
+    Object.entries(porTipo).forEach(([k, n]) => partes.push(`${n} ${k}${n!=1 && !/s$/.test(k) ? 's' : ''}`));
+    return partes.join(' · ');
+  };
+
+  $('bn-body').innerHTML = `
+    <div class="kpi-grid" style="margin-bottom:14px">
+      <div class="kpi success"><div class="kpi-icon">🏅</div>
+        <div class="label">Con derecho</div><div class="value">${r.con_derecho}</div>
+        <div class="sub">Sin retardos ni ausencias</div></div>
+      <div class="kpi danger"><div class="kpi-icon">✖</div>
+        <div class="label">Lo pierden</div><div class="value">${r.sin_derecho}</div>
+        <div class="sub">Con retardo o ausencia</div></div>
+      <div class="kpi primary"><div class="kpi-icon">💵</div>
+        <div class="label">Total a pagar</div><div class="value">${fmt(r.total_pagar)}</div>
+        <div class="sub">${r.sin_monto ? `⚠ ${r.sin_monto} sin monto asignado` : 'Suma de los que ganan'}</div></div>
+    </div>
+
+    ${r.sin_monto ? `<div class="card" style="margin-bottom:12px;background:#fffbeb;border-color:#fcd34d;
+        font-size:12px;color:#92400e;line-height:1.5">
+      ${r.sin_monto} colaborador${r.sin_monto!=1?'es':''} ganó el bono pero tiene monto en cero,
+      así que no suma nada. Asíágnalo en <strong>💰 Montos</strong>.
+    </div>` : ''}
+
+    <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:10px">
+      <span style="font-size:10px;font-weight:800;text-transform:uppercase;
+            letter-spacing:.9px;color:var(--muted)">Mostrar</span>
+      ${btnF('todos', 'Todos', d.filas.length)}
+      ${btnF('ganan', '🏅 Solo con derecho', conDerecho.length)}
+      ${btnF('pierden', '✖ Solo los que lo pierden', perdieron.length)}
+      ${filtro !== 'todos' ? `<span style="font-size:11px;color:var(--muted)">
+        Lo que imprimas o exportes sale con este filtro.</span>` : ''}
+    </div>
+
+    <div class="tscroll" style="overflow:auto">
+    <table style="font-size:12px">
+      <thead><tr>
+        <th>Colaborador</th><th>Puesto</th>
+        <th style="text-align:center">Días trabajados</th>
+        <th>Por qué lo pierde</th>
+        <th style="text-align:right">Monto</th>
+        <th style="text-align:center">¿Gana?</th>
+      </tr></thead>
+      <tbody>
+        ${!visibles.length ? `<tr><td colspan="6" class="empty">
+          Ningún colaborador en este grupo durante el periodo.</td></tr>` : ''}
+        ${visibles.map(f => `
+          <tr style="${f.sin_actividad ? 'opacity:.5' : ''}">
+            <td style="font-weight:700;white-space:nowrap">${f.nombre}</td>
+            <td style="color:var(--muted)">${f.puesto || '—'}</td>
+            <td style="text-align:center;font-weight:800">${f.dias_trabajados}</td>
+            <td style="font-size:11.5px;color:${f.gana ? 'var(--muted)' : '#b45309'}">
+              ${f.sin_actividad ? '<em>Sin días laborables en el periodo</em>'
+                : f.gana ? '—'
+                : `${motivoCorto(f)}
+                   <a href="#" onclick="event.preventDefault();bnDetalle(${f.empleado_id})"
+                      style="margin-left:6px;font-size:10.5px">ver días</a>`}
+            </td>
+            <td style="text-align:right;font-weight:800;color:${f.gana && f.monto ? '#047857' : 'var(--muted)'}">
+              ${f.gana ? fmt(f.monto) : '—'}</td>
+            <td style="text-align:center">
+              ${f.sin_actividad ? '<span class="gt-pill nd">n/a</span>'
+                : f.gana ? '<span class="gt-pill vig">Sí</span>'
+                         : '<span class="gt-pill can">No</span>'}</td>
+          </tr>`).join('')}
+      </tbody>
+      <tfoot><tr style="border-top:2px solid var(--dark);font-weight:900;background:var(--bg-alt)">
+        <td colspan="4" style="text-align:right;padding:8px">
+          TOTAL A PAGAR${filtro !== 'todos' ? ' (de lo mostrado)' : ''}</td>
+        <td style="text-align:right;padding:8px;color:#047857">
+          ${fmt(visibles.reduce((a, f) => a + f.a_pagar, 0))}</td>
+        <td></td>
+      </tr></tfoot>
+    </table>
+    </div>
+
+    <div style="margin-top:10px;font-size:11.5px;color:var(--muted);line-height:1.6">
+      Se gana solo si el colaborador trabajó <strong>todos</strong> sus días laborables del periodo
+      y llegó a tiempo en todos. Vacaciones e incapacidad también lo tumban.
+      Los días de descanso no cuentan, y los retardos ya vienen con la tolerancia de cada
+      quien descontada. Si Recursos Humanos corrige un día en la Lista de Asistencia,
+      el bono se recalcula con esa corrección.
+    </div>`;
+}
+
+// El detalle importa: "no gana" a secas termina en discusión de pasillo
+function bnDetalle(empId) {
+  const f = (window._bnData?.filas || []).find(x => x.empleado_id === empId);
+  if (!f) return;
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#991b1b,#dc2626);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Por qué pierde el bono</div>
+      <div style="font-size:19px;font-weight:900;margin-top:3px">${f.nombre}</div>
+      <div style="font-size:11.5px;opacity:.9;margin-top:4px">
+        ${fmtDate(window._bnData.desde)} al ${fmtDate(window._bnData.hasta)}
+      </div>
+    </div>
+    ${f.retardos.length ? `
+      <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:7px">
+        Retardos</div>
+      ${f.retardos.map(x => `<div style="display:flex;justify-content:space-between;
+          border-bottom:1px solid var(--border);padding:6px 2px;font-size:12.5px">
+        <span>${fmtDate(x.fecha)}</span>
+        <strong style="color:#b45309">${x.minutos} min tarde</strong></div>`).join('')}` : ''}
+    ${f.motivos.length ? `
+      <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 7px">
+        Ausencias</div>
+      ${f.motivos.map(x => `<div style="border-bottom:1px solid var(--border);padding:6px 2px;font-size:12.5px">
+        <div style="display:flex;justify-content:space-between">
+          <span>${fmtDate(x.fecha)}</span>
+          <strong style="color:#b45309">${x.etiqueta}</strong></div>
+        ${x.nota ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${x.nota}</div>` : ''}
+      </div>`).join('')}` : ''}
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button>
+    </div>`;
+  openModal('modal-gt-cats');
+}
+
+// Montos por colaborador
+function bnMontos() {
+  const filas = window._bnData?.filas || [];
+  if (!filas.length) return toast('Primero calcula un periodo.', 'warn');
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#0f766e,#14b8a6);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Configuración</div>
+      <div style="font-size:19px;font-weight:900;margin-top:3px">💰 Monto del bono</div>
+      <div style="font-size:11.5px;opacity:.88;margin-top:4px">
+        Es por persona y no cambia con el periodo: se queda guardado.
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:end;margin-bottom:12px;flex-wrap:wrap">
+      <div class="fi" style="margin:0;flex:1;min-width:150px">
+        <label>Aplicar este monto a todos</label>
+        <input type="number" step="0.01" min="0" id="bn-masivo" placeholder="0.00">
+      </div>
+      <button class="btn bo bsm" style="height:37px" onclick="bnAplicarATodos()">↧ Aplicar a todos</button>
+    </div>
+    <div class="tscroll" style="max-height:46vh;overflow:auto">
+      <table style="font-size:12px">
+        <thead><tr><th>Colaborador</th><th style="text-align:right;width:130px">Monto</th></tr></thead>
+        <tbody>${filas.map(f => `<tr>
+          <td>${f.nombre}<div style="font-size:10.5px;color:var(--muted)">${f.puesto||''}</div></td>
+          <td><input type="number" step="0.01" min="0" id="bn-m-${f.empleado_id}" value="${f.monto || 0}"
+                     style="text-align:right;font-weight:800" onchange="bnGuardarMonto(${f.empleado_id})"></td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gt-cats');cargarBono()">Cerrar</button>
+    </div>`;
+  openModal('modal-gt-cats');
+}
+
+async function bnGuardarMonto(empId) {
+  const v = parseFloat($(`bn-m-${empId}`)?.value) || 0;
+  try {
+    await api(`/checador/empleados/${empId}/bono`, {
+      method:'PUT', body: JSON.stringify({ bono_puntualidad: v })
+    });
+    const f = (window._bnData?.filas || []).find(x => x.empleado_id === empId);
+    if (f) { f.monto = v; f.a_pagar = f.gana ? v : 0; }
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function bnAplicarATodos() {
+  const v = parseFloat($('bn-masivo')?.value);
+  if (!(v >= 0)) return toast('Escribe el monto a aplicar.', 'warn');
+  const ids = (window._bnData?.filas || []).map(f => f.empleado_id);
+  if (!await confirm2(`¿Poner ${fmt(v)} de bono a los ${ids.length} colaboradores de la lista?\n\nSe reemplaza el monto que cada quien tenga.`)) return;
+  try {
+    await api('/checador/bono-masivo', {
+      method:'PUT', body: JSON.stringify({ bono_puntualidad: v, empleados: ids })
+    });
+    toast(`Monto aplicado a ${ids.length} colaboradores.`);
+    ids.forEach(id => { const el = $(`bn-m-${id}`); if (el) el.value = v; });
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+function exportarBonoExcel() {
+  const d = window._bnData;
+  if (!d) return toast('Primero calcula un periodo.', 'warn');
+  if (typeof XLSX === 'undefined') return toast('Librería XLSX no disponible.', 'err');
+  const visibles = bnVisibles(d);
+  const rotulo = window._bnFiltro === 'ganan'   ? ' — SOLO CON DERECHO'
+               : window._bnFiltro === 'pierden' ? ' — SOLO QUIENES LO PIERDEN' : '';
+  const aoa = [
+    ['GRUPO MANAGEMENT'],
+    [`BONO DE PUNTUALIDAD Y ASISTENCIA · ${d.desde} al ${d.hasta}${rotulo}`],
+    [`Generado: ${new Date().toLocaleString('es-MX')}`], [],
+    ['COLABORADOR','PUESTO','DÍAS TRABAJADOS','RETARDOS','MIN. RETARDO','AUSENCIAS','¿GANA?','MONTO']
+  ];
+  visibles.forEach(f => aoa.push([
+    f.nombre, f.puesto || '', f.dias_trabajados,
+    f.retardos.length, f.minutos_retardo, f.motivos.length,
+    f.sin_actividad ? 'n/a' : (f.gana ? 'Sí' : 'No'),
+    f.a_pagar
+  ]));
+  aoa.push([]);
+  aoa.push(['TOTAL A PAGAR', '', '', '', '', '', '',
+            +visibles.reduce((a, f) => a + f.a_pagar, 0).toFixed(2)]);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:32},{wch:20},{wch:16},{wch:10},{wch:13},{wch:11},{wch:9},{wch:13}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Bono puntualidad');
+  XLSX.writeFile(wb, `Bono_puntualidad_${d.desde}_${d.hasta}.xlsx`);
+}
+
+function imprimirBono() {
+  const d = window._bnData;
+  if (!d) return toast('Primero calcula un periodo.', 'warn');
+  const w = window.open('', '_blank');
+  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+    <title>Bono de puntualidad</title>
+    <style>
+      @page{margin:12mm}
+      body{font-family:'Segoe UI',Arial,sans-serif;font-size:10px;margin:0;color:#111}
+      h1{font-size:15px;letter-spacing:3px;text-align:center;margin:0 0 2px}
+      h2{font-size:11px;text-align:center;margin:0 0 12px;font-weight:700}
+      table{width:100%;border-collapse:collapse}
+      th{background:#eef2f7;padding:5px 4px;font-size:8.5px;text-transform:uppercase;
+         text-align:left;border-bottom:1.5px solid #111}
+      td{padding:4px;border-bottom:.5px solid #e5e7eb}
+      .num{text-align:right}.cen{text-align:center}
+      .no{color:#991b1b}
+      tfoot td{border-top:1.5px solid #111;font-weight:800;background:#f3f4f6}
+      .pie{margin-top:10px;font-size:8px;color:#666}
+      .firmas{margin-top:44px;width:100%;font-size:9px;text-align:center}
+      .firmas td{border-top:1px solid #000;padding-top:4px;border-bottom:none}
+    </style></head><body>
+    <h1>G R U P O   M A N A G E M E N T</h1>
+    <h2>BONO DE PUNTUALIDAD Y ASISTENCIA · ${fmtDate(d.desde)} al ${fmtDate(d.hasta)}
+      ${window._bnFiltro === 'ganan' ? '<br>SOLO COLABORADORES CON DERECHO'
+      : window._bnFiltro === 'pierden' ? '<br>SOLO QUIENES LO PIERDEN' : ''}</h2>
+    <table>
+      <thead><tr><th>Colaborador</th><th>Puesto</th><th class="cen">Días</th>
+        <th>Motivo</th><th class="cen">¿Gana?</th><th class="num">Monto</th></tr></thead>
+      <tbody>${bnVisibles(d).filter(f => !f.sin_actividad).map(f => `<tr>
+        <td>${f.nombre}</td><td>${f.puesto||''}</td>
+        <td class="cen">${f.dias_trabajados}</td>
+        <td class="${f.gana?'':'no'}">${f.gana ? '—'
+          : [f.retardos.length ? `${f.retardos.length} retardo(s), ${f.minutos_retardo} min` : '',
+             f.motivos.length ? `${f.motivos.length} ausencia(s)` : ''].filter(Boolean).join(' · ')}</td>
+        <td class="cen">${f.gana ? 'Sí' : 'No'}</td>
+        <td class="num">${f.gana ? fmt(f.monto) : '—'}</td>
+      </tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="5" class="num">TOTAL A PAGAR</td>
+        <td class="num">${fmt(bnVisibles(d).reduce((a, f) => a + f.a_pagar, 0))}</td></tr></tfoot>
+    </table>
+    <div class="pie">Se gana solo si el colaborador trabajó todos sus días laborables del periodo y
+      llegó a tiempo en todos. Vacaciones e incapacidad también lo tumban. Los retardos ya
+      traen descontada la tolerancia de cada colaborador.</div>
+    <table class="firmas"><tr>
+      <td style="width:40%">Elaboró</td><td style="width:20%"></td><td style="width:40%">Autorizó</td>
+    </tr></table>
+    </body></html>`);
+  w.document.close();
+  setTimeout(() => w.print(), 300);
+}
+
 async function checador() {
   // Si el usuario tiene rol 'checador' → pantalla tablet en modo oscuro
   if (isChecador()) return renderChecadorTablet();
@@ -9571,10 +9898,28 @@ async function checador() {
       <div class="tab" onclick="showTab(this,'ch-tab-hoy');cargarChecadorHoy()">📅 Registros de hoy</div>
       <div class="tab" onclick="showTab(this,'ch-tab-reporte');cargarChecadorReporte()">📊 Reporte por periodo</div>
       ${puede('asistencia', NIVEL.VER) !== false ? `<div class="tab" onclick="showTab(this,'ch-tab-asistencia');inicializarAsistencia()">📋 Lista de Asistencia</div>` : ''}
+      <div class="tab" onclick="showTab(this,'ch-tab-bono');inicializarBono()">🏅 Bono de puntualidad</div>
       ${canAdmin()?`<div class="tab" onclick="showTab(this,'ch-tab-productividad');inicializarProductividad()">📊 Productividad</div>`:''}
     </div>`}
 
     <!-- PESTAÑA MARCAR -->
+    <div class="tab-panel" id="ch-tab-bono">
+      <div class="card">
+        <div class="filters" style="align-items:end">
+          <div class="fi" style="margin:0"><label style="font-size:10px">Desde</label>
+            <input type="date" id="bn-desde" onchange="cargarBono()"></div>
+          <div class="fi" style="margin:0"><label style="font-size:10px">Hasta</label>
+            <input type="date" id="bn-hasta" onchange="cargarBono()"></div>
+          <button class="btn bo bsm" onclick="bnQuincena(1)" title="Del 1 al 15 del mes de la fecha 'Desde'">1ª quincena</button>
+          <button class="btn bo bsm" onclick="bnQuincena(2)" title="Del 16 al fin de mes">2ª quincena</button>
+          <button class="btn bo bsm" onclick="bnMontos()">💰 Montos</button>
+          <button class="btn bo bsm" onclick="imprimirBono()">🖨 Imprimir</button>
+          <button class="btn bo bsm" onclick="exportarBonoExcel()">⬇ Excel</button>
+        </div>
+        <div id="bn-body"><p class="empty">Elige el periodo.</p></div>
+      </div>
+    </div>
+
     <div class="tab-panel active" id="ch-tab-marcar">
       <div class="card" style="max-width:640px;margin:0 auto">
         <div id="ch-reloj" style="text-align:center;font-family:'Consolas',monospace;font-size:52px;font-weight:900;color:var(--red);letter-spacing:2px;margin-bottom:6px"></div>

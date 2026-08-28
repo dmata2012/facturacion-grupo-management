@@ -26,6 +26,9 @@ router.use(verificarToken);
 (async () => {
   try {
     await query(`ALTER TABLE fac_empleados ADD COLUMN IF NOT EXISTS tolerancia_min INT DEFAULT 0`);
+    // Monto del bono de puntualidad, por persona: distintos puestos suelen traer
+    // distinto bono, y un solo monto global obligaria a inventar excepciones.
+    await query(`ALTER TABLE fac_empleados ADD COLUMN IF NOT EXISTS bono_puntualidad NUMERIC(12,2) DEFAULT 0`);
   } catch (e) { console.warn('Migración tolerancia_min:', e.message); }
 })();
 
@@ -592,11 +595,11 @@ router.get('/asistencia/historial', verAsistencia, async (req, res) => {
 //   In = Incapacidad (solicitud aprobada tipo='incapacidad')
 //   D  = Dia de descanso (segun empleado)
 //   -  = Sin datos (empleado inactivo o fuera de rango)
-router.get('/asistencia', verMatrizAsistencia, async (req, res) => {
-  try {
-    const { desde, hasta, empleado_id, incluir_inactivos } = req.query;
-    if (!desde || !hasta) return res.status(400).json({ error: 'Se requieren desde y hasta (YYYY-MM-DD).' });
-
+// La matriz de asistencia la consumen la lista, el expediente y el bono de
+// puntualidad. Vive en una sola funcion a proposito: si el bono calculara los
+// codigos por su cuenta, tarde o temprano diria algo distinto de lo que la lista
+// muestra en pantalla, y no habria forma de saber cual de las dos miente.
+async function construirMatriz({ desde, hasta, empleado_id, incluir_inactivos }) {
     // Empleados
     const paramsE = [];
     let whereE = incluir_inactivos === 'true' ? '' : 'WHERE activo=TRUE';
@@ -605,7 +608,9 @@ router.get('/asistencia', verMatrizAsistencia, async (req, res) => {
       whereE = whereE ? `${whereE} AND id=$${paramsE.length}` : `WHERE id=$${paramsE.length}`;
     }
     const empleados = await query(
-      `SELECT id, nombre, numero_colaborador, puesto, departamento, dias_descanso
+      `SELECT id, nombre, numero_colaborador, puesto, departamento, dias_descanso,
+              TO_CHAR(fecha_ingreso,'YYYY-MM-DD') AS fecha_ingreso,
+              COALESCE(bono_puntualidad, 0) AS bono_puntualidad
        FROM fac_empleados ${whereE} ORDER BY nombre`,
       paramsE
     );
@@ -761,13 +766,114 @@ router.get('/asistencia', verMatrizAsistencia, async (req, res) => {
         numero_colaborador: e.numero_colaborador,
         puesto: e.puesto,
         departamento: e.departamento,
+        fecha_ingreso: e.fecha_ingreso,
+        bono_puntualidad: e.bono_puntualidad,
         celdas,
         totales,
         minutos_retardo: minutosRetardoTotal
       };
     });
 
-    res.json({ desde, hasta, dias, empleados: matriz, incidencias_nomina: quincenas });
+    return { desde, hasta, dias, empleados: matriz, incidencias_nomina: quincenas };
+}
+
+router.get('/asistencia', verMatrizAsistencia, async (req, res) => {
+  try {
+    const { desde, hasta, empleado_id, incluir_inactivos } = req.query;
+    if (!desde || !hasta) return res.status(400).json({ error: 'Se requieren desde y hasta (YYYY-MM-DD).' });
+    res.json(await construirMatriz({ desde, hasta, empleado_id, incluir_inactivos }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══ BONO DE PUNTUALIDAD Y ASISTENCIA ════════════════
+// Se gana solo si en el periodo trabajo todos sus dias laborables y llego a
+// tiempo en todos. Cualquier ausencia lo tumba, incluidas vacaciones e
+// incapacidad: es un bono de puntualidad Y asistencia, no de puntualidad a secas.
+const CODIGOS_QUE_TUMBAN = {
+  'F'  : 'falta',
+  'FJ' : 'falta justificada',
+  'V'  : 'vacaciones',
+  'In' : 'incapacidad',
+  'P/G': 'permiso con goce'
+};
+
+router.get('/bono-puntualidad', permiso('checador', NIVEL.VER), async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    if (!desde || !hasta) return res.status(400).json({ error: 'Se requieren desde y hasta (YYYY-MM-DD).' });
+
+    const m = await construirMatriz({ desde, hasta });
+
+    const filas = m.empleados.map(e => {
+      const retardos = [];
+      const motivos  = [];
+      let diasTrabajados = 0, minutosRetardo = 0;
+
+      m.dias.forEach(f => {
+        // Antes de su ingreso no habia nada que cumplir: la matriz marca F en
+        // esos dias y sin esto un colaborador recien contratado nunca ganaria.
+        if (e.fecha_ingreso && f < e.fecha_ingreso) return;
+        const c = e.celdas[f];
+        if (!c || !c.c) return;      // fecha futura o sin dato
+        if (c.c === 'D') return;     // descanso: no se trabaja, no cuenta
+        if (c.c === 'A') {
+          diasTrabajados++;
+          if (c.r) { retardos.push({ fecha: f, minutos: c.r }); minutosRetardo += c.r; }
+          return;
+        }
+        const etiqueta = CODIGOS_QUE_TUMBAN[c.c];
+        if (etiqueta) motivos.push({ fecha: f, codigo: c.c, etiqueta, nota: c.n || null });
+      });
+
+      // Quien no tuvo un solo dia laborable en el periodo (alta posterior, baja)
+      // no gana ni pierde: no hubo asistencia que premiar.
+      const sinActividad = diasTrabajados === 0 && motivos.length === 0;
+      const gana = !sinActividad && retardos.length === 0 && motivos.length === 0;
+      const monto = parseFloat(e.bono_puntualidad || 0);
+
+      return {
+        empleado_id: e.empleado_id, nombre: e.nombre, puesto: e.puesto,
+        departamento: e.departamento, numero_colaborador: e.numero_colaborador,
+        dias_trabajados: diasTrabajados,
+        retardos, minutos_retardo: minutosRetardo,
+        motivos, sin_actividad: sinActividad,
+        gana, monto,
+        a_pagar: gana ? monto : 0
+      };
+    });
+
+    const activas = filas.filter(f => !f.sin_actividad);
+    res.json({
+      desde, hasta, filas,
+      resumen: {
+        con_derecho : activas.filter(f => f.gana).length,
+        sin_derecho : activas.filter(f => !f.gana).length,
+        sin_actividad: filas.length - activas.length,
+        total_pagar : +filas.reduce((a, f) => a + f.a_pagar, 0).toFixed(2),
+        sin_monto   : activas.filter(f => f.gana && !f.monto).length
+      }
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Monto del bono por colaborador
+router.put('/empleados/:id/bono', permiso('checador', NIVEL.EDITAR), async (req, res) => {
+  try {
+    const monto = Math.max(0, parseFloat(req.body.bono_puntualidad) || 0);
+    await query(`UPDATE fac_empleados SET bono_puntualidad=$1 WHERE id=$2`, [monto, req.params.id]);
+    res.json({ ok: true, bono_puntualidad: monto });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Mismo monto a varios de un golpe. Sin ids explicitos no hace nada: un update
+// sin WHERE aqui le cambiaria el bono a toda la plantilla.
+router.put('/bono-masivo', permiso('checador', NIVEL.EDITAR), async (req, res) => {
+  try {
+    const monto = Math.max(0, parseFloat(req.body.bono_puntualidad) || 0);
+    const ids = (req.body.empleados || []).map(Number).filter(Boolean);
+    if (!ids.length) return res.status(400).json({ error: 'Indica a quiénes aplícarselo.' });
+    await query(`UPDATE fac_empleados SET bono_puntualidad=$1 WHERE id = ANY($2::int[])`, [monto, ids]);
+    res.json({ ok: true, actualizados: ids.length, bono_puntualidad: monto });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
