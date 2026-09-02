@@ -709,7 +709,13 @@ router.get('/mensual-direccion', async (req, res) => {
     const fact = await query(`
       SELECT EXTRACT(MONTH FROM f.fecha_emision)::int AS mes,
              COALESCE(SUM(d.comision),0) AS comisiones,
-             COALESCE(SUM(f.iva),0)      AS iva
+             COALESCE(SUM(f.iva),0)      AS iva,
+             -- El LEFT JOIN conserva las facturas sin desglose, asi que la columna
+             -- de IVA las incluye y la de comisiones no. Esto mide esa diferencia:
+             -- cuanto del IVA facturado no tiene comision detras. Tambien cae aqui
+             -- la factura que si trae desglose pero sin ninguna linea de comision.
+             COALESCE(SUM(f.iva) FILTER (WHERE COALESCE(d.comision,0) = 0),0) AS iva_sin_comision,
+             COUNT(f.id) FILTER (WHERE COALESCE(d.comision,0) = 0)::int       AS n_sin_comision
         FROM fac_facturas f
         LEFT JOIN (
           SELECT factura_id,
@@ -765,9 +771,12 @@ router.get('/mensual-direccion', async (req, res) => {
     } catch (e) { empresas = []; }
 
     const comisiones = vacio(), iva = vacio(), otrosIng = vacio(), gastosOp = vacio();
+    const ivaSinCom = vacio(), nSinCom = vacio();
     fact.rows.forEach(r => {
       comisiones[r.mes - 1] = parseFloat(r.comisiones) || 0;
       iva[r.mes - 1]        = parseFloat(r.iva) || 0;
+      ivaSinCom[r.mes - 1]  = parseFloat(r.iva_sin_comision) || 0;
+      nSinCom[r.mes - 1]    = parseInt(r.n_sin_comision) || 0;
     });
     otros.forEach(r  => { otrosIng[r.mes - 1] = parseFloat(r.total) || 0; });
     gastos.forEach(r => { gastosOp[r.mes - 1] = parseFloat(r.total) || 0; });
@@ -789,6 +798,9 @@ router.get('/mensual-direccion', async (req, res) => {
         mes: i + 1,
         comisiones: comisiones[i],
         facturacion: iva[i],
+        // Parte de facturacion, no se suma aparte: es un "de la cual"
+        iva_sin_comision: ivaSinCom[i],
+        facturas_sin_comision: nSinCom[i],
         otros_ingresos: otrosIng[i],
         total_ingresos: totalIng[i],
         gastos_operativos: gastosOp[i],
@@ -799,6 +811,8 @@ router.get('/mensual-direccion', async (req, res) => {
       totales: {
         comisiones: suma(comisiones),
         facturacion: suma(iva),
+        iva_sin_comision: suma(ivaSinCom),
+        facturas_sin_comision: suma(nSinCom),
         otros_ingresos: suma(otrosIng),
         total_ingresos: suma(totalIng),
         gastos_operativos: suma(gastosOp),
