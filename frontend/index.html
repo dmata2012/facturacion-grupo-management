@@ -6302,6 +6302,29 @@ async function loadFacturas() {
           ${f.desglose_validado?`<span title="Desglose cuadrado: no se puede editar ni eliminar. Cancelar sí está permitido, con confirmación." style="color:var(--muted);font-size:11px;font-style:italic">🔒 sin edición</span>`:''}
         </td>
       </tr>`).join('')}</tbody>
+      ${(() => {
+        // Los totales son del PERIODO FILTRADO completo, no de los 50 renglones
+        // que se ven. Puesto justo debajo de la tabla se leeria como la suma de
+        // lo visible, asi que cuando hay mas de una pagina el rotulo lo dice.
+        const t = d.totales || {};
+        const paginas = Math.max(1, Math.ceil(d.total / d.limit));
+        const cel = (v, extra) => `<td style="text-align:right;white-space:nowrap;${extra||''}">${fmt(v)}</td>`;
+        return `<tfoot><tr style="background:#f1f5f9;font-weight:900;border-top:2.5px solid var(--dark)">
+          <td colspan="5" style="text-align:right;padding:9px 8px;font-size:11.5px;
+              text-transform:uppercase;letter-spacing:.6px;color:var(--dark)">
+            Total del periodo
+            <span style="font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted)">
+              · ${d.total} factura${d.total!=1?'s':''}${paginas > 1
+                ? ` de las ${paginas} páginas, no solo esta` : ''}</span>
+          </td>
+          ${cel(t.subtotal, 'color:var(--muted)')}
+          ${cel(t.iva, 'color:var(--muted)')}
+          ${cel(t.facturado, 'font-size:13px')}
+          ${cel(t.cobrado, 'color:var(--success)')}
+          ${cel(t.saldo, 'color:' + (parseFloat(t.saldo) > 0 ? 'var(--danger)' : 'var(--success)'))}
+          <td colspan="3"></td>
+        </tr></tfoot>`;
+      })()}
     </table></div>
     ${(() => {
       const totalPag = Math.max(1, Math.ceil(d.total / d.limit));
