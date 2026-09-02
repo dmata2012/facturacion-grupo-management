@@ -13538,10 +13538,6 @@ async function mensualDireccion() {
       .md-t .h-imp {background:#bfdbfe;color:#1e3a8a}
       .md-t .h-egr {background:#7c2d12;color:#fff}
       .md-t .h-dif {background:#7c2d12;color:#fff}
-      /* Desglose de Facturacion, no un concepto mas: se pinta apagada para que
-         no se lea como una columna que suma. */
-      .md-t .h-sub {background:#f8fafc;color:#94a3b8;font-weight:700}
-      .md-t .c-sub {background:#fafafa;color:#94a3b8;font-size:10.5px}
       .md-t .c-tot {background:#f8fafc;font-weight:800;font-style:italic}
       .md-t .c-gas {background:#eff6ff;font-weight:700;font-style:italic}
       .md-t .c-egr {background:#fef2f2;font-weight:800;font-style:italic}
@@ -13625,7 +13621,6 @@ function renderMensualDir(d) {
             <th class="h-ing" rowspan="2" style="text-align:left">Mes</th>
             <th class="h-ing" rowspan="2">Comisiones</th>
             <th class="h-ing" rowspan="2">Facturación</th>
-            <th class="h-sub" rowspan="2" title="Parte del IVA de arriba que corresponde a facturas sin comisión. Ya está incluida en Facturación, no se suma aparte.">de la cual<br>sin comisión</th>
             <th class="h-ing" rowspan="2">Otros Ingresos</th>
             <th class="h-ing" rowspan="2">Total Ingresos</th>
             <th class="h-gas" rowspan="2">Gastos<br>Operativos</th>
@@ -13643,7 +13638,7 @@ function renderMensualDir(d) {
             ${abierto ? emp.map(e => `<th class="h-imp" colspan="2" title="${e.nombre}">${e.nombre}</th>`).join('') : ''}
           </tr>
           ${abierto && emp.length ? `<tr>
-            <th class="h-ing" colspan="7"></th>
+            <th class="h-ing" colspan="6"></th>
             ${emp.map(() => `<th class="h-imp">IVA</th><th class="h-imp">ISR</th>`).join('')}
             <th class="h-egr"></th><th class="h-dif"></th>
           </tr>` : ''}
@@ -13654,7 +13649,6 @@ function renderMensualDir(d) {
             <td class="mes">${MESES_MD[m.mes-1]}</td>
             <td>${mdN(m.comisiones)}</td>
             <td>${mdN(m.facturacion)}</td>
-            <td class="c-sub"${m.facturas_sin_comision ? ` title="${m.facturas_sin_comision} factura${m.facturas_sin_comision!=1?'s':''} sin comisión"` : ''}>${mdN(m.iva_sin_comision)}</td>
             <td>${mdN(m.otros_ingresos)}</td>
             <td class="c-tot">${mdN(m.total_ingresos)}</td>
             <td class="c-gas">${mdN(m.gastos_operativos)}</td>
@@ -13669,7 +13663,6 @@ function renderMensualDir(d) {
           <td class="mes" style="background:#e2e8f0">TOTAL ${d.anio}</td>
           <td>${fmt(d.totales.comisiones)}</td>
           <td>${fmt(d.totales.facturacion)}</td>
-          <td class="c-sub">${mdN(d.totales.iva_sin_comision)}</td>
           <td>${fmt(d.totales.otros_ingresos)}</td>
           <td>${fmt(d.totales.total_ingresos)}</td>
           <td>${fmt(d.totales.gastos_operativos)}</td>
@@ -13683,9 +13676,7 @@ function renderMensualDir(d) {
 
       <div class="md-pie">
         <strong>Comisiones:</strong> concepto de comisión del desglose de las facturas emitidas en el mes.
-        &nbsp;<strong>Facturación:</strong> IVA de <em>todas</em> las facturas del mes, tengan desglose o no.
-        &nbsp;<strong>De la cual sin comisión:</strong> la parte de ese IVA que viene de facturas
-        sin ninguna línea de comisión en su desglose. Ya está contada en Facturación—no se suma aparte.
+        &nbsp;<strong>Facturación:</strong> IVA de esas mismas facturas.
         &nbsp;<strong>Otros ingresos:</strong> cobros sin factura del mes.
         &nbsp;<strong>Gastos operativos:</strong> gastos del bloque de operación, por fecha del gasto.
         No incluye facturas canceladas.
