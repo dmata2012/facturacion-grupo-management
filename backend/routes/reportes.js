@@ -706,12 +706,16 @@ router.get('/mensual-direccion', async (req, res) => {
     const vacio = () => Array(12).fill(0);
 
     // ── Ingresos: comisiones del desglose e IVA de la factura ──
+    // JOIN, no LEFT JOIN: ambas columnas cubren la misma poblacion, las facturas
+    // que traen desglose. Con LEFT la de IVA incluia tambien las que no lo tienen
+    // y la de comisiones no, asi que las dos hablaban de universos distintos sin
+    // que nada en el reporte lo dijera.
     const fact = await query(`
       SELECT EXTRACT(MONTH FROM f.fecha_emision)::int AS mes,
              COALESCE(SUM(d.comision),0) AS comisiones,
              COALESCE(SUM(f.iva),0)      AS iva
         FROM fac_facturas f
-        LEFT JOIN (
+        JOIN (
           SELECT factura_id,
                  SUM(monto) FILTER (WHERE UPPER(concepto) LIKE '%COMISI%') AS comision
             FROM fac_desglose_rh GROUP BY factura_id
