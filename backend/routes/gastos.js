@@ -177,6 +177,11 @@ const CATEGORIAS_SEED = [
     await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS pago_forma TEXT`);
     await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS pago_referencia TEXT`);
     await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS pago_notas TEXT`);
+    // Solo para gastos del bloque de impuestos: de que empresa emisora es el pago
+    // y si es IVA o ISR. Sin estos dos datos el pago no cabe en ninguna columna
+    // del Reporte Mensual, que las abre por empresa y por tipo.
+    await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS empresa_receptora_id INT`);
+    await query(`ALTER TABLE fac_gastos ADD COLUMN IF NOT EXISTS tipo_impuesto TEXT`);
     await query(`UPDATE fac_gastos SET pagado = 0 WHERE pagado IS NULL`);
     await query(`CREATE INDEX IF NOT EXISTS idx_gastos_venc ON fac_gastos(fecha_vencimiento)`);
 
@@ -984,6 +989,18 @@ router.get('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Solo tienen sentido en gastos del bloque de impuestos. Se normalizan a NULL
+// cuando vienen vacios: un <select> sin elegir manda '', y el reporte necesita
+// distinguir "sin asignar" de un id o un tipo real.
+function datosImpuesto(body) {
+  const emp = parseInt(body.empresa_receptora_id);
+  const t   = String(body.tipo_impuesto || '').toUpperCase();
+  return {
+    empresa: Number.isInteger(emp) && emp > 0 ? emp : null,
+    tipo: ['IVA', 'ISR'].includes(t) ? t : null
+  };
+}
+
 router.post('/', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
   try {
     const { concepto_id, fecha, monto, descripcion, proveedor,
@@ -1006,15 +1023,17 @@ router.post('/', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), asyn
     const r = await query(
       `INSERT INTO fac_gastos(concepto_id, fecha, monto, descripcion, proveedor,
          forma_pago, referencia, factura_rfc, deducible, notas,
-         uuid, origen, subtotal, iva, retenciones, rfc_proveedor, nombre_proveedor, creado_por)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'MANUAL',$12,$13,$14,$15,$16,$17) RETURNING *`,
+         uuid, origen, subtotal, iva, retenciones, rfc_proveedor, nombre_proveedor, creado_por,
+         empresa_receptora_id, tipo_impuesto)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'MANUAL',$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
       [concepto_id, fecha, m, descripcion || null, proveedor || null,
        forma_pago || 'transferencia', referencia || null, factura_rfc || null,
        deducible !== false, notas || null,
        uuidLimpio, parseFloat(subtotal) || null, parseFloat(iva) || null,
        parseFloat(retenciones) || 0,
        (rfc_proveedor || factura_rfc || '').trim().toUpperCase() || null,
-       proveedor || null, req.usuario.id]
+       proveedor || null, req.usuario.id,
+       datosImpuesto(req.body).empresa, datosImpuesto(req.body).tipo]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) {
@@ -1049,17 +1068,20 @@ router.put('/:id', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), as
     }
 
     const num = v => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+    const imp = datosImpuesto(req.body);
     await query(
       `UPDATE fac_gastos SET concepto_id=$1, fecha=$2, monto=$3, descripcion=$4, proveedor=$5,
          forma_pago=$6, referencia=$7, factura_rfc=$8, deducible=$9, notas=$10,
          uuid=$11, subtotal=$12, iva=$13, retenciones=COALESCE($14, retenciones),
-         rfc_proveedor=COALESCE($15, rfc_proveedor), actualizado_en=NOW()
-       WHERE id=$16`,
+         rfc_proveedor=COALESCE($15, rfc_proveedor),
+         empresa_receptora_id=$16, tipo_impuesto=$17, actualizado_en=NOW()
+       WHERE id=$18`,
       [concepto_id, fecha, m, descripcion || null, proveedor || null,
        forma_pago || 'transferencia', referencia || null, factura_rfc || null,
        deducible !== false, notas || null,
        uuidFinal, num(subtotal), num(iva), num(retenciones),
-       (rfc_proveedor || factura_rfc || '').trim().toUpperCase() || null, req.params.id]
+       (rfc_proveedor || factura_rfc || '').trim().toUpperCase() || null,
+       imp.empresa, imp.tipo, req.params.id]
     );
     res.json({ ok: true });
   } catch (e) {

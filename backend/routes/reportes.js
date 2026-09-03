@@ -756,10 +756,8 @@ router.get('/mensual-direccion', async (req, res) => {
     } catch (e) { gastos = []; }
 
     // ── Impuestos por empresa ──
-    // Las columnas se arman desde el catálogo de empresas emisoras; los importes
-    // todavía no tienen de dónde salir, así que van en cero. Se devuelven de
-    // todos modos para que el reporte muestre la estructura completa y se note
-    // qué falta capturar, en vez de omitir el bloque.
+    // Las columnas se arman desde el catálogo de empresas emisoras y se llenan con
+    // los gastos del bloque de impuestos, etiquetados en la captura de CxP.
     let empresas = [];
     try {
       const e = await query(
@@ -767,6 +765,23 @@ router.get('/mensual-direccion', async (req, res) => {
            FROM fac_empresas_receptoras WHERE activo = TRUE ORDER BY nombre`);
       empresas = e.rows.map(x => ({ id: x.id, nombre: x.nombre, iva: vacio(), isr: vacio() }));
     } catch (e) { empresas = []; }
+
+    // Mismo origen y misma fecha que los gastos operativos, pero del otro bloque.
+    let impRows = [];
+    try {
+      const im = await query(`
+        SELECT EXTRACT(MONTH FROM g.fecha)::int      AS mes,
+               g.empresa_receptora_id                AS empresa_id,
+               UPPER(COALESCE(g.tipo_impuesto,''))   AS tipo,
+               COALESCE(SUM(g.monto),0)              AS total
+          FROM fac_gastos g
+          JOIN fac_gastos_conceptos  c ON c.id = g.concepto_id
+          JOIN fac_gastos_categorias k ON k.id = c.categoria_id
+         WHERE EXTRACT(YEAR FROM g.fecha) = $1
+           AND k.bloque = 'impuestos'
+         GROUP BY 1, 2, 3`, [anio]);
+      impRows = im.rows;
+    } catch (e) { impRows = []; }
 
     const comisiones = vacio(), iva = vacio(), otrosIng = vacio(), gastosOp = vacio();
     fact.rows.forEach(r => {
@@ -776,10 +791,23 @@ router.get('/mensual-direccion', async (req, res) => {
     otros.forEach(r  => { otrosIng[r.mes - 1] = parseFloat(r.total) || 0; });
     gastos.forEach(r => { gastosOp[r.mes - 1] = parseFloat(r.total) || 0; });
 
-    const impuestos = vacio();
-    empresas.forEach(e => e.iva.forEach((_, i) => {
-      impuestos[i] += (e.iva[i] || 0) + (e.isr[i] || 0);
-    }));
+    // El total del mes sale de TODOS los gastos de impuestos, no de la suma de las
+    // columnas: un pago sin empresa o sin tipo no cabe en ninguna columna, y si el
+    // total se calculara sumandolas ese dinero desapareceria del reporte sin que
+    // nada lo dijera. Se cuenta aparte para poder mostrar cuanto falta clasificar.
+    const impuestos = vacio(), impSinAsignar = vacio();
+    const porEmpresa = new Map(empresas.map(e => [e.id, e]));
+    impRows.forEach(x => {
+      const v = parseFloat(x.total) || 0;
+      const i = x.mes - 1;
+      impuestos[i] += v;
+      const emp = porEmpresa.get(x.empresa_id);
+      if (emp && (x.tipo === 'IVA' || x.tipo === 'ISR')) {
+        (x.tipo === 'IVA' ? emp.iva : emp.isr)[i] += v;
+      } else {
+        impSinAsignar[i] += v;
+      }
+    });
 
     const totalIng  = comisiones.map((v, i) => v + iva[i] + otrosIng[i]);
     const totalEgr  = gastosOp.map((v, i) => v + impuestos[i]);
@@ -797,6 +825,9 @@ router.get('/mensual-direccion', async (req, res) => {
         total_ingresos: totalIng[i],
         gastos_operativos: gastosOp[i],
         impuestos: empresas.map(e => ({ iva: e.iva[i], isr: e.isr[i] })),
+        // El total incluye lo que no cabe en ninguna columna; el desglose no
+        impuestos_total: impuestos[i],
+        impuestos_sin_asignar: impSinAsignar[i],
         total_egresos: totalEgr[i],
         diferencia: diferencia[i]
       })),
@@ -807,11 +838,14 @@ router.get('/mensual-direccion', async (req, res) => {
         total_ingresos: suma(totalIng),
         gastos_operativos: suma(gastosOp),
         impuestos: empresas.map(e => ({ iva: suma(e.iva), isr: suma(e.isr) })),
+        impuestos_total: suma(impuestos),
+        impuestos_sin_asignar: suma(impSinAsignar),
         total_egresos: suma(totalEgr),
         diferencia: suma(diferencia)
       },
-      // Para que la pantalla explique por qué el bloque de impuestos va en ceros
-      impuestos_sin_origen: true
+      // Ya no es "sin origen": ahora sale de los gastos del bloque de impuestos.
+      // El aviso solo aplica si no hay un solo pago capturado en todo el año.
+      impuestos_sin_origen: impRows.length === 0
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

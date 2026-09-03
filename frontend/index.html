@@ -2634,6 +2634,11 @@ function exportarGastosExcel() {
 // ── Modal de captura de gasto ──
 async function openGasto(id) {
   await gtCargarCatalogos();
+  // Para las columnas del Reporte Mensual. Se pide una sola vez por sesion.
+  if (!window._gtEmpresas) {
+    try { window._gtEmpresas = await api('/receptoras'); }
+    catch(e) { window._gtEmpresas = []; }
+  }
   const conceptos = window._gtConceptos || [];
   try { window._gtProveedores = await api('/gastos/proveedores'); }
   catch(e) { window._gtProveedores = window._gtProveedores || []; }
@@ -2668,6 +2673,38 @@ async function openGasto(id) {
           <option value="">— Seleccionar —</option>
           ${gtOptsConceptos(catActual, g.concepto_id)}
         </select>
+      </div>
+      <!-- Solo para el bloque de impuestos: sin empresa y tipo, el pago no cabe
+           en ninguna columna del Reporte Mensual. Se muestran u ocultan segun la
+           categoria elegida para no estorbar en el resto de las capturas. -->
+      <div class="fi full" id="gf-imp-caja" style="display:none">
+        <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:11px;padding:11px 13px">
+          <div style="font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.9px;
+               color:#1e40af;margin-bottom:8px">Pago de impuestos · a qué columna va</div>
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:9px">
+            <div>
+              <label style="font-size:10px">Empresa emisora</label>
+              <select id="gf-empresa">
+                <option value="">— Sin asignar —</option>
+                ${(window._gtEmpresas||[]).map(e => `<option value="${e.id}" ${
+                  String(e.id)===String(g.empresa_receptora_id||'')?'selected':''}>${
+                  e.nombre_comercial || e.razon_social}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label style="font-size:10px">Tipo</label>
+              <select id="gf-tipo-imp">
+                <option value="">—</option>
+                <option value="IVA" ${g.tipo_impuesto==='IVA'?'selected':''}>IVA</option>
+                <option value="ISR" ${g.tipo_impuesto==='ISR'?'selected':''}>ISR</option>
+              </select>
+            </div>
+          </div>
+          <div style="font-size:10.5px;color:#1e40af;margin-top:7px;line-height:1.5">
+            Si lo dejas sin asignar, el pago sigue contando en el total de egresos
+            pero no aparece en ninguna columna del Reporte Mensual.
+          </div>
+        </div>
       </div>
       <div class="fi"><label>Fecha <span style="color:var(--red)">*</span></label>
         <input type="date" id="gf-fecha" value="${sv(g.fecha).slice(0,10)}">
@@ -2747,7 +2784,27 @@ async function openGasto(id) {
     </div>`;
   gfLlenarProveedores();
   gfProveedorElegido(true);
+  gfMostrarImpuestos();
   openModal('modal-gasto');
+}
+
+// El bloque de impuestos se decide en la categoria de la cuenta de gasto, asi que
+// los campos aparecen segun lo elegido en cualquiera de los dos selectores.
+function gfMostrarImpuestos() {
+  const caja = $('gf-imp-caja');
+  if (!caja) return;
+  const conceptoId = $('gf-concepto')?.value;
+  const conc = (window._gtConceptos || []).find(c => String(c.id) === String(conceptoId));
+  const catId = conc ? conc.categoria_id : $('gf-categoria')?.value;
+  const cat = (window._gtCategorias || []).find(k => String(k.id) === String(catId));
+  const esImpuesto = cat && cat.bloque === 'impuestos';
+  caja.style.display = esImpuesto ? '' : 'none';
+  // Si deja de ser un gasto de impuestos, se limpian: dejarlos puestos guardaria
+  // una empresa y un tipo en un gasto operativo, donde no significan nada.
+  if (!esImpuesto) {
+    if ($('gf-empresa'))  $('gf-empresa').value = '';
+    if ($('gf-tipo-imp')) $('gf-tipo-imp').value = '';
+  }
 }
 
 // Sugerencias del campo Proveedor. Se usa <datalist> y no un <select> a propósito:
@@ -2804,6 +2861,7 @@ function gfProveedorElegido(silencioso) {
 
 // Cascada del modal: acotar las cuentas de gasto a la categoría elegida
 function gtCascadaModal() {
+  setTimeout(gfMostrarImpuestos, 0);
   const cat = $('gf-categoria').value, sel = $('gf-concepto'), prev = sel.value;
   sel.innerHTML = '<option value="">— Seleccionar —</option>' + gtOptsConceptos(cat, prev);
 }
@@ -2824,7 +2882,9 @@ async function guardarGasto(id) {
     subtotal   : num($('gf-subtotal')?.value),
     iva        : num($('gf-iva')?.value),
     retenciones: num($('gf-retenciones')?.value),
-    uuid       : ($('gf-uuid')?.value || '').trim().toUpperCase() || null
+    uuid       : ($('gf-uuid')?.value || '').trim().toUpperCase() || null,
+    empresa_receptora_id: $('gf-empresa')?.value || null,
+    tipo_impuesto       : $('gf-tipo-imp')?.value || null
   };
   // La captura manual exige clasificar de inmediato: sin cuenta de gasto no hay estado financiero
   if (!body.concepto_id) return toast('Selecciona la cuenta de gasto.', 'warn');
@@ -13719,7 +13779,9 @@ function renderMensualDir(d) {
             <td class="c-gas">${mdN(m.gastos_operativos)}</td>
             ${abierto
               ? (m.impuestos||[]).map(i => `<td>${mdN(i.iva)}</td><td>${mdN(i.isr)}</td>`).join('')
-              : `<td>${mdN((m.impuestos||[]).reduce((a,i) => a + (i.iva||0) + (i.isr||0), 0))}</td>`}
+              : `<td${m.impuestos_sin_asignar ? ` title="${fmt(m.impuestos_sin_asignar)} sin empresa o tipo asignado"` : ''
+                }>${mdN(m.impuestos_total != null ? m.impuestos_total
+                       : (m.impuestos||[]).reduce((a,i) => a + (i.iva||0) + (i.isr||0), 0))}</td>`}
             <td class="c-egr">${mdN(m.total_egresos)}</td>
             <td class="c-dif">${mdN(m.diferencia)}</td>
           </tr>`;
@@ -13733,7 +13795,8 @@ function renderMensualDir(d) {
           <td>${fmt(d.totales.gastos_operativos)}</td>
           ${abierto
             ? (d.totales.impuestos||[]).map(i => `<td>${mdN(i.iva)}</td><td>${mdN(i.isr)}</td>`).join('')
-            : `<td>${mdN((d.totales.impuestos||[]).reduce((a,i) => a + (i.iva||0) + (i.isr||0), 0))}</td>`}
+            : `<td>${mdN(d.totales.impuestos_total != null ? d.totales.impuestos_total
+                     : (d.totales.impuestos||[]).reduce((a,i) => a + (i.iva||0) + (i.isr||0), 0))}</td>`}
           <td>${fmt(d.totales.total_egresos)}</td>
           <td>${fmt(d.totales.diferencia)}</td>
         </tr></tfoot>
@@ -13754,9 +13817,17 @@ function renderMensualDir(d) {
         ${d.impuestos_sin_origen ? `
         <div class="no-print" style="margin-top:9px;background:#fffbeb;border:1px solid #fcd34d;
              border-radius:8px;padding:8px 11px;color:#78350f">
-          <strong>⚠ El bloque de Impuestos sale en ceros.</strong> Las columnas se arman con tus
-          ${emp.length} empresa${emp.length!==1?'s':''} emisora${emp.length!==1?'s':''}, pero el sistema
-          todavía no captura el IVA e ISR pagado por cada una. Dime de dónde debe salir ese dato y lo conecto.
+          <strong>⚠ El bloque de Impuestos sale en ceros.</strong> Sale de los gastos capturados en
+          <em>Gastos (CxP)</em> cuya categoría esté marcada como <strong>Pago de impuestos</strong>,
+          y en ${d.anio} no hay ninguno. Marca la categoría en Gastos → Catálogo y captura ahí los pagos.
+        </div>` : ''}
+        ${(d.totales.impuestos_sin_asignar || 0) > 0 ? `
+        <div class="no-print" style="margin-top:9px;background:#eff6ff;border:1px solid #bfdbfe;
+             border-radius:8px;padding:8px 11px;color:#1e40af">
+          <strong>${fmt(d.totales.impuestos_sin_asignar)} de impuestos sin asignar.</strong>
+          Ese dinero sí cuenta en el total de egresos, pero no aparece en ninguna columna porque
+          al gasto le falta la empresa emisora o el tipo (IVA/ISR). Se completa editando el gasto
+          en <em>Gastos (CxP)</em>.
         </div>` : ''}
         <div style="margin-top:5px">Generado el ${new Date().toLocaleString('es-MX')}.</div>
       </div>
