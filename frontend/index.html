@@ -13605,6 +13605,9 @@ async function mensualDireccion() {
       .md-t .c-egr {background:#fef2f2;font-weight:800;font-style:italic}
       .md-t .c-dif {background:#fffbeb;font-weight:800;font-style:italic}
       .md-t tfoot td{background:#e2e8f0;font-weight:900;font-style:italic;border-top:2px solid #64748b}
+      .md-graf{margin-top:22px;padding-top:16px;border-top:1px solid var(--border)}
+      .md-graf-t{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:1px;
+        color:var(--muted);margin-bottom:10px}
       .md-pie{margin-top:16px;font-size:11px;color:var(--muted);line-height:1.6;
         border-top:1px solid var(--border);padding-top:12px;min-width:900px}
     </style>
@@ -13736,6 +13739,11 @@ function renderMensualDir(d) {
         </tr></tfoot>
       </table>
 
+      <div class="md-graf">
+        <div class="md-graf-t">Ingresos por mes</div>
+        <div style="height:290px"><canvas id="md-chart"></canvas></div>
+      </div>
+
       <div class="md-pie">
         <strong>Comisiones:</strong> concepto de comisión del desglose de las facturas emitidas en el mes.
         &nbsp;<strong>Facturación:</strong> IVA de esas mismas facturas. Ambas columnas cuentan
@@ -13753,6 +13761,50 @@ function renderMensualDir(d) {
         <div style="margin-top:5px">Generado el ${new Date().toLocaleString('es-MX')}.</div>
       </div>
     </div>`;
+
+  dibujarGraficaMensual(d);
+}
+
+// Barras apiladas: la altura de cada mes ES el total de ingresos, y al mismo
+// tiempo se ve de que se compone. Con cuatro series sueltas —las tres partes mas
+// el total— el total aplastaria a las otras y ademas repetiria lo que ya suman.
+function dibujarGraficaMensual(d) {
+  const ctx = $('md-chart');
+  if (!ctx || typeof Chart === 'undefined') return;
+  const serie = campo => d.meses.map(m => parseFloat(m[campo]) || 0);
+  const partes = [
+    { label: 'Comisiones',     data: serie('comisiones'),     backgroundColor: '#0f766e' },
+    { label: 'Facturación',    data: serie('facturacion'),    backgroundColor: '#94a3b8' },
+    { label: 'Otros ingresos', data: serie('otros_ingresos'), backgroundColor: '#f59e0b' }
+  ];
+  makeChart('md-ingresos', ctx, {
+    type: 'bar',
+    data: { labels: MESES_MD, datasets: partes.map(p => ({ ...p, borderRadius: 3, borderWidth: 0 })) },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      // 'index' para que el tooltip muestre las tres partes del mes a la vez:
+      // el dato util es la composicion, no una barra suelta.
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: c => `${c.dataset.label}: ${fmt(c.raw)}`,
+            footer: items => 'Total ingresos: ' +
+              fmt(items.reduce((a, i) => a + (parseFloat(i.raw) || 0), 0))
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, grid: { display: false } },
+        y: {
+          stacked: true, beginAtZero: true,
+          ticks: { callback: v => v >= 1000000 ? '$' + (v/1000000).toFixed(1) + 'M'
+                              : v >= 1000 ? '$' + Math.round(v/1000) + 'k' : '$' + v }
+        }
+      }
+    }
+  });
 }
 
 function exportarMensualDirExcel() {
@@ -13814,6 +13866,9 @@ function imprimirMensualDir() {
       .enc h2{margin:0;font-size:13px;font-weight:900}
       .enc .s{font-size:10px;color:#666;margin-top:2px}
       table{border-collapse:collapse;width:100%}
+      .graf{margin-top:12px;page-break-inside:avoid}
+      .graf-t{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:1px;
+        color:#666;margin-bottom:5px}
       th{padding:4px 5px;font-size:7.5px;font-weight:800;text-align:center;border:.5px solid #666}
       td{padding:3px 5px;text-align:right;border:.5px solid #bbb;white-space:nowrap}
       td.mes{text-align:left;font-weight:700;background:#f5f5f5}
@@ -13894,6 +13949,16 @@ function imprimirMensualDir() {
       Gastos operativos: gastos del bloque de operación. No incluye facturas canceladas.
       <br>Impreso el ${new Date().toLocaleString('es-MX')}.
     </div>
+    ${(() => {
+      // La ventana de impresion se arma desde cero, asi que el <canvas> no viaja:
+      // se manda su imagen. Si la grafica no alcanzo a dibujarse, no se imprime
+      // nada en lugar de dejar un hueco.
+      try {
+        const png = document.getElementById('md-chart')?.toDataURL('image/png');
+        return png ? `<div class="graf"><div class="graf-t">Ingresos por mes</div>
+          <img src="${png}" style="width:100%;max-height:78mm;object-fit:contain"></div>` : '';
+      } catch (e) { return ''; }
+    })()}
     <div class="actions"><button class="p" onclick="window.print()">🖨 Imprimir</button></div>
     <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),500));<\/script>
     </body></html>`);
