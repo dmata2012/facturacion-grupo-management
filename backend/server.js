@@ -128,4 +128,12 @@ app.listen(PORT, async () => {
   console.log(`\n✅ Sistema de Facturación corriendo en http://localhost:${PORT}`);
   console.log(`   API: http://localhost:${PORT}/api\n`);
   await autoVencer();
+
+  // Importador automático de facturas por correo (IMAP)
+  try {
+    const { iniciarImportadorCorreo } = require('./config/imap-facturas');
+    iniciarImportadorCorreo();
+  } catch (e) {
+    console.warn('No se pudo iniciar el importador de correo:', e.message);
+  }
 });

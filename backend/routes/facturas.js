@@ -115,6 +115,17 @@ router.get('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── REVISAR EL BUZÓN AHORA ────────────────────
+// El importador ya corre solo cada X minutos; esto es para no esperarlo cuando
+// se sabe que la factura acaba de llegar. Va antes de /:id para que esa ruta no
+// se lo trague como si "revisar-correo" fuera un id.
+router.post('/revisar-correo', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
+  try {
+    const { revisarCorreo } = require('../config/imap-facturas');
+    res.json(await revisarCorreo());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── OBTENER UNA ───────────────────────────────
 router.get('/:id', async (req, res) => {
   try {

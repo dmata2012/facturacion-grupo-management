@@ -6237,7 +6237,11 @@ async function facturas(resetPage = true) {
       <div class="page-title">Facturas</div>
       <div class="page-sub">Gestión y seguimiento de comprobantes fiscales</div>
     </div>
-    ${canFacturar() ? `<div style="display:flex;gap:8px"><button class="btn bo" onclick="openImportarXML()">📥 Importar XMLs</button><button class="btn bs" onclick="openFactura()">+ Nueva factura</button></div>` : ''}
+    ${canFacturar() ? `<div style="display:flex;gap:8px">
+      <button class="btn bo" id="fac-correo-btn" onclick="revisarCorreoFacturas()"
+              title="Busca facturas nuevas en el buzón y las da de alta">📬 Revisar correo</button>
+      <button class="btn bo" onclick="openImportarXML()">📥 Importar XMLs</button>
+      <button class="btn bs" onclick="openFactura()">+ Nueva factura</button></div>` : ''}
   </div>
   <div class="card">
     <div class="filters">
@@ -6298,6 +6302,61 @@ function limpiarFiltrosFac() {
   if ($('f-cliente')) $('f-cliente').value = '';
   _facPage = 1;
   loadFacturas();
+}
+
+// El importador ya revisa el buzón solo cada pocos minutos; esto es para no
+// esperarlo. Lo que aporta de mas es el resultado a la vista: corriendo solo, un
+// XML que falla nada mas queda en el log del servidor.
+async function revisarCorreoFacturas() {
+  const btn = $('fac-correo-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Revisando…'; }
+  try {
+    const r = await api('/facturas/revisar-correo', { method:'POST', body: JSON.stringify({}) });
+    if (!r.configurado) {
+      toast('El buzón no está configurado. Falta capturar el usuario y la contraseña en el servidor.', 'warn');
+    } else if (r.ocupado) {
+      toast('Ya hay una revisión en curso. Espera unos segundos.', 'warn');
+    } else if (!r.revisados) {
+      toast('Sin correos nuevos en ' + (r.buzon || 'el buzón') + '.');
+    } else {
+      const partes = [];
+      if (r.creadas)    partes.push(`${r.creadas} importada${r.creadas!=1?'s':''}`);
+      if (r.duplicadas) partes.push(`${r.duplicadas} ya estaba${r.duplicadas!=1?'n':''}`);
+      if (r.errores)    partes.push(`${r.errores} con error`);
+      toast(`${r.revisados} correo${r.revisados!=1?'s':''}: ` +
+            (partes.join(', ') || 'ninguno traía XML'), r.errores ? 'warn' : 'ok');
+      if (r.creadas) await loadFacturas();
+      // Los errores se muestran completos: saber cuantos fallaron sin saber por
+      // que no sirve para arreglarlos.
+      if (r.detalles?.length) mostrarErroresCorreo(r);
+    }
+  } catch(e) { toast(e.message, 'err'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '📬 Revisar correo'; } }
+}
+
+function mostrarErroresCorreo(r) {
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#92400e,#d97706);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Revisión del buzón</div>
+      <div style="font-size:19px;font-weight:900;margin-top:3px">${r.errores} archivo${r.errores!=1?'s':''} sin importar</div>
+      <div style="font-size:11.5px;opacity:.9;margin-top:4px">${r.buzon||''}</div>
+    </div>
+    <div class="tscroll" style="max-height:50vh;overflow:auto">
+      ${r.detalles.map(x => `
+        <div style="border-bottom:1px solid var(--border);padding:9px 2px">
+          <div style="font-weight:700;font-size:12.5px">${x.archivo}</div>
+          ${x.de ? `<div style="font-size:11px;color:var(--muted)">${String(x.de).replace(/</g,'&lt;')}</div>` : ''}
+          <div style="font-size:12px;color:#b45309;margin-top:3px">${x.error}</div>
+        </div>`).join('')}
+    </div>
+    <div style="font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.5">
+      Estos correos ya quedaron marcados como leídos, así que no se van a volver a intentar.
+      Si el XML era válido, súbelo con <strong>📥 Importar XMLs</strong>.
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button>
+    </div>`;
+  openModal('modal-gt-cats');
 }
 
 async function loadFacturas() {
