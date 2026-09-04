@@ -38,8 +38,13 @@ function buscarNodo(obj, nombre) {
 }
 
 function parsearCFDI(xmlText) {
-  const j = xmlParser.parse(xmlText);
-  const comp = j.Comprobante;
+  // El parser revienta con un adjunto que no es XML bien formado, y venia sin
+  // proteger: un solo archivo corrupto abortaba el resto de los XML de ese mismo
+  // correo. Se convierte en un rechazo normal, con su motivo.
+  let j;
+  try { j = xmlParser.parse(xmlText); }
+  catch (e) { return { ok: false, error: 'El archivo no es XML valido: ' + e.message }; }
+  const comp = j && j.Comprobante;
   if (!comp) return { ok: false, error: 'No es un CFDI (falta Comprobante)' };
 
   const emisor   = comp.Emisor;
