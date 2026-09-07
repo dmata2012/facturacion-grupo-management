@@ -6256,6 +6256,14 @@ async function facturas(resetPage = true) {
         <option value="">Todos los estatus</option>
         <option>pendiente</option><option>parcial</option><option>pagada</option><option>vencida</option><option>cancelada</option>
       </select>
+      <select id="f-sat" onchange="filtrarFacturas()" title="Estatus del comprobante ante el SAT">
+        <option value="">🏛 Todo estatus SAT</option>
+        <option value="vigente">✔ Vigente</option>
+        <option value="cancelado">✖ Cancelado</option>
+        <option value="no_encontrado">⚠ No encontrado</option>
+        <option value="otro">⚠ Otra respuesta</option>
+        <option value="sin_validar">⏳ Sin validar</option>
+      </select>
       <input id="f-desde" type="date" onchange="filtrarFacturas()">
       <input id="f-hasta" type="date" onchange="filtrarFacturas()">
       <button class="btn bo bsm" onclick="limpiarFiltrosFac()" title="Limpiar filtros">✕ Limpiar</button>
@@ -6300,6 +6308,7 @@ function limpiarFiltrosFac() {
   $('f-hasta').value   = '';
   if ($('f-emisora')) $('f-emisora').value = '';
   if ($('f-cliente')) $('f-cliente').value = '';
+  if ($('f-sat')) $('f-sat').value = '';
   _facPage = 1;
   loadFacturas();
 }
@@ -6373,6 +6382,8 @@ async function loadFacturas() {
   if (hasta)   url += `&hasta=${hasta}`;
   if (emisora) url += `&emisora_id=${emisora}`;
   if (cliente) url += `&cliente_id=${cliente}`;
+  const sat = $('f-sat')?.value || '';
+  if (sat) url += `&estatus_sat=${sat}`;
   try {
     const d = await api(url);
     $('fac-table').innerHTML = d.data.length ? `

@@ -29,9 +29,28 @@ router.get('/', async (req, res) => {
     const params = [];
     let where = 'WHERE 1=1';
 
+    const estatus_sat = req.query.estatus_sat;
     if (cliente_id) { params.push(cliente_id); where += ` AND f.cliente_id=$${params.length}`; }
     if (emisora_id) { params.push(emisora_id); where += ` AND f.empresa_receptora_id=$${params.length}`; }
     if (estatus)    { params.push(estatus);     where += ` AND f.estatus=$${params.length}`; }
+    // El estatus del SAT es texto libre devuelto por su servicio ("Vigente",
+    // "Cancelado", "No Encontrado", "Sin respuesta"...), asi que se filtra por
+    // patron y no por igualdad: la misma regla que usa la etiqueta de color.
+    if (estatus_sat) {
+      if (estatus_sat === 'sin_validar') {
+        where += ` AND NULLIF(TRIM(f.estatus_sat),'') IS NULL`;
+      } else if (estatus_sat === 'otro') {
+        // Ya se consulto, pero la respuesta no fue ninguna de las tres conocidas
+        where += ` AND NULLIF(TRIM(f.estatus_sat),'') IS NOT NULL
+                   AND f.estatus_sat NOT ILIKE '%vigente%'
+                   AND f.estatus_sat NOT ILIKE '%cancelad%'
+                   AND f.estatus_sat NOT ILIKE '%no encontr%'`;
+      } else {
+        const patron = { vigente: '%vigente%', cancelado: '%cancelad%',
+                         no_encontrado: '%no encontr%' }[estatus_sat];
+        if (patron) { params.push(patron); where += ` AND f.estatus_sat ILIKE $${params.length}`; }
+      }
+    }
     if (desde)      { params.push(desde);       where += ` AND f.fecha_emision>=$${params.length}`; }
     if (hasta)      { params.push(hasta);       where += ` AND f.fecha_emision<=$${params.length}`; }
     if (buscar) {
