@@ -31,6 +31,8 @@ const MODULOS_SEED = [
     nota:'Se puede dar sin dar el Reloj Checador. En Editar además permite capturar notas de justificación.' },
   { clave:'expedienteAsistencia', nombre:'Expediente de Asistencia', icono:'🗂', grupo:'Recursos Humanos', orden:35,
     nota:'Reporte individual de un colaborador: incidencias, horas, retardos y los cambios con su justificación. Se asigna aparte.' },
+  { clave:'bonoPuntualidad', nombre:'Bono de Puntualidad', icono:'🏅', grupo:'Recursos Humanos', orden:36,
+    nota:'Quién gana el bono del periodo y de cuánto es. Se asigna aparte del Reloj Checador porque muestra importes: en Ver solo se consulta, y de Editar en adelante se pueden cambiar los montos de cada colaborador.' },
   { clave:'cajaChica',    nombre:'Caja Chica',          icono:'💵', grupo:'Tesorería',            orden:40 },
   { clave:'bancos',       nombre:'Cuentas Bancarias',   icono:'🏦', grupo:'Bancos',               orden:50 },
   { clave:'reportes',     nombre:'Reportes',            icono:'📋', grupo:'Dirección',            orden:8  },

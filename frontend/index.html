@@ -9853,7 +9853,9 @@ function renderBono(d) {
     ${r.sin_monto ? `<div class="card" style="margin-bottom:12px;background:#fffbeb;border-color:#fcd34d;
         font-size:12px;color:#92400e;line-height:1.5">
       ${r.sin_monto} colaborador${r.sin_monto!=1?'es':''} ganó el bono pero tiene monto en cero,
-      así que no suma nada. Asíágnalo en <strong>💰 Montos</strong>.
+      así que no suma nada. ${puede('bonoPuntualidad', NIVEL.EDITAR) !== false
+        ? 'Asígnalo en <strong>💰 Montos</strong>.'
+        : 'Lo puede asignar alguien con permiso de editar este módulo.'}
     </div>` : ''}
 
     <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:10px">
@@ -10113,12 +10115,13 @@ async function checador() {
       <div class="tab" onclick="showTab(this,'ch-tab-hoy');cargarChecadorHoy()">📅 Registros de hoy</div>
       <div class="tab" onclick="showTab(this,'ch-tab-reporte');cargarChecadorReporte()">📊 Reporte por periodo</div>
       ${puede('asistencia', NIVEL.VER) !== false ? `<div class="tab" onclick="showTab(this,'ch-tab-asistencia');inicializarAsistencia()">📋 Lista de Asistencia</div>` : ''}
-      <div class="tab" onclick="showTab(this,'ch-tab-bono');inicializarBono()">🏅 Bono de puntualidad</div>
+      ${puede('bonoPuntualidad', NIVEL.VER) !== false
+        ? `<div class="tab" onclick="showTab(this,'ch-tab-bono');inicializarBono()">🏅 Bono de puntualidad</div>` : ''}
       ${canAdmin()?`<div class="tab" onclick="showTab(this,'ch-tab-productividad');inicializarProductividad()">📊 Productividad</div>`:''}
     </div>`}
 
     <!-- PESTAÑA MARCAR -->
-    <div class="tab-panel" id="ch-tab-bono">
+    <div class="tab-panel" id="ch-tab-bono"${puede('bonoPuntualidad', NIVEL.VER) === false ? ' hidden' : ''}>
       <div class="card">
         <div class="filters" style="align-items:end">
           <div class="fi" style="margin:0"><label style="font-size:10px">Desde</label>
@@ -10127,7 +10130,8 @@ async function checador() {
             <input type="date" id="bn-hasta" onchange="cargarBono()"></div>
           <button class="btn bo bsm" onclick="bnQuincena(1)" title="Del 1 al 15 del mes de la fecha 'Desde'">1ª quincena</button>
           <button class="btn bo bsm" onclick="bnQuincena(2)" title="Del 16 al fin de mes">2ª quincena</button>
-          <button class="btn bo bsm" onclick="bnMontos()">💰 Montos</button>
+          ${puede('bonoPuntualidad', NIVEL.EDITAR) !== false
+            ? `<button class="btn bo bsm" onclick="bnMontos()">💰 Montos</button>` : ''}
           <button class="btn bo bsm" onclick="imprimirBono()">🖨 Imprimir</button>
           <button class="btn bo bsm" onclick="exportarBonoExcel()">⬇ Excel</button>
         </div>

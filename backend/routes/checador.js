@@ -797,7 +797,9 @@ const CODIGOS_QUE_TUMBAN = {
   'P/G': 'permiso con goce'
 };
 
-router.get('/bono-puntualidad', permiso('checador', NIVEL.VER), async (req, res) => {
+// Modulo propio, no el del Reloj Checador: aqui se ven importes por persona, y
+// quien marca entradas o revisa la lista de asistencia no tiene por que verlos.
+router.get('/bono-puntualidad', permiso('bonoPuntualidad', NIVEL.VER), async (req, res) => {
   try {
     const { desde, hasta } = req.query;
     if (!desde || !hasta) return res.status(400).json({ error: 'Se requieren desde y hasta (YYYY-MM-DD).' });
@@ -857,7 +859,7 @@ router.get('/bono-puntualidad', permiso('checador', NIVEL.VER), async (req, res)
 });
 
 // Monto del bono por colaborador
-router.put('/empleados/:id/bono', permiso('checador', NIVEL.EDITAR), async (req, res) => {
+router.put('/empleados/:id/bono', permiso('bonoPuntualidad', NIVEL.EDITAR), async (req, res) => {
   try {
     const monto = Math.max(0, parseFloat(req.body.bono_puntualidad) || 0);
     await query(`UPDATE fac_empleados SET bono_puntualidad=$1 WHERE id=$2`, [monto, req.params.id]);
@@ -867,7 +869,7 @@ router.put('/empleados/:id/bono', permiso('checador', NIVEL.EDITAR), async (req,
 
 // Mismo monto a varios de un golpe. Sin ids explicitos no hace nada: un update
 // sin WHERE aqui le cambiaria el bono a toda la plantilla.
-router.put('/bono-masivo', permiso('checador', NIVEL.EDITAR), async (req, res) => {
+router.put('/bono-masivo', permiso('bonoPuntualidad', NIVEL.EDITAR), async (req, res) => {
   try {
     const monto = Math.max(0, parseFloat(req.body.bono_puntualidad) || 0);
     const ids = (req.body.empleados || []).map(Number).filter(Boolean);
