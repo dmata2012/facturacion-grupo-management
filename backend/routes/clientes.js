@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { query } = require('../config/db');
 const { verificarToken, requireRol } = require('../middleware/auth');
+const { permiso, NIVEL } = require('../middleware/permiso');
 
 router.use(verificarToken);
 
@@ -66,7 +67,10 @@ router.get('/rfc/:rfc', async (req, res) => {
 });
 
 // POST /api/clientes
-router.post('/', requireRol('admin', 'capturista'), async (req, res) => {
+// Antes era una lista fija de roles que no coincidia ni con la pantalla: el boton
+// tambien salia a Tesoreria, que luego recibia un 403 al guardar. Ahora manda la
+// matriz, igual que en los modulos ya migrados.
+router.post('/', permiso('clientes', NIVEL.CAPTURAR), async (req, res) => {
   try {
     const {
       rfc, razon_social, nombre_comercial, contacto, email, telefono,
@@ -100,7 +104,7 @@ router.post('/', requireRol('admin', 'capturista'), async (req, res) => {
 });
 
 // PUT /api/clientes/:id
-router.put('/:id', requireRol('admin', 'capturista'), async (req, res) => {
+router.put('/:id', permiso('clientes', NIVEL.EDITAR), async (req, res) => {
   try {
     const {
       rfc, razon_social, nombre_comercial, contacto, email, telefono,
@@ -134,7 +138,7 @@ router.put('/:id', requireRol('admin', 'capturista'), async (req, res) => {
 });
 
 // DELETE /api/clientes/:id (desactivar)
-router.delete('/:id', requireRol('admin'), async (req, res) => {
+router.delete('/:id', permiso('clientes', NIVEL.TODO), async (req, res) => {
   try {
     await query(`UPDATE fac_clientes SET activo=FALSE,actualizado_en=NOW() WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });

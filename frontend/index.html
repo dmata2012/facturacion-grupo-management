@@ -959,6 +959,13 @@ function nivelEn(modulo) {
   return ME.permisos.niveles[modulo] ?? 0;
 }
 
+// Para pantallas que pasan del rol fijo a la matriz: con el motor de permisos
+// apagado se conserva la regla vieja, en vez de dejar a todos sin botones.
+function puedeO(modulo, nivel, respaldo) {
+  const p = puede(modulo, nivel);
+  return p === null ? !!respaldo : p;
+}
+
 // ¿Puede el usuario hacer algo de este nivel en este módulo?
 function puede(modulo, nivel = NIVEL.VER) {
   const n = nivelEn(modulo);
@@ -7810,7 +7817,7 @@ async function clientes() {
       <div class="page-title">Clientes</div>
       <div class="page-sub">Directorio de empresas y contribuyentes</div>
     </div>
-    ${canWrite()?`<button class="btn bs" onclick="openCliente()">+ Nuevo cliente</button>`:''}
+    ${puedeO('clientes', NIVEL.CAPTURAR, canWrite())?`<button class="btn bs" onclick="openCliente()">+ Nuevo cliente</button>`:''}
   </div>
   <div class="card">
     <div class="filters">
@@ -7850,8 +7857,8 @@ async function loadClientes() {
         <td>${c.activo?'<span class="badge b-pagada">Activo</span>':'<span class="badge b-cancelada">Inactivo</span>'}</td>
         <td style="white-space:nowrap">
           <button class="btn bo bsm" onclick="verEstCliente(${c.id})">📊</button>
-          ${canWrite()?`<button class="btn bg bsm" onclick="openCliente(${c.id})">✏️</button>`:''}
-          ${canAdmin()?`<button class="btn bd bsm" onclick="desactivarCliente(${c.id})">✕</button>`:''}
+          ${puedeO('clientes', NIVEL.EDITAR, canWrite())?`<button class="btn bg bsm" onclick="openCliente(${c.id})">✏️</button>`:''}
+          ${puedeO('clientes', NIVEL.TODO, canAdmin())?`<button class="btn bd bsm" onclick="desactivarCliente(${c.id})">✕</button>`:''}
         </td>
       </tr>`).join('')}</tbody>
     </table></div>` : `<p class="empty">No hay clientes.</p>`;

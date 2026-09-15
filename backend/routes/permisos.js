@@ -60,7 +60,7 @@ const PERFILES_SEED = [
 
   { clave:'capturista', nombre:'Capturista', color:'#0891b2', es_sistema:true,
     descripcion:'Captura facturas y apoya en Recursos Humanos.',
-    permisos: { facturas: E, empleados: E, vacaciones: C, gastos: C, dashboard: V, asistencia: V } },
+    permisos: { facturas: E, clientes: E, empleados: E, vacaciones: C, gastos: C, dashboard: V, asistencia: V } },
 
   { clave:'tesoreria', nombre:'Tesorería', color:'#059669', es_sistema:true,
     descripcion:'Maneja caja chica y bancos.',
@@ -176,6 +176,33 @@ const PERFILES_SEED = [
           [perfilId, clave, p.permisos[clave] || 0]);
       }
     }
+    // ── Migraciones de una sola vez ──
+    // La siembra de arriba nunca pisa lo existente, que es lo correcto, pero eso
+    // impide corregir un nivel que quedo mal sembrado. Estas se aplican una vez y
+    // quedan marcadas, para no revertir despues lo que se ajuste a mano.
+    await query(`CREATE TABLE IF NOT EXISTS fac_migraciones_aplicadas (
+                   clave TEXT PRIMARY KEY, aplicada_en TIMESTAMP DEFAULT NOW())`);
+    const unaVez = async (clave, fn) => {
+      const ya = await query(`SELECT 1 FROM fac_migraciones_aplicadas WHERE clave=$1`, [clave]);
+      if (ya.rows.length) return;
+      await fn();
+      await query(`INSERT INTO fac_migraciones_aplicadas(clave) VALUES($1)
+                   ON CONFLICT DO NOTHING`, [clave]);
+    };
+
+    // Clientes dejo de mirar el rol y paso a la matriz. El capturista quedo
+    // sembrado en cero para ese modulo, pero en la practica si daba de alta y
+    // editaba clientes: sin esto, el cambio le quitaria un permiso que ya usaba.
+    // Mientras la pantalla ignoraba la matriz, un cero ahi no tenia efecto, asi que
+    // no hay un ajuste manual que respetar.
+    await unaVez('clientes_a_matriz', async () => {
+      await query(
+        `UPDATE fac_perfil_permisos pp SET nivel = 3
+           FROM fac_perfiles pf
+          WHERE pf.id = pp.perfil_id AND pf.clave = 'capturista'
+            AND pp.modulo = 'clientes' AND pp.nivel < 3`);
+    });
+
     console.log('✔ Permisos: módulos y perfiles listos');
   } catch (e) { console.warn('Migración permisos:', e.message); }
 })();
