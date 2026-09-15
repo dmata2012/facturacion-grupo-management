@@ -715,6 +715,7 @@ canvas{max-height:230px}
           <a href="#" onclick="nav('checador')"   id="nav-checador"><span class="ni"><svg><use href="#i-clock"/></svg></span> Reloj Checador</a>
           <a href="#" onclick="nav('asistencia')" id="nav-asistencia"><span class="ni"><svg><use href="#i-check-list"/></svg></span> Lista de Asistencia</a>
           <a href="#" onclick="nav('expedienteAsistencia')" id="nav-expedienteAsistencia"><span class="ni"><svg><use href="#i-user"/></svg></span> Expediente de Asistencia</a>
+          <a href="#" onclick="nav('bonoPuntualidad')" id="nav-bonoPuntualidad"><span class="ni"><svg><use href="#i-target"/></svg></span> Bono de Puntualidad</a>
         </div>
       </div>
 
@@ -1255,13 +1256,14 @@ function nav(page) {
     misVacaciones:'Mis Vacaciones', asistencia:'Lista de Asistencia',
     concentrado:'Concentrado Anual', otrosIngresos:'Otros Ingresos S/F',
     expedienteAsistencia:'Expediente de Asistencia',
+    bonoPuntualidad:'Bono de Puntualidad',
     mensualDireccion:'Reporte Mensual'
   };
   const mt = $('mt-title');
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
     dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones, asistencia, concentrado, otrosIngresos,
-    mensualDireccion, expedienteAsistencia
+    mensualDireccion, expedienteAsistencia, bonoPuntualidad
   };
   if (pages[page]) pages[page]();
 }
@@ -9776,6 +9778,40 @@ async function cargarDetalleEst(tipo) {
 // Se gana solo si trabajó todos sus días laborables del periodo y llegó a tiempo
 // en todos. Vacaciones e incapacidad también lo tumban: es un bono de puntualidad
 // Y asistencia.
+// El mismo panel se monta en dos lugares: como pestana del Reloj Checador y como
+// pantalla propia del menu. La propia existe porque el bono se asigna aparte:
+// quien lo tiene sin tener el Reloj Checador no tendria por donde llegar a el.
+function bnPanelHTML() {
+  return `
+      <div class="card">
+        <div class="filters" style="align-items:end">
+          <div class="fi" style="margin:0"><label style="font-size:10px">Desde</label>
+            <input type="date" id="bn-desde" onchange="cargarBono()"></div>
+          <div class="fi" style="margin:0"><label style="font-size:10px">Hasta</label>
+            <input type="date" id="bn-hasta" onchange="cargarBono()"></div>
+          <button class="btn bo bsm" onclick="bnQuincena(1)" title="Del 1 al 15 del mes de la fecha 'Desde'">1ª quincena</button>
+          <button class="btn bo bsm" onclick="bnQuincena(2)" title="Del 16 al fin de mes">2ª quincena</button>
+          ${puede('bonoPuntualidad', NIVEL.EDITAR) !== false
+            ? `<button class="btn bo bsm" onclick="bnMontos()">💰 Montos</button>` : ''}
+          <button class="btn bo bsm" onclick="imprimirBono()">🖨 Imprimir</button>
+          <button class="btn bo bsm" onclick="exportarBonoExcel()">⬇ Excel</button>
+        </div>
+        <div id="bn-body"><p class="empty">Elige el periodo.</p></div>
+      </div>`;
+}
+
+async function bonoPuntualidad() {
+  $('content').innerHTML = `
+    <div class="page-header">
+      <div class="page-header-left">
+        <div class="page-title">🏅 Bono de Puntualidad</div>
+        <div class="page-sub">Quién gana el bono del periodo: sin retardos ni ausencias</div>
+      </div>
+    </div>
+    ${bnPanelHTML()}`;
+  inicializarBono();
+}
+
 function inicializarBono() {
   if ($('bn-desde').value) return;   // ya se eligió periodo, no pisarlo
   bnQuincena(new Date().getDate() <= 15 ? 1 : 2);
@@ -10129,21 +10165,7 @@ async function checador() {
 
     <!-- PESTAÑA MARCAR -->
     <div class="tab-panel" id="ch-tab-bono"${puede('bonoPuntualidad', NIVEL.VER) === false ? ' hidden' : ''}>
-      <div class="card">
-        <div class="filters" style="align-items:end">
-          <div class="fi" style="margin:0"><label style="font-size:10px">Desde</label>
-            <input type="date" id="bn-desde" onchange="cargarBono()"></div>
-          <div class="fi" style="margin:0"><label style="font-size:10px">Hasta</label>
-            <input type="date" id="bn-hasta" onchange="cargarBono()"></div>
-          <button class="btn bo bsm" onclick="bnQuincena(1)" title="Del 1 al 15 del mes de la fecha 'Desde'">1ª quincena</button>
-          <button class="btn bo bsm" onclick="bnQuincena(2)" title="Del 16 al fin de mes">2ª quincena</button>
-          ${puede('bonoPuntualidad', NIVEL.EDITAR) !== false
-            ? `<button class="btn bo bsm" onclick="bnMontos()">💰 Montos</button>` : ''}
-          <button class="btn bo bsm" onclick="imprimirBono()">🖨 Imprimir</button>
-          <button class="btn bo bsm" onclick="exportarBonoExcel()">⬇ Excel</button>
-        </div>
-        <div id="bn-body"><p class="empty">Elige el periodo.</p></div>
-      </div>
+      ${bnPanelHTML()}
     </div>
 
     <div class="tab-panel active" id="ch-tab-marcar">
