@@ -16568,9 +16568,11 @@ function renderDetalleFondoCC() {
         let botones = '';
         if (esPendiente) botones += '<button class="btn bo bsm" style="padding:6px 8px" onclick="imprimirValeCC('+m.id+')" title="Imprimir vale de caja">🖨</button> ';
         if (esPendiente && w) botones += '<button class="btn bo bsm" style="padding:6px 8px;background:#facc15;color:#78350f;border-color:#ca8a04;font-weight:900" onclick="marcarDevueltoCC('+m.id+')" title="Marcar como devuelto (registra entrada y limpia pendiente)">💰</button> ';
-        botones = (m.tiene_comprobante
-          ? '<button class="btn bo bsm" style="padding:6px 8px" onclick="verComprobanteCC('+m.id+')" title="Ver comprobante">📎</button> '
-          : '<span title="Sin comprobante" style="display:inline-block;width:30px;text-align:center;color:#cbd5e1;margin-right:4px">—</span>')
+        // Consultar no depende del rol: quien ve la caja puede abrir el detalle
+        botones = '<button class="btn bo bsm" style="padding:6px 8px" onclick="verMovimientoCC('+m.id+')" title="Ver detalle del movimiento">🔍</button> '
+          + (m.tiene_comprobante
+            ? '<button class="btn bo bsm" style="padding:6px 8px" onclick="verComprobanteCC('+m.id+')" title="Ver comprobante">📎</button> '
+            : '<span title="Sin comprobante" style="display:inline-block;width:30px;text-align:center;color:#cbd5e1;margin-right:4px">—</span>')
           + botones;
         if (w) botones += '<button class="btn bg bsm" style="padding:6px 8px" onclick="openMovCC(\''+m.tipo+'\','+m.id+')" title="Editar movimiento">✏️</button> ';
         if (w) botones += '<button class="btn bd bsm" style="padding:6px 8px" onclick="eliminarMovCC('+m.id+')" title="Eliminar movimiento">🗑</button>';
@@ -17908,6 +17910,70 @@ function openMovCC(tipo, id) {
   window._cmCtx = { tipo, saldoActual, saldoEdit: id ? parseFloat(mov.monto)||0 : 0, es, theme, esNuevo: !id };
   window._cmArchivo = null;
   validarMovCC();
+}
+
+// Detalle en solo lectura. Existe porque los datos completos de un movimiento
+// —folio, periodo, notas, quién lo capturó— solo se veían abriendo el modal de
+// edición, y ese botón lo tiene únicamente quien puede modificar.
+function verMovimientoCC(id) {
+  const f = window._ccFondoActual;
+  const m = (f?.movimientos || []).find(x => x.id === id);
+  if (!m) return toast('Movimiento no encontrado.', 'err');
+  const es = m.tipo === 'entrada';
+  const col = es ? '#166534' : '#991b1b';
+  const grad = es ? 'linear-gradient(135deg,#16a34a,#22c55e)' : 'linear-gradient(135deg,#dc2626,#ef4444)';
+  const esc = v => String(v == null ? '' : v).replace(/</g, '&lt;');
+  const dato = (etq, val, extra) => !val ? '' : `
+    <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:var(--muted)">${etq}</div>
+      <div style="font-size:13px;color:var(--dark);margin-top:2px;${extra||''}">${esc(val)}</div>
+    </div>`;
+
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:${grad};color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">
+        ${es ? '📥 Ingreso' : '📤 Gasto'} · ${f.nombre}</div>
+      <div style="font-size:26px;font-weight:900;margin-top:4px">${es ? '+' : '−'}${fmt(m.monto)}</div>
+      <div style="font-size:12.5px;opacity:.92;margin-top:3px">${esc(m.concepto)}</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px">
+      ${dato('Fecha', fmtDate(m.fecha))}
+      ${dato('Categoría', m.categoria || 'Sin categoría')}
+      ${dato('Beneficiario', m.beneficiario)}
+      ${dato('Forma de pago', m.forma_pago)}
+      ${dato('Folio del comprobante', m.comprobante)}
+      ${dato('Referencia', m.referencia)}
+      ${dato('Periodo de pago', m.periodo_pago)}
+      ${dato('Tipo de gasto', m.tipo_gasto)}
+      ${dato('Autorizó', m.autorizado_por)}
+      ${dato('Capturado por', m.capturado_por)}
+    </div>
+    ${m.notas ? `<div style="margin-top:12px;background:var(--bg-alt);border-radius:9px;padding:10px 12px">
+      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:var(--muted)">Notas</div>
+      <div style="font-size:12.5px;margin-top:3px;white-space:pre-wrap;line-height:1.5">${esc(m.notas)}</div>
+    </div>` : ''}
+
+    <div style="margin-top:14px;border:2px dashed ${m.tiene_comprobante ? '#86efac' : 'var(--border)'};
+         border-radius:10px;padding:12px 14px">
+      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:6px">Comprobante</div>
+      ${m.tiene_comprobante ? `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span style="font-size:12.5px;color:#166534;font-weight:700;overflow:hidden;
+                text-overflow:ellipsis;white-space:nowrap;max-width:260px">✅ ${esc(m.comprobante_nombre || 'comprobante')}</span>
+          <button class="btn bs bsm" onclick="verComprobanteCC(${m.id})">📎 Abrir</button>
+        </div>`
+      : `<div style="font-size:12.5px;color:var(--muted)">
+           Este movimiento no tiene archivo adjunto.
+           ${canWrite() ? 'Puedes subirlo desde el botón de editar ✏️.' : ''}
+         </div>`}
+    </div>
+
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button>
+      ${canWrite() ? `<button class="btn bs" onclick="closeModal('modal-gt-cats');openMovCC('${m.tipo}',${m.id})">✏️ Editar</button>` : ''}
+    </div>`;
+  openModal('modal-gt-cats');
 }
 
 // ══ Comprobantes de caja chica ══

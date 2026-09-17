@@ -170,9 +170,11 @@ router.get('/fondos/:id', async (req, res) => {
       SELECT m.*,
              (c.id IS NOT NULL) AS tiene_comprobante,
              c.nombre           AS comprobante_nombre,
-             c.tipo             AS comprobante_tipo
+             c.tipo             AS comprobante_tipo,
+             u.nombre           AS capturado_por
         FROM fac_caja_chica_movimientos m
         LEFT JOIN fac_caja_chica_comprobantes c ON c.movimiento_id = m.id
+        LEFT JOIN fac_usuarios u ON u.id = m.creado_por
        WHERE m.fondo_id=$1 ORDER BY m.fecha DESC, m.id DESC
     `, [req.params.id]);
 
