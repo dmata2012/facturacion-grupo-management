@@ -16568,6 +16568,10 @@ function renderDetalleFondoCC() {
         let botones = '';
         if (esPendiente) botones += '<button class="btn bo bsm" style="padding:6px 8px" onclick="imprimirValeCC('+m.id+')" title="Imprimir vale de caja">🖨</button> ';
         if (esPendiente && w) botones += '<button class="btn bo bsm" style="padding:6px 8px;background:#facc15;color:#78350f;border-color:#ca8a04;font-weight:900" onclick="marcarDevueltoCC('+m.id+')" title="Marcar como devuelto (registra entrada y limpia pendiente)">💰</button> ';
+        botones = (m.tiene_comprobante
+          ? '<button class="btn bo bsm" style="padding:6px 8px" onclick="verComprobanteCC('+m.id+')" title="Ver comprobante">📎</button> '
+          : '<span title="Sin comprobante" style="display:inline-block;width:30px;text-align:center;color:#cbd5e1;margin-right:4px">—</span>')
+          + botones;
         if (w) botones += '<button class="btn bg bsm" style="padding:6px 8px" onclick="openMovCC(\''+m.tipo+'\','+m.id+')" title="Editar movimiento">✏️</button> ';
         if (w) botones += '<button class="btn bd bsm" style="padding:6px 8px" onclick="eliminarMovCC('+m.id+')" title="Eliminar movimiento">🗑</button>';
         const trStyle = esPendiente ? 'background:#dbeafe;font-weight:800;color:#1e40af' : '';
@@ -17648,6 +17652,8 @@ async function marcarDevueltoCC(id) {
   if (!orig) return toast('Movimiento no encontrado.', 'err');
   const montoOrig = parseFloat(orig.monto) || 0;
   const hoy = new Date().toISOString().slice(0,10);
+  // Sin esto, el archivo de la devolucion anterior quedaria adjunto a esta
+  window._devArchivo = null;
 
   const modalHtml = `
     <div style="margin:-28px -28px 20px;padding:20px 28px;background:linear-gradient(135deg,#d97706,#f59e0b);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
@@ -17674,6 +17680,13 @@ async function marcarDevueltoCC(id) {
       <div class="fi full">
         <label>Referencia <span style="font-weight:400;color:var(--muted);font-size:10.5px">(N° de recibo, cheque, transferencia — opcional)</span></label>
         <input id="dev-ref" placeholder="Ej: SPEI-88291, RECIBO-042">
+      </div>
+      <div class="fi full" style="background:#fff;border:2px dashed #86efac;border-radius:10px;padding:11px 13px">
+        <label style="color:#166534"><strong>📎 Comprobante de la devolución</strong>
+          <span style="font-weight:400;color:var(--muted);font-size:10.5px">(opcional · foto o PDF, máx. 5 MB)</span></label>
+        <input type="file" id="dev-archivo" accept="image/jpeg,image/png,image/webp,application/pdf"
+               onchange="devElegirArchivo(this)">
+        <div id="dev-archivo-info" style="font-size:11.5px;margin-top:6px;min-height:14px"></div>
       </div>
     </div>
     <div id="dev-info" style="margin-top:12px;font-size:12px;color:#166534;font-weight:600"></div>
@@ -17734,7 +17747,8 @@ async function confirmarDevueltoCC(id) {
         beneficiario: orig.beneficiario||'',
         forma_pago  : 'efectivo',
         referencia  : ref || `Devolución de mov #${id}`,
-        clave       : clave
+        clave       : clave,
+        archivo     : window._devArchivo || undefined
       })
     });
 
@@ -17859,9 +17873,24 @@ function openMovCC(tipo, id) {
           <label style="color:#854d0e"><strong>🧾 N° de cheque</strong> <span style="font-weight:400;color:#78350f;font-size:10.5px">(o folio de transferencia)</span></label>
           <input id="cm-cheque" placeholder="Ej: 001234 o SPEI-88291" value="${mov.referencia||''}">
         </div>`:''}
+        <div class="fi full" style="background:#fff;border:2px dashed ${id && mov.tiene_comprobante ? '#86efac' : 'var(--border)'};border-radius:10px;padding:11px 13px">
+          <label style="color:${theme.color}"><strong>📎 Archivo del comprobante</strong>
+            <span style="font-weight:400;color:var(--muted);font-size:10.5px">(opcional · foto o PDF, máx. 5 MB)</span></label>
+          ${id && mov.tiene_comprobante ? `
+            <div style="display:flex;align-items:center;gap:8px;margin:4px 0 8px;font-size:12px;color:#166534">
+              ✅ Ya tiene: <strong style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">${(mov.comprobante_nombre||'comprobante').replace(/</g,'&lt;')}</strong>
+              <button type="button" class="btn bo bsm" onclick="verComprobanteCC(${id})">Ver</button>
+            </div>
+            <div style="font-size:10.5px;color:var(--muted);margin-bottom:5px">Sube otro solo si quieres reemplazarlo.</div>`
+          : id ? `<div style="font-size:11.5px;color:var(--muted);margin:4px 0 7px">
+              Sin comprobante. Puedes subirlo aquí.</div>` : ''}
+          <input type="file" id="cm-archivo" accept="image/jpeg,image/png,image/webp,application/pdf"
+                 onchange="cmElegirArchivo(this)">
+          <div id="cm-archivo-info" style="font-size:11.5px;margin-top:6px;min-height:14px"></div>
+        </div>
         <div class="fi">
-          <label>Comprobante <span style="font-weight:400;color:var(--muted);font-size:10.5px">(N° ticket, factura o URL)</span></label>
-          <input id="cm-comp" placeholder="Ej: TICKET-4832, FAC-A1152 o enlace a comprobante" value="${mov.comprobante || (es ? '' : mov.referencia) || ''}">
+          <label>Folio del comprobante <span style="font-weight:400;color:var(--muted);font-size:10.5px">(N° ticket o factura, opcional)</span></label>
+          <input id="cm-comp" placeholder="Ej: TICKET-4832, FAC-A1152" value="${mov.comprobante || (es ? '' : mov.referencia) || ''}">
         </div>
         <div class="fi">
           <label>Periodo de pago</label>
@@ -17876,8 +17905,95 @@ function openMovCC(tipo, id) {
     </div>`;
   openModal('modal-cc-mov');
   // Guardar contexto para validación
-  window._cmCtx = { tipo, saldoActual, saldoEdit: id ? parseFloat(mov.monto)||0 : 0, es, theme };
+  window._cmCtx = { tipo, saldoActual, saldoEdit: id ? parseFloat(mov.monto)||0 : 0, es, theme, esNuevo: !id };
+  window._cmArchivo = null;
   validarMovCC();
+}
+
+// ══ Comprobantes de caja chica ══
+// Las fotos se reducen antes de subirlas: una foto de celular pesa 3 a 8 MB y un
+// ticket se lee perfecto a 1600 px. Se guardan en la base de datos, así que cada
+// megabyte ahorrado cuenta. Los PDF viajan tal cual.
+const CC_COMP_MAX = 5 * 1024 * 1024;
+
+async function prepararComprobante(file) {
+  if (!file) return null;
+  const tiposOk = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+  if (!tiposOk.includes(file.type))
+    throw new Error('Usa una foto (JPG, PNG, WEBP) o un PDF.');
+  const aBase64 = blob => new Promise((ok, mal) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result).split(',')[1]);
+    r.onerror = () => mal(new Error('No se pudo leer el archivo.'));
+    r.readAsDataURL(blob);
+  });
+  if (file.type === 'application/pdf') {
+    if (file.size > CC_COMP_MAX) throw new Error('El PDF pesa más de 5 MB.');
+    return { nombre: file.name, tipo: file.type, base64: await aBase64(file), tamano: file.size };
+  }
+  let img;
+  try { img = await createImageBitmap(file); }
+  catch (e) { throw new Error('No se pudo abrir la imagen. Prueba con JPG o PDF.'); }
+  const MAX = 1600;
+  const k = Math.min(1, MAX / Math.max(img.width, img.height));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(img.width * k);
+  cv.height = Math.round(img.height * k);
+  const g = cv.getContext('2d');
+  g.fillStyle = '#fff';                 // un PNG con transparencia no queda negro en JPG
+  g.fillRect(0, 0, cv.width, cv.height);
+  g.drawImage(img, 0, 0, cv.width, cv.height);
+  const blob = await new Promise(ok => cv.toBlob(ok, 'image/jpeg', 0.82));
+  if (!blob) throw new Error('No se pudo procesar la imagen.');
+  if (blob.size > CC_COMP_MAX) throw new Error('La imagen sigue pesando más de 5 MB.');
+  const nombre = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+  return { nombre, tipo: 'image/jpeg', base64: await aBase64(blob), tamano: blob.size };
+}
+
+function ccPesoTexto(b) {
+  return b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+}
+
+async function ccElegirArchivo(input, infoId, destino, alTerminar) {
+  const info = $(infoId);
+  window[destino] = null;
+  const file = input.files && input.files[0];
+  if (!file) { if (info) info.innerHTML = ''; alTerminar && alTerminar(); return; }
+  if (info) info.innerHTML = '<span style="color:var(--muted)">⏳ Preparando…</span>';
+  try {
+    const a = await prepararComprobante(file);
+    window[destino] = a;
+    if (info) info.innerHTML = `<span style="color:#166534;font-weight:700">✅ ${a.nombre.replace(/</g,'&lt;')}
+      · ${ccPesoTexto(a.tamano)}${a.tamano < file.size ? ` (era ${ccPesoTexto(file.size)})` : ''}</span>`;
+  } catch (e) {
+    input.value = '';
+    if (info) info.innerHTML = `<span style="color:#dc2626;font-weight:700">⚠ ${e.message}</span>`;
+  }
+  alTerminar && alTerminar();
+}
+function cmElegirArchivo(input)  { ccElegirArchivo(input, 'cm-archivo-info',  '_cmArchivo',  validarMovCC); }
+function devElegirArchivo(input) { ccElegirArchivo(input, 'dev-archivo-info', '_devArchivo'); }
+
+// Se pide con la sesión en el encabezado, que un enlace simple no manda. La
+// ventana se abre antes de esperar la descarga: si se abre después, el
+// navegador la toma por ventana emergente y la bloquea.
+async function verComprobanteCC(movId) {
+  const w = window.open('', '_blank');
+  if (w) w.document.write('<p style="font-family:sans-serif;padding:20px;color:#555">Abriendo comprobante…</p>');
+  try {
+    const r = await fetch(API + `/tesoreria/movimientos/${movId}/comprobante`,
+                          { headers: { Authorization: `Bearer ${TOKEN}` } });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(e.error || 'No se pudo abrir el comprobante.');
+    }
+    const url = URL.createObjectURL(await r.blob());
+    if (w) w.location.href = url; else window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) {
+    if (w) w.close();
+    toast(e.message, 'err');
+  }
 }
 
 function validarMovCC() {
@@ -17948,6 +18064,7 @@ async function saveMovCC(tipo, id) {
     tipo_gasto  : tipo === 'salida' ? ($('cm-tipo-gasto')?.value || '') : '',
     referencia  : tipo === 'entrada' ? ($('cm-cheque')?.value.trim() || '') : ''
   };
+  if (window._cmArchivo) body.archivo = window._cmArchivo;
   if (!body.concepto || !body.monto) return toast('Concepto y monto son requeridos.', 'warn');
   if (tipo === 'entrada' && !body.referencia)
     return toast('N° de cheque o folio de transferencia es requerido para ingresos de efectivo.', 'warn');

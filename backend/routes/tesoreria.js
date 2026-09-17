@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { query } = require('../config/db');
+const { query, getClient } = require('../config/db');
 const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
@@ -9,6 +9,66 @@ router.use(verificarToken);
   try { await query(`ALTER TABLE fac_caja_chica_movimientos ADD COLUMN IF NOT EXISTS tipo_gasto TEXT`); }
   catch (e) { console.warn('Migración tipo_gasto:', e.message); }
 })();
+
+// ══ COMPROBANTES (archivo) ══════════════════════════════════
+// Se guardan en la base de datos y no en la carpeta uploads/. En Render esa
+// carpeta vive dentro del contenedor y se borra en cada despliegue: un comprobante
+// obligatorio que desaparece al dia siguiente seria peor que no pedirlo.
+//
+// Tabla aparte de los movimientos para que listar un fondo no arrastre los bytes.
+(async () => {
+  const cols = `id SERIAL PRIMARY KEY,
+    movimiento_id INT NOT NULL UNIQUE %FK%,
+    nombre TEXT, tipo TEXT NOT NULL, tamano INT,
+    datos BYTEA NOT NULL,
+    subido_por INT, creado_en TIMESTAMP DEFAULT NOW()`;
+  try {
+    // Con cascada: borrar el movimiento, o el fondo completo, se lleva su archivo
+    await query(`CREATE TABLE IF NOT EXISTS fac_caja_chica_comprobantes (${
+      cols.replace('%FK%', 'REFERENCES fac_caja_chica_movimientos(id) ON DELETE CASCADE')})`);
+  } catch (e) {
+    try {
+      await query(`CREATE TABLE IF NOT EXISTS fac_caja_chica_comprobantes (${cols.replace('%FK%', '')})`);
+    } catch (e2) { console.warn('Migración comprobantes caja chica:', e2.message); }
+  }
+})();
+
+const COMP_TIPOS = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' };
+const COMP_MAX_BYTES = 5 * 1024 * 1024;
+
+// Valida el archivo que manda la pantalla: { nombre, tipo, base64 }.
+// Se comprueba el contenido real y no solo el tipo declarado, para que un archivo
+// renombrado no pase por imagen o PDF.
+function leerComprobante(a) {
+  if (!a || !a.base64) return { ok: false, error: 'Adjunta el archivo del comprobante.' };
+  const tipo = String(a.tipo || '').toLowerCase();
+  if (!COMP_TIPOS[tipo]) return { ok: false, error: 'El comprobante debe ser una imagen (JPG, PNG, WEBP) o un PDF.' };
+  let buf;
+  try { buf = Buffer.from(String(a.base64).replace(/^data:[^,]*,/, ''), 'base64'); }
+  catch { return { ok: false, error: 'No se pudo leer el archivo.' }; }
+  if (!buf.length) return { ok: false, error: 'El archivo está vacío.' };
+  if (buf.length > COMP_MAX_BYTES)
+    return { ok: false, error: 'El comprobante pesa más de 5 MB. Toma la foto con menos resolución o comprime el PDF.' };
+  const firma = buf.slice(0, 12);
+  const esPdf  = firma.slice(0, 4).toString('latin1') === '%PDF';
+  const esJpg  = firma[0] === 0xFF && firma[1] === 0xD8;
+  const esPng  = firma[0] === 0x89 && firma.slice(1, 4).toString('latin1') === 'PNG';
+  const esWebp = firma.slice(0, 4).toString('latin1') === 'RIFF' && firma.slice(8, 12).toString('latin1') === 'WEBP';
+  const coincide = { 'application/pdf': esPdf, 'image/jpeg': esJpg, 'image/png': esPng, 'image/webp': esWebp }[tipo];
+  if (!coincide) return { ok: false, error: 'El contenido del archivo no corresponde a su tipo.' };
+  const nombre = String(a.nombre || ('comprobante.' + COMP_TIPOS[tipo])).replace(/[\\/\r\n"]/g, '_').slice(0, 150);
+  return { ok: true, nombre, tipo, buf };
+}
+
+async function guardarComprobante(db, movimientoId, c, usuarioId) {
+  await db.query(
+    `INSERT INTO fac_caja_chica_comprobantes(movimiento_id, nombre, tipo, tamano, datos, subido_por)
+     VALUES($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (movimiento_id) DO UPDATE SET
+       nombre=EXCLUDED.nombre, tipo=EXCLUDED.tipo, tamano=EXCLUDED.tamano,
+       datos=EXCLUDED.datos, subido_por=EXCLUDED.subido_por, creado_en=NOW()`,
+    [movimientoId, c.nombre, c.tipo, c.buf.length, c.buf, usuarioId]);
+}
 
 // Helper: verificar si usuario tiene acceso a un fondo (admin = siempre; otros = permiso explícito)
 async function tienePermisoFondo(fondoId, usuario) {
@@ -107,8 +167,13 @@ router.get('/fondos/:id', async (req, res) => {
     if (!r.rows.length) return res.status(404).json({ error: 'Fondo no encontrado.' });
 
     const mov = await query(`
-      SELECT * FROM fac_caja_chica_movimientos
-      WHERE fondo_id=$1 ORDER BY fecha DESC, id DESC
+      SELECT m.*,
+             (c.id IS NOT NULL) AS tiene_comprobante,
+             c.nombre           AS comprobante_nombre,
+             c.tipo             AS comprobante_tipo
+        FROM fac_caja_chica_movimientos m
+        LEFT JOIN fac_caja_chica_comprobantes c ON c.movimiento_id = m.id
+       WHERE m.fondo_id=$1 ORDER BY m.fecha DESC, m.id DESC
     `, [req.params.id]);
 
     const kpi = await query(`
@@ -228,6 +293,14 @@ router.post('/movimientos', requireRol('admin', 'capturista', 'tesoreria'), asyn
     const m = parseFloat(monto);
     if (!(m > 0)) return res.status(400).json({ error: 'El monto debe ser mayor a 0.' });
 
+    // Opcional. Si viene, se valida antes de tocar nada: un archivo invalido debe
+    // rechazar el alta completa, no dejar el movimiento guardado sin el.
+    let comp = null;
+    if (req.body.archivo) {
+      comp = leerComprobante(req.body.archivo);
+      if (!comp.ok) return res.status(400).json({ error: comp.error });
+    }
+
     // Verificar permiso de acceso al fondo
     if (!(await tienePermisoFondo(fondo_id, req.usuario))) {
       return res.status(403).json({ error: 'No tienes acceso a esta caja chica.' });
@@ -254,16 +327,48 @@ router.post('/movimientos', requireRol('admin', 'capturista', 'tesoreria'), asyn
       }
     }
 
+    // Movimiento y archivo juntos: si el usuario adjunto uno y no se pudo
+    // guardar, el movimiento tampoco se queda. Sin archivo, solo el movimiento.
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      const r = await client.query(
+        `INSERT INTO fac_caja_chica_movimientos(
+           fondo_id, fecha, tipo, categoria, concepto, monto,
+           beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, periodo_pago, tipo_gasto, creado_por
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+        [fondo_id, fecha, tipo, categoria||null, concepto, m,
+         beneficiario||null, forma_pago||'efectivo', referencia||null, comprobante||null,
+         autorizado_por||null, notas||null, periodo_pago||null, req.body.tipo_gasto||null, req.usuario.id]
+      );
+      if (comp) await guardarComprobante(client, r.rows[0].id, comp, req.usuario.id);
+      await client.query('COMMIT');
+      res.status(201).json({ ...r.rows[0], tiene_comprobante: !!comp });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally { client.release(); }
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Ver el archivo. Mismo candado que el fondo: quien no tiene acceso a esa caja no
+// puede abrir sus comprobantes aunque adivine el id.
+router.get('/movimientos/:id/comprobante', async (req, res) => {
+  try {
     const r = await query(
-      `INSERT INTO fac_caja_chica_movimientos(
-         fondo_id, fecha, tipo, categoria, concepto, monto,
-         beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, periodo_pago, tipo_gasto, creado_por
-       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-      [fondo_id, fecha, tipo, categoria||null, concepto, m,
-       beneficiario||null, forma_pago||'efectivo', referencia||null, comprobante||null,
-       autorizado_por||null, notas||null, periodo_pago||null, req.body.tipo_gasto||null, req.usuario.id]
-    );
-    res.status(201).json(r.rows[0]);
+      `SELECT c.nombre, c.tipo, c.datos, m.fondo_id
+         FROM fac_caja_chica_comprobantes c
+         JOIN fac_caja_chica_movimientos m ON m.id = c.movimiento_id
+        WHERE c.movimiento_id = $1`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Este movimiento no tiene comprobante.' });
+    const c = r.rows[0];
+    if (!(await tienePermisoFondo(c.fondo_id, req.usuario)))
+      return res.status(403).json({ error: 'No tienes acceso a esta caja chica.' });
+    res.setHeader('Content-Type', c.tipo);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(c.nombre || 'comprobante')}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(c.datos);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -272,6 +377,12 @@ router.put('/movimientos/:id', requireRol('admin', 'capturista', 'tesoreria'), a
     const { fecha, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, clave, periodo_pago, tipo_gasto } = req.body;
     if (!fecha || !concepto || !monto)
       return res.status(400).json({ error: 'Fecha, concepto y monto requeridos.' });
+    // Opcional, igual que en el alta. Si viene, se valida y reemplaza al anterior.
+    let comp = null;
+    if (req.body.archivo) {
+      comp = leerComprobante(req.body.archivo);
+      if (!comp.ok) return res.status(400).json({ error: comp.error });
+    }
     const m = parseFloat(monto);
     if (!(m > 0)) return res.status(400).json({ error: 'El monto debe ser mayor a 0.' });
 
@@ -312,7 +423,8 @@ router.put('/movimientos/:id', requireRol('admin', 'capturista', 'tesoreria'), a
       [fecha, categoria||null, concepto, m, beneficiario||null, forma_pago||'efectivo',
        referencia||null, comprobante||null, autorizado_por||null, notas||null, periodo_pago||null, tipo_gasto||null, req.params.id]
     );
-    res.json({ ok: true });
+    if (comp) await guardarComprobante({ query }, req.params.id, comp, req.usuario.id);
+    res.json({ ok: true, comprobante_reemplazado: !!comp });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -326,6 +438,7 @@ router.delete('/movimientos/:id', requireRol('admin', 'capturista', 'tesoreria')
     }
     const chk = await validarClaveFondo(cur.rows[0].fondo_id, clave, req.usuario);
     if (!chk.ok) return res.status(chk.code||403).json({ error: chk.error });
+    await query(`DELETE FROM fac_caja_chica_comprobantes WHERE movimiento_id=$1`, [req.params.id]);
     await query(`DELETE FROM fac_caja_chica_movimientos WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
