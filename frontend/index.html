@@ -1772,8 +1772,11 @@ function renderGastos(r) {
           ${parseFloat(g.saldo||0) > 0 && parseFloat(g.pagado||0) > 0
             ? `<div style="font-size:9.5px;font-weight:700;color:#1d4ed8">saldo ${fmt(g.saldo)}</div>` : ''}</td>
         <td style="white-space:nowrap">
+          ${canGastos() && g.estatus_pago !== 'pagado' ? `<button class="btn bsuc bsm" style="padding:4px 8px"
+             onclick="pagarTodoGasto(${g.id})"
+             title="Marcar como pagada por completo, con fecha de hoy">✓</button>` : ''}
           ${canGastos()?`<button class="btn ${g.estatus_pago==='pagado'?'bo':'bs'} bsm" style="padding:4px 8px"
-             onclick="openPagoGasto(${g.id})" title="${g.estatus_pago==='pagado'?'Ver o corregir el pago':'Registrar pago'}">💵</button>`:''}
+             onclick="openPagoGasto(${g.id})" title="${g.estatus_pago==='pagado'?'Ver o corregir el pago':'Registrar un pago parcial o con otra fecha'}">💵</button>`:''}
           ${canGastos() && g.uuid ? `<button class="btn bo bsm" style="padding:4px 8px" onclick="validarSATGasto(${g.id},this)" title="Consultar estatus en el SAT">🛡️</button>` : ''}
           ${canGastos()?`<button class="btn bg bsm" style="padding:4px 8px" onclick="openGasto(${g.id})" title="Editar">✏️</button>`:''}
           ${canGastos()?`<button class="btn bd bsm" style="padding:4px 8px" onclick="eliminarGasto(${g.id})" title="Eliminar">🗑</button>`:''}
@@ -1805,7 +1808,41 @@ function gtPillPago(g) {
   return `<span class="gt-pill pdt"${g.fecha_vencimiento ? ` title="Vence el ${fmtDate(g.fecha_vencimiento)}"` : ''}>⏳ Por pagar</span>`;
 }
 
-async function openPagoGasto(id) {
+async // Marcar pagado de un tirón. El botón de billete sigue existiendo para lo que
+// necesita detalle —un abono parcial, otra fecha, la referencia—; esto es para el
+// caso comun, que es liquidar el total hoy y seguir con el siguiente.
+async function pagarTodoGasto(id) {
+  const g = (window._gtData?.gastos || []).find(x => x.id === id);
+  if (!g) return toast('No se encontró el gasto en la lista.', 'err');
+  const saldo = Math.max(parseFloat(g.monto) - parseFloat(g.pagado || 0), 0);
+  const quien = g.nombre_proveedor || g.proveedor || 'sin proveedor';
+  const hoy = new Date().toISOString().slice(0,10);
+  // Se dice el saldo y no el monto: si ya llevaba un abono, lo que se va a
+  // registrar ahora es solo lo que falta.
+  if (!await confirm2(
+    `¿Marcar como pagada?\n\n${g.concepto || ''}\n${quien}\n` +
+    `${fmt(saldo)}${parseFloat(g.pagado||0) > 0 ? ` pendientes de ${fmt(g.monto)}` : ''}\n\n` +
+    `Se registra con fecha de hoy. Para un abono parcial u otra fecha, usa el botón 💵.`)) return;
+  try {
+    await api(`/gastos/${id}/pago`, {
+      method: 'PATCH',
+      // La ruta reescribe forma, referencia y notas con lo que reciba, asi que se
+      // reenvia lo que ya tenia: si no, marcar pagado borraria el dato de un abono
+      // anterior sin que nadie lo notara.
+      body: JSON.stringify({
+        todo: true, fecha_pago: hoy,
+        pago_forma     : g.pago_forma || null,
+        pago_referencia: g.pago_referencia || null,
+        pago_notas     : g.pago_notas || null
+      })
+    });
+    toast(`Pagada · ${fmt(saldo)}.`);
+    if ($('gt-body')) cargarGastos();
+    gtActualizarBadgePendientes();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+function openPagoGasto(id) {
   const g = (window._gtData?.gastos || []).find(x => x.id === id);
   if (!g) return toast('No se encontró el gasto en la lista.', 'err');
   const monto  = parseFloat(g.monto);
