@@ -660,6 +660,7 @@ canvas{max-height:230px}
       <!-- Principal siempre visible sin acordeón -->
       <a href="#" onclick="nav('dashboard')" id="nav-dashboard" style="margin-top:8px"><span class="ni"><svg><use href="#i-home"/></svg></span> Dashboard</a>
       <a href="#" onclick="nav('misVacaciones')" id="nav-misVacaciones"><span class="ni"><svg><use href="#i-palm"/></svg></span> Mis Vacaciones</a>
+      <a href="#" onclick="nav('miAsistencia')" id="nav-miAsistencia"><span class="ni"><svg><use href="#i-clock"/></svg></span> Mi Asistencia</a>
 
       <div class="nav-group" data-group="direccion">
         <button class="nav-group-toggle" onclick="toggleNavGroup('direccion')">
@@ -1253,7 +1254,7 @@ function nav(page) {
     vacaciones:'Vacaciones', checador:'Reloj Checador', cajaChica:'Caja Chica',
     reportes:'Reportes', estadisticas:'Estadísticas', usuarios:'Usuarios y Permisos',
     catalogo:'Conceptos de Desglose', bancos:'Bancos', gastos:'Gastos (CxP)',
-    misVacaciones:'Mis Vacaciones', asistencia:'Lista de Asistencia',
+    misVacaciones:'Mis Vacaciones', miAsistencia:'Mi Asistencia', asistencia:'Lista de Asistencia',
     concentrado:'Concentrado Anual', otrosIngresos:'Otros Ingresos S/F',
     expedienteAsistencia:'Expediente de Asistencia',
     bonoPuntualidad:'Bono de Puntualidad',
@@ -1263,7 +1264,7 @@ function nav(page) {
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
     dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones, asistencia, concentrado, otrosIngresos,
-    mensualDireccion, expedienteAsistencia, bonoPuntualidad
+    mensualDireccion, expedienteAsistencia, bonoPuntualidad, miAsistencia
   };
   if (pages[page]) pages[page]();
 }
@@ -14777,6 +14778,136 @@ function imprimirConcentrado() {
 // ══ MIS VACACIONES (autoservicio) ════════════════════
 // Pantalla acotada al propio expediente: es la que hace posible dar acceso a
 // toda la plantilla sin exponerle los saldos ni las solicitudes de los demás.
+// ══ MI ASISTENCIA ══════════════════════════════
+// Cada quien consulta sus propias marcas. Existe para que saber cuantos retardos
+// llevas no dependa de preguntarle a Recursos Humanos.
+const MI_AS_COD = {
+  'A':   { t: 'Asistencia',            bg: '#dcfce7', fg: '#166534' },
+  'F':   { t: 'Falta',                 bg: '#fee2e2', fg: '#991b1b' },
+  'FJ':  { t: 'Falta justificada',     bg: '#fef3c7', fg: '#92400e' },
+  'V':   { t: 'Vacaciones',            bg: '#dbeafe', fg: '#1e40af' },
+  'P/G': { t: 'Permiso con goce',      bg: '#e0e7ff', fg: '#3730a3' },
+  'In':  { t: 'Incapacidad',           bg: '#f3e8ff', fg: '#6b21a8' },
+  'D':   { t: 'Descanso',              bg: '#f1f5f9', fg: '#64748b' }
+};
+
+async function miAsistencia() {
+  const hoy = new Date(), pad = n => String(n).padStart(2, '0');
+  const mes = `${hoy.getFullYear()}-${pad(hoy.getMonth() + 1)}`;
+  $('content').innerHTML = `
+    <div class="page-header">
+      <div class="page-header-left">
+        <div class="page-title">🕓 Mi Asistencia</div>
+        <div class="page-sub">Tus entradas, salidas y retardos del periodo</div>
+      </div>
+      <input type="month" id="ma-mes" value="${mes}" onchange="cargarMiAsistencia()"
+             style="border:1.5px solid var(--border);border-radius:9px;padding:7px 10px;font-family:inherit;font-weight:700">
+    </div>
+    <div id="ma-body"><p class="empty">Cargando…</p></div>`;
+  await cargarMiAsistencia();
+}
+
+async function cargarMiAsistencia() {
+  const mes = $('ma-mes').value;
+  if (!mes) return;
+  const [a, m] = mes.split('-').map(Number);
+  const desde = `${mes}-01`;
+  const hasta = `${mes}-${String(new Date(a, m, 0).getDate()).padStart(2, '0')}`;
+  $('ma-body').innerHTML = '<p class="empty">Cargando…</p>';
+  try {
+    const d = await api(`/checador/mi-asistencia?desde=${desde}&hasta=${hasta}`);
+    if (!d.vinculado) {
+      $('ma-body').innerHTML = `
+        <div class="card" style="text-align:center;padding:44px 28px">
+          <div style="font-size:48px">🔗</div>
+          <h3 style="margin:10px 0 6px;font-size:18px;font-weight:900">Tu usuario no está enlazado a un expediente</h3>
+          <p style="font-size:13px;color:var(--muted);max-width:420px;margin:0 auto;line-height:1.55">
+            Sin ese enlace no se puede saber cuáles marcas son tuyas.
+            Pídele a Recursos Humanos que lo configure en tu usuario.</p>
+        </div>`;
+      return;
+    }
+    renderMiAsistencia(d);
+  } catch(e) { $('ma-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+function renderMiAsistencia(d) {
+  const t = d.totales || {};
+  const horas = h => Math.floor(h / 60) + 'h ' + (h % 60) + 'm';
+  const esc = v => String(v == null ? '' : v).replace(/</g, '&lt;');
+  const bono = d.bono.sin_actividad ? null : d.bono.gana;
+
+  // Los dias se pintan en rejilla, como un calendario: de un vistazo se ve donde
+  // estan los huecos, cosa que una lista larga no deja ver.
+  const celdas = d.dias.map(f => {
+    const c = d.celdas[f] || {};
+    const est = MI_AS_COD[c.c] || { t: '', bg: '#fff', fg: '#cbd5e1' };
+    const dia = parseInt(f.slice(8, 10));
+    const dow = new Date(f + 'T12:00:00').getDay();
+    const conRetardo = c.c === 'A' && c.r;
+    const corregido = !!(c.a || c.n);
+    return `
+      <div title="${esc(f)} · ${est.t}${conRetardo ? ' · ' + c.r + ' min tarde' : ''}${c.n ? ' · ' + esc(c.n) : ''}"
+           style="border:1.5px solid ${conRetardo ? '#fbbf24' : 'var(--border)'};border-radius:9px;
+                  padding:6px 4px;text-align:center;background:${est.bg};position:relative">
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase">${['D','L','M','M','J','V','S'][dow]}</div>
+        <div style="font-size:15px;font-weight:900;color:${est.fg};line-height:1.1">${dia}</div>
+        <div style="font-size:8.5px;font-weight:800;color:${est.fg};text-transform:uppercase;letter-spacing:.3px">${c.c || ''}</div>
+        ${conRetardo ? `<div style="font-size:8.5px;font-weight:800;color:#b45309">+${c.r}′</div>` : ''}
+        ${corregido ? `<div style="position:absolute;top:2px;right:3px;font-size:8px" title="Corregido por Recursos Humanos">✎</div>` : ''}
+      </div>`;
+  }).join('');
+
+  $('ma-body').innerHTML = `
+    <div class="kpi-grid" style="margin-bottom:14px">
+      <div class="kpi success"><div class="kpi-icon">✅</div>
+        <div class="label">Días asistidos</div><div class="value">${t.A || 0}</div>
+        <div class="sub">de ${d.dias_trabajados + d.ausencias.length} laborables</div></div>
+      <div class="kpi ${d.retardos.length ? 'warning' : 'success'}"><div class="kpi-icon">⏰</div>
+        <div class="label">Retardos</div><div class="value">${d.retardos.length}</div>
+        <div class="sub">${d.minutos_retardo ? horas(d.minutos_retardo) + ' en total' : 'Ninguno'}</div></div>
+      <div class="kpi ${(t.F || 0) ? 'danger' : 'success'}"><div class="kpi-icon">✖</div>
+        <div class="label">Faltas</div><div class="value">${t.F || 0}</div>
+        <div class="sub">${t.FJ ? t.FJ + ' justificada' + (t.FJ != 1 ? 's' : '') : 'Sin faltas'}</div></div>
+      ${bono === null ? '' : `
+      <div class="kpi ${bono ? 'success' : 'danger'}"><div class="kpi-icon">🏅</div>
+        <div class="label">Bono de puntualidad</div>
+        <div class="value" style="font-size:17px">${bono ? 'Vas ganando' : 'Este periodo no'}</div>
+        <div class="sub">${bono ? 'Sin retardos ni ausencias' : 'Por lo marcado abajo'}</div></div>`}
+    </div>
+
+    <div class="card">
+      <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:10px">
+        Día por día</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:6px">${celdas}</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;font-size:10.5px;color:var(--muted)">
+        ${Object.entries(MI_AS_COD).map(([k, v]) => `
+          <span><b style="display:inline-block;width:9px;height:9px;border-radius:3px;background:${v.bg};
+                border:1px solid ${v.fg};vertical-align:middle"></b> ${k} · ${v.t}</span>`).join('')}
+        <span>✎ · corregido por RH</span>
+      </div>
+    </div>
+
+    ${d.retardos.length || d.ausencias.length ? `
+    <div class="card" style="margin-top:12px">
+      <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:10px">
+        Detalle</div>
+      ${d.retardos.map(x => `<div style="display:flex;justify-content:space-between;
+          border-bottom:1px solid var(--border);padding:7px 2px;font-size:12.5px">
+        <span>${fmtDate(x.fecha)}</span><strong style="color:#b45309">${x.minutos} min tarde</strong></div>`).join('')}
+      ${d.ausencias.map(x => `<div style="display:flex;justify-content:space-between;
+          border-bottom:1px solid var(--border);padding:7px 2px;font-size:12.5px">
+        <span>${fmtDate(x.fecha)}</span>
+        <strong style="color:${MI_AS_COD[x.codigo]?.fg || '#991b1b'}">${MI_AS_COD[x.codigo]?.t || x.codigo}</strong></div>`).join('')}
+    </div>` : ''}
+
+    <div style="margin-top:10px;font-size:11.5px;color:var(--muted);line-height:1.6">
+      Los retardos ya traen descontada tu tolerancia. Un día con ✎ lo corrigió Recursos Humanos;
+      pasa el cursor encima para ver la nota. Si algo no cuadra, avísale a Recursos Humanos:
+      desde aquí solo se consulta.
+    </div>`;
+}
+
 async function misVacaciones() {
   $('content').innerHTML = '<p class="empty">Cargando…</p>';
   let d;

@@ -777,6 +777,55 @@ async function construirMatriz({ desde, hasta, empleado_id, incluir_inactivos })
     return { desde, hasta, dias, empleados: matriz, incidencias_nomina: quincenas };
 }
 
+// ══ MI ASISTENCIA ════════════════════════════════════
+// Lo que el colaborador ve de si mismo. El empleado sale de la sesion y nunca del
+// parametro: aunque alguien cambie la peticion a mano, no puede pedir a otro.
+//
+// Usa la misma matriz que la Lista de Asistencia, asi que lo que ve aqui es
+// exactamente lo que ve Recursos Humanos, correcciones incluidas. Si tuviera su
+// propio calculo, tarde o temprano diria algo distinto y no habria forma de saber
+// cual de los dos manda.
+router.get('/mi-asistencia', async (req, res) => {
+  try {
+    const u = await query(`SELECT empleado_id FROM fac_usuarios WHERE id=$1`, [req.usuario.id]);
+    const empId = u.rows[0]?.empleado_id;
+    if (!empId) return res.json({ vinculado: false });
+
+    const { desde, hasta } = req.query;
+    if (!desde || !hasta) return res.status(400).json({ error: 'Indica el periodo.' });
+
+    const m = await construirMatriz({ desde, hasta, empleado_id: empId });
+    const yo = m.empleados[0];
+    if (!yo) return res.json({ vinculado: false });
+
+    // Como va el bono del periodo. Se dice si lo gana o no, sin el importe: eso es
+    // dato de sueldo y vive en su propio modulo con su propio permiso.
+    const retardos = [], ausencias = [];
+    let diasTrabajados = 0;
+    m.dias.forEach(f => {
+      if (yo.fecha_ingreso && f < yo.fecha_ingreso) return;
+      const c = yo.celdas[f];
+      if (!c || !c.c || c.c === 'D') return;
+      if (c.c === 'A') { diasTrabajados++; if (c.r) retardos.push({ fecha: f, minutos: c.r }); return; }
+      ausencias.push({ fecha: f, codigo: c.c });
+    });
+
+    res.json({
+      vinculado: true,
+      desde, hasta, dias: m.dias,
+      empleado: { nombre: yo.nombre, puesto: yo.puesto, departamento: yo.departamento,
+                  numero_colaborador: yo.numero_colaborador },
+      celdas: yo.celdas,
+      totales: yo.totales,
+      minutos_retardo: yo.minutos_retardo,
+      dias_trabajados: diasTrabajados,
+      retardos, ausencias,
+      bono: { gana: diasTrabajados > 0 && !retardos.length && !ausencias.length,
+              sin_actividad: diasTrabajados === 0 && !ausencias.length }
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/asistencia', verMatrizAsistencia, async (req, res) => {
   try {
     const { desde, hasta, empleado_id, incluir_inactivos } = req.query;

@@ -22,6 +22,8 @@ const MODULOS_SEED = [
     nota:'Cobros por servicio que no generan factura. Suman al Concentrado como ingreso no facturado.' },
   { clave:'gastos',       nombre:'Gastos (CxP)',        icono:'📤', grupo:'Gastos (CxP)',         orden:20 },
   { clave:'misVacaciones',nombre:'Mis Vacaciones',      icono:'🏖', grupo:'Mi espacio',           orden:5  },
+  { clave:'miAsistencia', nombre:'Mi Asistencia',        icono:'🕓', grupo:'Mi espacio',           orden:6,
+    nota:'Cada quien ve solo sus propias marcas del periodo: entradas, salidas, retardos y las correcciones que Recursos Humanos haya hecho. No muestra a nadie más.' },
   { clave:'nomina',       nombre:'Nómina',              icono:'👥', grupo:'Recursos Humanos',     orden:30 },
   { clave:'empleados',    nombre:'Empleados',           icono:'👤', grupo:'Recursos Humanos',     orden:31 },
   { clave:'vacaciones',   nombre:'Vacaciones',          icono:'🌴', grupo:'Recursos Humanos',     orden:32,
@@ -84,7 +86,7 @@ const PERFILES_SEED = [
   // solicitudes de todos; 'misVacaciones' está acotado a su propio expediente.
   { clave:'colaborador', nombre:'Colaborador', color:'#0d9488', es_sistema:true,
     descripcion:'Solo puede solicitar sus vacaciones y ver sus propios días. No ve información de nadie más.',
-    permisos: { misVacaciones: C } }
+    permisos: { misVacaciones: C, miAsistencia: V } }
 ];
 
 (async () => {
