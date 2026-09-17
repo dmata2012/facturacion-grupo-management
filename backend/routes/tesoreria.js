@@ -1,6 +1,11 @@
 const router = require('express').Router();
 const { query, getClient } = require('../config/db');
 const { verificarToken, requireRol } = require('../middleware/auth');
+const { permiso, NIVEL } = require('../middleware/permiso');
+
+// Borrar un fondo entero y repartir quien entra a el se quedan en el rol de
+// administrador a proposito: no son operacion diaria de la caja, y ponerlos en la
+// matriz los volveria alcanzables con un nivel alto de Caja Chica.
 
 router.use(verificarToken);
 
@@ -202,7 +207,7 @@ router.get('/fondos/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/fondos', requireRol('admin', 'capturista', 'tesoreria'), async (req, res) => {
+router.post('/fondos', permiso('cajaChica', NIVEL.CAPTURAR), async (req, res) => {
   try {
     const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, notas, clave_movimientos, icono } = req.body;
     if (!nombre) return res.status(400).json({ error: 'Nombre requerido.' });
@@ -216,7 +221,7 @@ router.post('/fondos', requireRol('admin', 'capturista', 'tesoreria'), async (re
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/fondos/:id', requireRol('admin', 'capturista', 'tesoreria'), async (req, res) => {
+router.put('/fondos/:id', permiso('cajaChica', NIVEL.EDITAR), async (req, res) => {
   try {
     const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, activo, notas, clave_movimientos, icono } = req.body;
     // Si clave_movimientos NO viene en el body, conservar la existente
@@ -285,7 +290,7 @@ router.delete('/fondos/:id/completo', requireRol('admin'), async (req, res) => {
 });
 
 // ══ MOVIMIENTOS ═══════════════════════════════════════════
-router.post('/movimientos', requireRol('admin', 'capturista', 'tesoreria'), async (req, res) => {
+router.post('/movimientos', permiso('cajaChica', NIVEL.CAPTURAR), async (req, res) => {
   try {
     const { fondo_id, fecha, tipo, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, clave, periodo_pago } = req.body;
     if (!fondo_id || !fecha || !tipo || !concepto || !monto)
@@ -374,7 +379,7 @@ router.get('/movimientos/:id/comprobante', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/movimientos/:id', requireRol('admin', 'capturista', 'tesoreria'), async (req, res) => {
+router.put('/movimientos/:id', permiso('cajaChica', NIVEL.EDITAR), async (req, res) => {
   try {
     const { fecha, categoria, concepto, monto, beneficiario, forma_pago, referencia, comprobante, autorizado_por, notas, clave, periodo_pago, tipo_gasto } = req.body;
     if (!fecha || !concepto || !monto)
@@ -430,7 +435,7 @@ router.put('/movimientos/:id', requireRol('admin', 'capturista', 'tesoreria'), a
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/movimientos/:id', requireRol('admin', 'capturista', 'tesoreria'), async (req, res) => {
+router.delete('/movimientos/:id', permiso('cajaChica', NIVEL.TODO), async (req, res) => {
   try {
     const clave = req.query.clave || req.body?.clave;
     const cur = await query(`SELECT fondo_id FROM fac_caja_chica_movimientos WHERE id=$1`, [req.params.id]);

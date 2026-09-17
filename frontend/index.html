@@ -16140,6 +16140,12 @@ async function imprimirSolicitudVac(id) {
 }
 
 // ══ CAJA CHICA (TESORERÍA) ══════════════════
+// Los permisos de Caja Chica salen de la matriz. Se conserva la regla vieja como
+// respaldo por si el motor esta apagado, para no dejar la caja sin botones.
+const ccPuedeCapturar = () => puedeO('cajaChica', NIVEL.CAPTURAR, canWrite());
+const ccPuedeEditar   = () => puedeO('cajaChica', NIVEL.EDITAR,   canWrite());
+const ccPuedeBorrar   = () => puedeO('cajaChica', NIVEL.TODO,     canAdmin());
+
 async function cajaChica() {
   $('content').innerHTML = `
     <div class="page-header">
@@ -16147,7 +16153,7 @@ async function cajaChica() {
         <div class="page-title">Caja Chica</div>
         <div class="page-sub">Control de fondos, entradas y salidas</div>
       </div>
-      ${canWrite()?`<button class="btn bs" onclick="openFondoCC()">+ Nuevo fondo</button>`:''}
+      ${ccPuedeCapturar()?`<button class="btn bs" onclick="openFondoCC()">+ Nuevo fondo</button>`:''}
     </div>
     <div id="cc-kpis" style="margin-bottom:14px"></div>
     <div id="cc-body"><p class="empty">Cargando...</p></div>`;
@@ -16444,14 +16450,14 @@ function renderDetalleFondoCC() {
         <div style="font-size:12px;color:var(--muted);margin-top:2px">${f.departamento||''}${f.responsable?' · Responsable: '+f.responsable:''}</div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${canWrite()?`<button class="btn bo bsm" onclick="openFondoCC(${f.id})">✏️ Editar fondo</button>`:''}
+        ${ccPuedeEditar()?`<button class="btn bo bsm" onclick="openFondoCC(${f.id})">✏️ Editar fondo</button>`:''}
         ${canAdmin()?`<button class="btn bo bsm" onclick="openPermisosCC(${f.id})">👥 Permisos</button>`:''}
         <button class="btn bsm" style="background:linear-gradient(135deg,#d97706,#f59e0b);color:#fff;border:none;font-weight:800;box-shadow:0 2px 8px rgba(217,119,6,.3)" onclick="solicitarReembolsoCC()" title="Generar solicitud formal de reembolso para tesoreria (con desglose y comprobantes)">💰 Solicitar Reembolso</button>
         <button class="btn bg bsm" onclick="openInformeReembolsoCC()">📋 Generar informe</button>
         <button class="btn bg bsm" onclick="openReporteCategoriasCC()">📊 Por categoría</button>
         ${canAdmin()?`<button class="btn bd bsm" onclick="eliminarCajaCC(${f.id},'${(f.nombre||'').replace(/'/g,"\\'")}')" title="Eliminar caja permanentemente">🗑 Eliminar caja</button>`:''}
-        ${canWrite()?`<button class="btn bsuc bsm" onclick="openMovCC('entrada')">+ Entrada de efectivo</button>`:''}
-        ${canWrite()?`<button class="btn bd bsm" onclick="openMovCC('salida')">− Gasto / Salida</button>`:''}
+        ${ccPuedeCapturar()?`<button class="btn bsuc bsm" onclick="openMovCC('entrada')">+ Entrada de efectivo</button>`:''}
+        ${ccPuedeCapturar()?`<button class="btn bd bsm" onclick="openMovCC('salida')">− Gasto / Salida</button>`:''}
       </div>
     </div>
 
@@ -16476,7 +16482,7 @@ function renderDetalleFondoCC() {
           <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">🎯 Fondo Fijo Objetivo</div>
           <div style="font-size:22px;font-weight:900;color:var(--dark);margin-top:2px">${fmt(asignado)}</div>
           <div style="font-size:10px;color:var(--muted);margin-top:2px">Límite autorizado</div>
-          ${canWrite()?`
+          ${ccPuedeEditar()?`
           <button onclick="editarFondoFijoCC(${f.id},${asignado})" title="Editar fondo fijo"
             style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;border:1.5px solid #e5e7eb;background:#fff;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:all .15s"
             onmouseover="this.style.background='var(--red-xs)';this.style.borderColor='var(--red)';this.style.color='var(--red)'"
@@ -16505,7 +16511,7 @@ function renderDetalleFondoCC() {
             <div style="color:#92400e">− Reemb. pendientes: <strong>${fmt(reembolsosPendientes)}</strong></div>
           </div>` : `
           <div style="font-size:10px;color:${estado.color};font-weight:700;margin-top:2px">Fondo Fijo − Saldo</div>`}
-          ${reembolso > 0 && canWrite() ? `
+          ${reembolso > 0 && ccPuedeCapturar() ? `
           <button class="btn bsuc bsm" style="margin-top:8px;width:100%;font-size:11px" onclick="registrarReembolsoCC(${reembolso.toFixed(2)})">
             💰 Registrar reembolso
           </button>` : reembolso === 0 && asignado > 0 ? `
@@ -16564,7 +16570,7 @@ function renderDetalleFondoCC() {
         const es = m.tipo==='entrada';
         const saldoAcum = saldosPorId[m.id] || 0;
         const esPendiente = /reembolso\s*pendiente/i.test(m.tipo_gasto||'');
-        const w = canWrite();
+        const w = ccPuedeEditar(), wBorrar = ccPuedeBorrar();
         let botones = '';
         if (esPendiente) botones += '<button class="btn bo bsm" style="padding:6px 8px" onclick="imprimirValeCC('+m.id+')" title="Imprimir vale de caja">🖨</button> ';
         if (esPendiente && w) botones += '<button class="btn bo bsm" style="padding:6px 8px;background:#facc15;color:#78350f;border-color:#ca8a04;font-weight:900" onclick="marcarDevueltoCC('+m.id+')" title="Marcar como devuelto (registra entrada y limpia pendiente)">💰</button> ';
@@ -16575,7 +16581,7 @@ function renderDetalleFondoCC() {
             : '<span title="Sin comprobante" style="display:inline-block;width:30px;text-align:center;color:#cbd5e1;margin-right:4px">—</span>')
           + botones;
         if (w) botones += '<button class="btn bg bsm" style="padding:6px 8px" onclick="openMovCC(\''+m.tipo+'\','+m.id+')" title="Editar movimiento">✏️</button> ';
-        if (w) botones += '<button class="btn bd bsm" style="padding:6px 8px" onclick="eliminarMovCC('+m.id+')" title="Eliminar movimiento">🗑</button>';
+        if (wBorrar) botones += '<button class="btn bd bsm" style="padding:6px 8px" onclick="eliminarMovCC('+m.id+')" title="Eliminar movimiento">🗑</button>';
         const trStyle = esPendiente ? 'background:#dbeafe;font-weight:800;color:#1e40af' : '';
         const conceptoStyle = esPendiente ? 'color:#1e3a8a;font-weight:800' : '';
         return `<tr style="${trStyle}">
@@ -17965,13 +17971,13 @@ function verMovimientoCC(id) {
         </div>`
       : `<div style="font-size:12.5px;color:var(--muted)">
            Este movimiento no tiene archivo adjunto.
-           ${canWrite() ? 'Puedes subirlo desde el botón de editar ✏️.' : ''}
+           ${ccPuedeEditar() ? 'Puedes subirlo desde el botón de editar ✏️.' : ''}
          </div>`}
     </div>
 
     <div class="form-actions">
       <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button>
-      ${canWrite() ? `<button class="btn bs" onclick="closeModal('modal-gt-cats');openMovCC('${m.tipo}',${m.id})">✏️ Editar</button>` : ''}
+      ${ccPuedeEditar() ? `<button class="btn bs" onclick="closeModal('modal-gt-cats');openMovCC('${m.tipo}',${m.id})">✏️ Editar</button>` : ''}
     </div>`;
   openModal('modal-gt-cats');
 }

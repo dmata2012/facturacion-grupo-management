@@ -64,7 +64,7 @@ const PERFILES_SEED = [
 
   { clave:'tesoreria', nombre:'Tesorería', color:'#059669', es_sistema:true,
     descripcion:'Maneja caja chica y bancos.',
-    permisos: { cajaChica: E, bancos: E, vacaciones: C, gastos: E, dashboard: V } },
+    permisos: { cajaChica: T, bancos: E, vacaciones: C, gastos: E, dashboard: V } },
 
   { clave:'tesoreria_consulta', nombre:'Tesorería (consulta)', color:'#0284c7', es_sistema:true,
     descripcion:'Consulta caja chica y bancos, sin poder modificar.',
@@ -201,6 +201,18 @@ const PERFILES_SEED = [
            FROM fac_perfiles pf
           WHERE pf.id = pp.perfil_id AND pf.clave = 'capturista'
             AND pp.modulo = 'clientes' AND pp.nivel < 3`);
+    });
+
+    // Caja Chica dejo de mirar el rol y paso a la matriz. Tesoreria podia borrar
+    // movimientos y su perfil estaba en Editar, que ya no alcanza para borrar: sin
+    // esto perderian un permiso que si usaban. Borrar el fondo completo y repartir
+    // sus accesos siguen siendo solo del administrador, aparte de la matriz.
+    await unaVez('caja_chica_a_matriz', async () => {
+      await query(
+        `UPDATE fac_perfil_permisos pp SET nivel = 4
+           FROM fac_perfiles pf
+          WHERE pf.id = pp.perfil_id AND pf.clave = 'tesoreria'
+            AND pp.modulo = 'cajaChica' AND pp.nivel < 4`);
     });
 
     console.log('✔ Permisos: módulos y perfiles listos');
