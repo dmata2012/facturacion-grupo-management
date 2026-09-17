@@ -1742,14 +1742,21 @@ function renderGastos(r) {
     </div>`;
 
   $('gt-body').innerHTML = desglose + `
+    <div id="gt-barra-sel"></div>
     <div class="tscroll"><table>
       <thead><tr>
+        ${canGastos() ? `<th style="width:28px;text-align:center">
+          <input type="checkbox" id="gt-sel-todos" onchange="gtSelTodos(this.checked)"
+                 title="Seleccionar los que están por pagar"></th>` : ''}
         <th>Fecha</th><th>Cuenta de gasto</th><th>Proveedor / Descripción</th>
         <th style="text-align:center">Origen</th><th style="text-align:center">SAT</th>
         <th style="text-align:center">Pago</th>
         <th style="text-align:right">Monto</th><th></th>
       </tr></thead>
       <tbody>${r.gastos.map(g => `<tr${g.deducible === false ? ' style="background:#fafafa"' : ''}>
+        ${canGastos() ? `<td style="text-align:center">${g.estatus_pago === 'pagado' ? ''
+          : `<input type="checkbox" class="gt-sel" data-id="${g.id}"
+                    ${window._gtSel.has(g.id) ? 'checked' : ''} onchange="gtSelCambio()">`}</td>` : ''}
         <td style="white-space:nowrap">${fmtDate(g.fecha)}</td>
         <td style="max-width:220px">
           ${g.concepto
@@ -1796,6 +1803,10 @@ function renderGastos(r) {
         </tr>
       </tfoot>
     </table></div>`;
+
+  // La seleccion sobrevive al repintado, asi que la barra se vuelve a dibujar con
+  // lo que siga visible; si el filtro dejo fuera lo marcado, desaparece sola.
+  gtPintarBarraSel();
 }
 
 // Estatus de pago. No viene guardado: el servidor lo deriva del importe pagado,
@@ -1837,6 +1848,110 @@ async function pagarTodoGasto(id) {
       })
     });
     toast(`Pagada · ${fmt(saldo)}.`);
+    if ($('gt-body')) cargarGastos();
+    gtActualizarBadgePendientes();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+// ══ PAGO EN LOTE ══════════════════════════════════
+// Liquidar varios el mismo dia es lo normal cuando se paga un lote de gastos; de
+// uno en uno son tres clics por renglon.
+window._gtSel = window._gtSel || new Set();
+
+function gtSelTodos(marcar) {
+  document.querySelectorAll('#gt-body .gt-sel').forEach(cb => {
+    cb.checked = marcar;
+    const id = parseInt(cb.dataset.id);
+    if (marcar) window._gtSel.add(id); else window._gtSel.delete(id);
+  });
+  gtSelCambio();
+}
+
+function gtSelCambio() {
+  document.querySelectorAll('#gt-body .gt-sel').forEach(cb => {
+    const id = parseInt(cb.dataset.id);
+    if (cb.checked) window._gtSel.add(id); else window._gtSel.delete(id);
+  });
+  gtPintarBarraSel();
+}
+
+// Lo que se ve seleccionado. Se filtra contra la lista en pantalla porque la
+// seleccion sobrevive a un cambio de filtro y podria incluir gastos que ya no
+// aparecen: cobrarlos sin que el usuario los vea seria una sorpresa fea.
+function gtSeleccionVisible() {
+  const enPantalla = new Set([...document.querySelectorAll('#gt-body .gt-sel')].map(cb => parseInt(cb.dataset.id)));
+  return (window._gtData?.gastos || []).filter(g => enPantalla.has(g.id) && window._gtSel.has(g.id));
+}
+
+function gtPintarBarraSel() {
+  const barra = $('gt-barra-sel');
+  if (!barra) return;
+  const sel = gtSeleccionVisible();
+  const cbTodos = $('gt-sel-todos');
+  if (cbTodos) {
+    const total = document.querySelectorAll('#gt-body .gt-sel').length;
+    cbTodos.checked = total > 0 && sel.length === total;
+    cbTodos.indeterminate = sel.length > 0 && sel.length < total;
+  }
+  if (!sel.length) { barra.innerHTML = ''; return; }
+  const saldo = sel.reduce((a, g) => a + Math.max(parseFloat(g.monto) - parseFloat(g.pagado || 0), 0), 0);
+  const hoy = new Date().toISOString().slice(0,10);
+  barra.innerHTML = `
+    <div class="card" style="margin-bottom:12px;background:linear-gradient(135deg,#065f46,#059669);color:#fff;
+         display:flex;align-items:end;gap:12px;flex-wrap:wrap">
+      <div style="flex:1;min-width:180px">
+        <div style="font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.2px;opacity:.9">Seleccionados</div>
+        <div style="font-size:22px;font-weight:900;line-height:1.15">
+          ${sel.length} gasto${sel.length!=1?'s':''} · ${fmt(saldo)}</div>
+      </div>
+      <div class="fi" style="margin:0">
+        <label style="font-size:10px;color:#d1fae5">Fecha de pago</label>
+        <input type="date" id="gt-lote-fecha" value="${hoy}" max="${hoy}" style="padding:6px 9px"></div>
+      <div class="fi" style="margin:0">
+        <label style="font-size:10px;color:#d1fae5">Forma <span style="opacity:.75">(opcional)</span></label>
+        <select id="gt-lote-forma" style="padding:6px 9px">
+          <option value="">— Dejar como está —</option>
+          ${FORMAS_PAGO_GTO.map(f => `<option value="${f}">${f}</option>`).join('')}
+        </select></div>
+      <div class="fi" style="margin:0">
+        <label style="font-size:10px;color:#d1fae5">Referencia <span style="opacity:.75">(opcional)</span></label>
+        <input id="gt-lote-ref" placeholder="Ej: SPEI-8821" style="padding:6px 9px;width:150px"></div>
+      <button class="btn bo bsm" style="height:34px" onclick="gtLimpiarSel()">✕ Quitar</button>
+      <button class="btn bs bsm" style="height:34px" onclick="gtPagarLote()">✓ Marcar como pagados</button>
+    </div>`;
+}
+
+function gtLimpiarSel() {
+  window._gtSel.clear();
+  document.querySelectorAll('#gt-body .gt-sel').forEach(cb => { cb.checked = false; });
+  gtPintarBarraSel();
+}
+
+async function gtPagarLote() {
+  const sel = gtSeleccionVisible();
+  if (!sel.length) return;
+  const saldo = sel.reduce((a, g) => a + Math.max(parseFloat(g.monto) - parseFloat(g.pagado || 0), 0), 0);
+  const fecha = $('gt-lote-fecha')?.value;
+  if (!fecha) return toast('Indica la fecha de pago.', 'warn');
+  // Los parciales se liquidan por completo, no se les abona: conviene decirlo
+  // antes, porque el importe que se registra no es el monto del gasto.
+  const parciales = sel.filter(g => parseFloat(g.pagado || 0) > 0).length;
+  if (!await confirm2(
+    `¿Marcar ${sel.length} gasto${sel.length!=1?'s':''} como pagado${sel.length!=1?'s':''}?\n\n` +
+    `${fmt(saldo)} con fecha ${fmtDate(fecha)}\n` +
+    (parciales ? `\n${parciales} ya tenía${parciales!=1?'n':''} un abono: se liquida${parciales!=1?'n':''} por completo.` : ''))) return;
+  try {
+    const r = await api('/gastos/pagos-lote', {
+      method: 'POST',
+      body: JSON.stringify({
+        ids: sel.map(g => g.id),
+        fecha_pago: fecha,
+        pago_forma: $('gt-lote-forma')?.value || null,
+        pago_referencia: ($('gt-lote-ref')?.value || '').trim() || null
+      })
+    });
+    window._gtSel.clear();
+    toast(`${r.marcados} gasto${r.marcados!=1?'s':''} marcado${r.marcados!=1?'s':''} como pagado${r.marcados!=1?'s':''}.`);
     if ($('gt-body')) cargarGastos();
     gtActualizarBadgePendientes();
   } catch(e) { toast(e.message, 'err'); }
