@@ -12638,6 +12638,8 @@ async function openConfigPINs() {
     const ubis = ubisTodas.filter(u => u.activo !== false);
     const validarUbi = Array.isArray(ubisResp) ? null : ubisResp?.validar_ubicacion;
     window._ubisAll = ubis;
+    // El editor de horario por dia lo consulta para saber que tiene cada quien
+    window._cpinEmps = emps;
     // Pre-cargar asignaciones actuales de todos los empleados
     const asigMap = {};
     await Promise.all(emps.map(async e => {
@@ -12702,6 +12704,7 @@ async function openConfigPINs() {
               <th style="padding:8px">Entrada</th>
               <th style="padding:8px">Salida</th>
               <th style="padding:8px" title="Minutos de gracia para no marcar retardo">⏰ Toler.</th>
+              <th style="padding:8px" title="Horario distinto por día de la semana">🗓</th>
               <th style="padding:8px">Descanso</th>
               <th style="padding:8px">PIN</th>
               <th style="padding:8px;text-align:left">📍 Ubicaciones autorizadas</th>
@@ -12723,6 +12726,11 @@ async function openConfigPINs() {
                   <input type="number" id="cpin-tol-${e.id}" value="${e.tolerancia_min||0}" min="0" max="120" style="width:56px;text-align:center;font-weight:800">
                   <span style="font-size:10px;color:var(--muted)">min</span>
                 </div>
+              </td>
+              <td style="padding:8px;text-align:center">
+                <button class="btn ${e.horario_semanal ? 'bs' : 'bo'} bsm" style="padding:5px 9px"
+                        onclick="openHorarioSemanalCH(${e.id})"
+                        title="${e.horario_semanal ? 'Tiene horario por día' : 'Mismo horario todos los días'}">🗓</button>
               </td>
               <td style="padding:8px">
                 <div style="display:flex;gap:3px" id="cpin-dd-${e.id}" data-empid="${e.id}">
@@ -12869,6 +12877,124 @@ document.addEventListener('scroll', () => {
   if (document.querySelector('.ubi-dd-panel.abierto')) cerrarTodosUbiDD();
 }, true);
 
+// ══ HORARIO POR DÍA DE LA SEMANA ═══════════════════════
+// Antes habia un solo par de horas para toda la semana. A quien sale antes el
+// sabado se le calculaba retardo y jornada contra un horario que ese dia no era el
+// suyo, y eso ensuciaba retardos, horas y el bono de puntualidad.
+window._horariosCH = window._horariosCH || {};
+const DIAS_SEM = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+
+function openHorarioSemanalCH(empId) {
+  const e = (window._cpinEmps || []).find(x => x.id === empId);
+  if (!e) return toast('Colaborador no encontrado.', 'err');
+  const hs = window._horariosCH[empId] !== undefined ? window._horariosCH[empId] : e.horario_semanal;
+  const genEnt = ($(`cpin-hora-${empId}`)?.value) || (e.hora_entrada_esperada || '09:00').toString().slice(0,5);
+  const genSal = ($(`cpin-sal-${empId}`)?.value)  || (e.hora_salida_esperada  || '18:00').toString().slice(0,5);
+  const cont = $(`cpin-dd-${empId}`);
+  const descansaHoy = cont
+    ? new Set([...cont.querySelectorAll('input[type="checkbox"]:checked')].map(cb => parseInt(cb.dataset.dia)))
+    : new Set([0]);
+
+  // Se parte de lo que ya esta configurado: horario por dia si lo hay, y si no el
+  // general con sus dias de descanso. Asi abrir el editor nunca cambia nada solo.
+  const filas = [0,1,2,3,4,5,6].map(d => {
+    const v = hs && Object.prototype.hasOwnProperty.call(hs, String(d)) ? hs[String(d)] : undefined;
+    const trabaja = v !== undefined ? !!(v && v.e) : !descansaHoy.has(d);
+    const ent = (v && v.e) || genEnt;
+    const sal = (v && v.s) || genSal;
+    return `
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:7px 4px;font-weight:700;font-size:12.5px">${DIAS_SEM[d]}</td>
+        <td style="padding:7px 4px;text-align:center">
+          <input type="checkbox" id="hs-t-${d}" ${trabaja ? 'checked' : ''}
+                 onchange="hsPintarFila(${d})"></td>
+        <td style="padding:7px 4px"><input type="time" id="hs-e-${d}" value="${ent}" style="width:100px"></td>
+        <td style="padding:7px 4px"><input type="time" id="hs-s-${d}" value="${sal}" style="width:100px"></td>
+        <td style="padding:7px 4px;text-align:right;font-size:11.5px;color:var(--muted)" id="hs-h-${d}"></td>
+      </tr>`;
+  }).join('');
+
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#1e1b4b,#4f46e5);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Horario por día</div>
+      <div style="font-size:19px;font-weight:900;margin-top:3px">${e.nombre}</div>
+      <div style="font-size:11.5px;opacity:.9;margin-top:3px">${e.puesto || ''}</div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead style="background:var(--bg-alt)"><tr>
+        <th style="text-align:left;padding:7px 4px">Día</th>
+        <th style="padding:7px 4px">Trabaja</th>
+        <th style="padding:7px 4px">Entrada</th>
+        <th style="padding:7px 4px">Salida</th>
+        <th style="padding:7px 4px;text-align:right">Jornada</th>
+      </tr></thead>
+      <tbody>${filas}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--dark);font-weight:900">
+        <td colspan="4" style="padding:8px 4px;text-align:right">Total a la semana</td>
+        <td style="padding:8px 4px;text-align:right" id="hs-total"></td>
+      </tr></tfoot>
+    </table>
+    <div style="margin-top:11px;font-size:11.5px;color:var(--muted);line-height:1.55">
+      El retardo de cada día se mide contra la entrada de ese día, y las horas
+      esperadas del mes suman la jornada que le toca a cada uno.
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cancelar</button>
+      <button class="btn bd bo" onclick="hsQuitar(${empId})"
+              title="Vuelve al horario general de la fila">↺ Usar el mismo todos los días</button>
+      <button class="btn bs" onclick="hsGuardar(${empId})">💾 Guardar horario</button>
+    </div>`;
+  openModal('modal-gt-cats');
+  [0,1,2,3,4,5,6].forEach(hsPintarFila);
+}
+
+function hsPintarFila(d) {
+  const t = $(`hs-t-${d}`), e = $(`hs-e-${d}`), s = $(`hs-s-${d}`), h = $(`hs-h-${d}`);
+  if (!t) return;
+  [e, s].forEach(x => { x.disabled = !t.checked; x.style.opacity = t.checked ? '' : '.4'; });
+  const min = hsMinutos(d);
+  if (h) h.textContent = t.checked ? (min > 0 ? (min/60).toFixed(1).replace('.0','') + ' h' : '—') : 'Descanso';
+  const tot = [0,1,2,3,4,5,6].reduce((a, x) => a + hsMinutos(x), 0);
+  const el = $('hs-total');
+  if (el) el.textContent = (tot/60).toFixed(1).replace('.0','') + ' h';
+}
+
+function hsMinutos(d) {
+  const t = $(`hs-t-${d}`);
+  if (!t || !t.checked) return 0;
+  const m = h => { const p = String($(`hs-${h}-${d}`)?.value || '').split(':');
+                   return p.length === 2 ? parseInt(p[0])*60 + parseInt(p[1]) : null; };
+  const e = m('e'), s = m('s');
+  return (e == null || s == null) ? 0 : Math.max(0, s - e);
+}
+
+async function hsGuardar(empId) {
+  const horario = {};
+  for (let d = 0; d <= 6; d++) {
+    const t = $(`hs-t-${d}`);
+    if (!t) continue;
+    if (!t.checked) { horario[String(d)] = null; continue; }
+    const e = $(`hs-e-${d}`)?.value, s = $(`hs-s-${d}`)?.value;
+    if (!e) return toast(`Falta la hora de entrada del ${DIAS_SEM[d].toLowerCase()}.`, 'warn');
+    if (s && s <= e) return toast(`La salida del ${DIAS_SEM[d].toLowerCase()} no puede ser antes que la entrada.`, 'warn');
+    horario[String(d)] = { e, s: s || null };
+  }
+  window._horariosCH[empId] = horario;
+  closeModal('modal-gt-cats');
+  // Se guarda por el mismo camino de siempre para que PIN, tolerancia y
+  // ubicaciones de esa fila viajen igual y no se pierdan.
+  await guardarPINEmp(empId);
+  openConfigPINs();
+}
+
+async function hsQuitar(empId) {
+  if (!await confirm2('¿Volver al mismo horario todos los días?\n\nSe usará la entrada, la salida y los días de descanso de la fila.')) return;
+  window._horariosCH[empId] = null;
+  closeModal('modal-gt-cats');
+  await guardarPINEmp(empId);
+  openConfigPINs();
+}
+
 async function guardarPINEmp(empId) {
   const pin      = $(`cpin-${empId}`)?.value || '';
   const horaEnt  = $(`cpin-hora-${empId}`)?.value || '09:00';
@@ -12892,7 +13018,11 @@ async function guardarPINEmp(empId) {
         hora_entrada_esperada: horaEnt,
         hora_salida_esperada : horaSal,
         dias_descanso        : dias.join(','),
-        tolerancia_min       : tolerancia
+        tolerancia_min       : tolerancia,
+        // Solo viaja si se edito en esta sesion; si no, el servidor deja el que ya
+        // tenia. Mandar null aqui lo borraria sin que nadie lo hubiera pedido.
+        ...(window._horariosCH && window._horariosCH[empId] !== undefined
+            ? { horario_semanal: window._horariosCH[empId] } : {})
       })
     });
     await api(`/checador/empleados/${empId}/ubicaciones`, {

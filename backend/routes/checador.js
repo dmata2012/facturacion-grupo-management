@@ -29,6 +29,13 @@ router.use(verificarToken);
     // Monto del bono de puntualidad, por persona: distintos puestos suelen traer
     // distinto bono, y un solo monto global obligaria a inventar excepciones.
     await query(`ALTER TABLE fac_empleados ADD COLUMN IF NOT EXISTS bono_puntualidad NUMERIC(12,2) DEFAULT 0`);
+    // Horario distinto por dia de la semana. Antes habia un solo par de horas para
+    // toda la semana, asi que a quien sale antes el sabado se le calculaba retardo
+    // y jornada contra un horario que ese dia no era el suyo.
+    // Forma: { "1": {"e":"09:00","s":"18:00"}, "6": {"e":"09:00","s":"14:00"}, "0": null }
+    // La llave es el dia (0=domingo). null significa descanso. Un dia ausente cae
+    // al horario general de siempre, para no obligar a reconfigurar a nadie.
+    await query(`ALTER TABLE fac_empleados ADD COLUMN IF NOT EXISTS horario_semanal JSONB`);
   } catch (e) { console.warn('Migración tolerancia_min:', e.message); }
 })();
 
@@ -57,6 +64,52 @@ router.use(verificarToken);
       )`);
   } catch (e) { console.warn('Migración notificaciones:', e.message); }
 })();
+
+// ══ HORARIO DEL EMPLEADO ═════════════════════════════
+// dias_descanso se guarda como texto ("0,6"), pero varias pantallas lo leian con
+// Array.isArray, que siempre daba falso: quien descansaba sabado y domingo veia el
+// sabado marcado como falta. Se normaliza en un solo lugar.
+function diasDescansoDe(emp) {
+  const d = emp && emp.dias_descanso;
+  const lista = Array.isArray(d)
+    ? d.map(Number)
+    : String(d == null ? '' : d).split(',').map(x => x.trim()).filter(x => x !== '').map(Number);
+  const limpia = lista.filter(n => Number.isInteger(n) && n >= 0 && n <= 6);
+  return limpia.length ? limpia : [0];   // sin configurar: domingo, como marca la LFT
+}
+
+// Que horario le toca a este empleado ese dia. Devuelve siempre la misma forma,
+// venga del horario por dia o del general, para que quien lo use no tenga que
+// preguntar de donde salio.
+function horarioDelDia(emp, dow) {
+  const hs = emp && emp.horario_semanal;
+  if (hs && typeof hs === 'object' && Object.prototype.hasOwnProperty.call(hs, String(dow))) {
+    const d = hs[String(dow)];
+    if (!d || !d.e) return { descansa: true, entrada: null, salida: null };
+    return { descansa: false, entrada: d.e, salida: d.s || null };
+  }
+  return {
+    descansa: diasDescansoDe(emp).includes(dow),
+    entrada: emp?.hora_entrada_esperada || null,
+    salida:  emp?.hora_salida_esperada  || null
+  };
+}
+
+// Minutos desde medianoche, tolerando '09:00' y '09:00:00'
+function minutosDe(hora) {
+  if (!hora) return null;
+  const p = String(hora).slice(0, 5).split(':');
+  const h = parseInt(p[0]), m = parseInt(p[1]);
+  return Number.isInteger(h) && Number.isInteger(m) ? h * 60 + m : null;
+}
+
+// Minutos de jornada de ese dia; 0 si descansa
+function jornadaDelDia(emp, dow) {
+  const h = horarioDelDia(emp, dow);
+  if (h.descansa) return 0;
+  const e = minutosDe(h.entrada), sal = minutosDe(h.salida);
+  return (e == null || sal == null) ? 0 : Math.max(0, sal - e);
+}
 
 // Helper: obtener notificaciones pendientes para un empleado (no vistas y activas)
 async function notificacionesPendientes(empleadoId) {
@@ -608,7 +661,7 @@ async function construirMatriz({ desde, hasta, empleado_id, incluir_inactivos })
       whereE = whereE ? `${whereE} AND id=$${paramsE.length}` : `WHERE id=$${paramsE.length}`;
     }
     const empleados = await query(
-      `SELECT id, nombre, numero_colaborador, puesto, departamento, dias_descanso,
+      `SELECT id, nombre, numero_colaborador, puesto, departamento, dias_descanso, horario_semanal,
               TO_CHAR(fecha_ingreso,'YYYY-MM-DD') AS fecha_ingreso,
               COALESCE(bono_puntualidad, 0) AS bono_puntualidad
        FROM fac_empleados ${whereE} ORDER BY nombre`,
@@ -714,9 +767,8 @@ async function construirMatriz({ desde, hasta, empleado_id, incluir_inactivos })
     // Construir matriz
     const matriz = empleados.rows.map(e => {
       // Default LFT: domingo es dia de descanso obligatorio si no hay config
-      const descanso = Array.isArray(e.dias_descanso) && e.dias_descanso.length
-        ? e.dias_descanso
-        : [0]; // 0 = domingo
+      // El descanso ya no es una lista fija: cada dia se pregunta por separado,
+      // porque el horario semanal puede marcar descanso solo en algunos.
       const celdas = {};
       const totales = { A:0, F:0, FJ:0, V:0, 'P/G':0, In:0, D:0, R:0 };
       let minutosRetardoTotal = 0;
@@ -732,7 +784,7 @@ async function construirMatriz({ desde, hasta, empleado_id, incluir_inactivos })
         let codAuto;
         if (reg && reg.hora_entrada) codAuto = 'A';
         else if (sol) codAuto = codigoTipoSolicitud[sol] || 'V';
-        else if (descanso.includes(dow)) codAuto = 'D';
+        else if (horarioDelDia(e, dow).descansa) codAuto = 'D';
         else if (esFutura) codAuto = '';   // fecha futura sin registro: no es falta
         else codAuto = 'F';
 
@@ -949,7 +1001,7 @@ router.get('/productividad', verProductividad, async (req, res) => {
     if (empleado_id) { paramsE.push(empleado_id); whereE += ` AND id=$${paramsE.length}`; }
     const emps = await query(
       `SELECT id, nombre, numero_colaborador, puesto, departamento,
-        hora_entrada_esperada, hora_salida_esperada, dias_descanso
+        hora_entrada_esperada, hora_salida_esperada, dias_descanso, horario_semanal
        FROM fac_empleados ${whereE} ORDER BY nombre`, paramsE);
 
     // Registros del reloj
@@ -1019,15 +1071,16 @@ router.get('/productividad', verProductividad, async (req, res) => {
 
     // Construir resumen por empleado
     const resumen = emps.rows.map(e => {
-      const descanso = Array.isArray(e.dias_descanso) && e.dias_descanso.length ? e.dias_descanso : [0];
-      const jornadaMin = Math.max(0, parseHora(e.hora_salida_esperada) - parseHora(e.hora_entrada_esperada));
+      // Las horas esperadas se acumulan por dia y no multiplicando una jornada
+      // fija: con horario semanal, un sabado corto vale menos que un lunes.
+      let minutosEsperados = 0;
       let diasLaborables = 0;   // dias esperados a trabajar (no descanso, no vacacion/pg/in)
       let diasTrabajados = 0;   // dias con entrada registrada
       let faltas = 0, vac = 0, pg = 0, inc = 0, fj = 0;
       let minutosTrab = 0, minutosRet = 0;
       dias.forEach(fecha => {
         const dow = new Date(fecha+'T12:00:00').getDay();
-        const esDescanso = descanso.includes(dow);
+        const esDescanso = horarioDelDia(e, dow).descansa;
         const sol = solByEmp[e.id]?.[fecha];
         const aj  = ajusByEmp[e.id]?.[fecha];
         const reg = regByEmp[e.id]?.[fecha];
@@ -1039,6 +1092,7 @@ router.get('/productividad', verProductividad, async (req, res) => {
         else if (esDescanso) cod = 'D';
         else cod = 'F';
 
+        if (['A','F','FJ'].includes(cod)) minutosEsperados += jornadaDelDia(e, dow);
         if (cod === 'A')  { diasTrabajados++; diasLaborables++; }
         else if (cod === 'F') { faltas++; diasLaborables++; }
         else if (cod === 'FJ') { fj++; diasLaborables++; }
@@ -1049,7 +1103,10 @@ router.get('/productividad', verProductividad, async (req, res) => {
         if (reg && reg.minutos_trabajados) minutosTrab += parseInt(reg.minutos_trabajados)||0;
         if (reg && reg.minutos_retardo)    minutosRet  += parseInt(reg.minutos_retardo)||0;
       });
-      const horasEsperadas = (diasLaborables * jornadaMin) / 60;
+      const horasEsperadas = minutosEsperados / 60;
+      // Se conserva para la pantalla, que muestra "jornada diaria": con horario
+      // semanal es un promedio de los dias que si se esperaban.
+      const jornadaMin = diasLaborables ? Math.round(minutosEsperados / diasLaborables) : 0;
       const horasLaboradas = minutosTrab / 60;
       const productividad  = horasEsperadas > 0 ? Math.min(200, (horasLaboradas / horasEsperadas) * 100) : 0;
       return {
@@ -1102,7 +1159,7 @@ router.get('/productividad-por-dia', async (req, res) => {
     if (empleado_id) { paramsE.push(empleado_id); whereE += ` AND id=$${paramsE.length}`; }
     const emps = await query(
       `SELECT id, nombre, numero_colaborador, puesto,
-        hora_entrada_esperada, hora_salida_esperada, dias_descanso
+        hora_entrada_esperada, hora_salida_esperada, dias_descanso, horario_semanal
        FROM fac_empleados ${whereE} ORDER BY nombre`, paramsE);
 
     const regs = await query(
@@ -1148,9 +1205,8 @@ router.get('/productividad-por-dia', async (req, res) => {
       let horasEsp = 0, horasLab = 0, empEsperados = 0, empTrabajados = 0;
       let faltas = 0, retardoMin = 0, ausencias = 0;
       emps.rows.forEach(e => {
-        const descanso = Array.isArray(e.dias_descanso) && e.dias_descanso.length ? e.dias_descanso : [0];
-        const esDesc = descanso.includes(dow);
-        const jornadaMin = Math.max(0, parseHora(e.hora_salida_esperada) - parseHora(e.hora_entrada_esperada));
+        const esDesc = horarioDelDia(e, dow).descansa;
+        const jornadaMin = jornadaDelDia(e, dow);
         const sol = solByEmpDia[e.id]?.[fecha];
         const aj  = ajusByEmpDia[e.id]?.[fecha];
         const reg = regByEmpDia[e.id]?.[fecha];
@@ -1205,7 +1261,7 @@ router.get('/empleados', async (req, res) => {
       SELECT id, nombre, puesto, departamento, numero_colaborador,
         pin_checador,
         (pin_checador IS NOT NULL AND pin_checador != '') AS tiene_pin,
-        hora_entrada_esperada, hora_salida_esperada, dias_descanso,
+        hora_entrada_esperada, hora_salida_esperada, dias_descanso, horario_semanal,
         COALESCE(tolerancia_min, 0) AS tolerancia_min
       FROM fac_empleados WHERE activo=TRUE ORDER BY nombre
     `);
@@ -1248,7 +1304,7 @@ router.post('/entrada', async (req, res) => {
     }
 
     const emp = await query(
-      `SELECT id, nombre, pin_checador, hora_entrada_esperada, dias_descanso,
+      `SELECT id, nombre, pin_checador, hora_entrada_esperada, dias_descanso, horario_semanal,
               COALESCE(tolerancia_min, 0) AS tolerancia_min
        FROM fac_empleados WHERE id=$1 AND activo=TRUE`,
       [empleado_id]
@@ -1270,9 +1326,9 @@ router.post('/entrada', async (req, res) => {
     const ahora = new Date(`${hoy}T${horaAhora}`);
     const diaSemana = ahora.getDay(); // 0=Dom ... 6=Sáb
 
-    // Verificar si hoy es día de descanso
-    const diasDescanso = new Set(String(emp.rows[0].dias_descanso||'').split(',').filter(x=>x!=='').map(x=>parseInt(x)));
-    const esDescanso = diasDescanso.has(diaSemana);
+    // Horario que le toca hoy: puede ser distinto por dia de la semana
+    const horarioHoy = horarioDelDia(emp.rows[0], diaSemana);
+    const esDescanso = horarioHoy.descansa;
 
     // Verificar si hoy está dentro de una solicitud de vacaciones aprobada
     const vac = await query(
@@ -1286,12 +1342,11 @@ router.post('/entrada', async (req, res) => {
     // Calcular retardo (minutos) — NO aplica en descanso ni vacaciones
     // Se resta la tolerancia configurada del empleado (dentro de ese margen no cuenta como retardo)
     let minutosRetardo = 0;
-    if (!esDescanso && !enVacaciones && emp.rows[0].hora_entrada_esperada) {
-      const esperada = emp.rows[0].hora_entrada_esperada.toString().slice(0,5).split(':');
-      const min_esperado = parseInt(esperada[0])*60 + parseInt(esperada[1]);
-      const min_actual   = ahora.getHours()*60 + ahora.getMinutes();
-      const tolerancia   = parseInt(emp.rows[0].tolerancia_min) || 0;
-      const dif = min_actual - min_esperado;
+    const minEsperado = esDescanso ? null : minutosDe(horarioHoy.entrada);
+    if (!esDescanso && !enVacaciones && minEsperado != null) {
+      const min_actual = ahora.getHours()*60 + ahora.getMinutes();
+      const tolerancia = parseInt(emp.rows[0].tolerancia_min) || 0;
+      const dif = min_actual - minEsperado;
       minutosRetardo = dif > tolerancia ? dif : 0;
     }
 
@@ -1522,6 +1577,22 @@ router.delete('/:id', requireRol('admin'), async (req, res) => {
 router.put('/empleado/:id/pin', requireRol('admin'), async (req, res) => {
   try {
     const { pin, hora_entrada_esperada, hora_salida_esperada, dias_descanso, tolerancia_min } = req.body;
+    // Horario por dia. Se limpia aqui: solo dias 0-6 y horas con forma HH:MM, para
+    // que nunca llegue a la base algo que despues rompa el calculo del retardo.
+    // null explicito = descansa ese dia; enviar {} borra el horario por dia y
+    // vuelve al general.
+    let horarioSemanal = null;
+    if (req.body.horario_semanal && typeof req.body.horario_semanal === 'object') {
+      const hora = h => (/^\d{1,2}:\d{2}$/.test(String(h||'')) ? String(h).padStart(5,'0') : null);
+      horarioSemanal = {};
+      for (let d = 0; d <= 6; d++) {
+        if (!Object.prototype.hasOwnProperty.call(req.body.horario_semanal, String(d))) continue;
+        const v = req.body.horario_semanal[String(d)];
+        if (!v || !hora(v.e)) { horarioSemanal[String(d)] = null; continue; }
+        horarioSemanal[String(d)] = { e: hora(v.e), s: hora(v.s) };
+      }
+      if (!Object.keys(horarioSemanal).length) horarioSemanal = null;
+    }
     // Normalizar días descanso: string tipo "0,6"
     let dd = '';
     if (Array.isArray(dias_descanso)) dd = dias_descanso.join(',');
@@ -1534,13 +1605,15 @@ router.put('/empleado/:id/pin', requireRol('admin'), async (req, res) => {
          hora_salida_esperada=$3,
          dias_descanso=$4,
          tolerancia_min=$5,
+         horario_semanal=$6,
          actualizado_en=NOW()
-       WHERE id=$6`,
+       WHERE id=$7`,
       [(pin||'').trim() || null,
        hora_entrada_esperada || '09:00',
        hora_salida_esperada  || '18:00',
        dd,
        tol,
+       horarioSemanal ? JSON.stringify(horarioSemanal) : null,
        req.params.id]
     );
     res.json({ ok: true });
