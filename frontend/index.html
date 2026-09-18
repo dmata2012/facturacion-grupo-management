@@ -16559,14 +16559,28 @@ const ccPuedeCapturar = () => puedeO('cajaChica', NIVEL.CAPTURAR, canWrite());
 const ccPuedeEditar   = () => puedeO('cajaChica', NIVEL.EDITAR,   canWrite());
 const ccPuedeBorrar   = () => puedeO('cajaChica', NIVEL.TODO,     canAdmin());
 
+// ══ TIPO DE CAJA ══════════════════════════════════════════════
+// Hay dos formas de manejar efectivo y no son la misma:
+//
+//   chica     fondo fijo. Se autoriza un monto, se gasta y se repone hasta
+//             volver a ese monto. Importa cuanto falta para reponerlo.
+//   efectivo  caja abierta. Entra efectivo por depositos o cobros y sale por
+//             gastos. No hay monto objetivo ni reposicion; importa el saldo.
+//
+// Se comparte todo el motor —movimientos, comprobantes, permisos, historial— y
+// solo cambia lo que de verdad es distinto: los indicadores y las categorias de
+// entrada. Duplicar la pantalla partiria el efectivo en dos lugares y ninguno
+// cuadraria.
+const esCajaEfectivo = f => (f && f.tipo) === 'efectivo';
+
 async function cajaChica() {
   $('content').innerHTML = `
     <div class="page-header">
       <div class="page-header-left">
-        <div class="page-title">Caja Chica</div>
-        <div class="page-sub">Control de fondos, entradas y salidas</div>
+        <div class="page-title">Cajas y Efectivo</div>
+        <div class="page-sub">Caja chica de fondo fijo y cajas de efectivo abiertas</div>
       </div>
-      ${ccPuedeCapturar()?`<button class="btn bs" onclick="openFondoCC()">+ Nuevo fondo</button>`:''}
+      ${ccPuedeCapturar()?`<button class="btn bs" onclick="openFondoCC()">+ Nueva caja</button>`:''}
     </div>
     <div id="cc-kpis" style="margin-bottom:14px"></div>
     <div id="cc-body"><p class="empty">Cargando...</p></div>`;
@@ -16619,15 +16633,40 @@ async function loadFondosCC() {
         </div>`;
       return;
     }
-    $('cc-body').innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px">
-      ${data.map(f => {
+    $('cc-body').innerHTML = ccSeccionesFondos(data);
+  } catch(e) { $('cc-body').innerHTML = `<p class="empty">${e.message}</p>`; }
+}
+
+// Las dos clases de caja se listan por separado. Mezclarlas confunde: una se
+// repone hasta un monto autorizado y la otra no tiene monto objetivo, asi que
+// el mismo numero significa cosas distintas en cada una.
+function ccSeccionesFondos(data) {
+  const chicas    = data.filter(f => !esCajaEfectivo(f));
+  const efectivos = data.filter(f =>  esCajaEfectivo(f));
+  // Si solo se usa una clase, el encabezado sobra.
+  const dosTipos  = chicas.length > 0 && efectivos.length > 0;
+  const seccion = (titulo, sub, lista) => !lista.length ? '' : `
+    ${dosTipos ? `<div style="display:flex;align-items:baseline;gap:8px;margin:0 2px 8px">
+      <span style="font-size:12.5px;font-weight:900;color:var(--dark)">${titulo}</span>
+      <span style="font-size:11px;color:var(--muted)">${sub}</span>
+    </div>` : ''}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;margin-bottom:18px">
+      ${lista.map(ccTarjetaFondo).join('')}
+    </div>`;
+  return seccion('💵 Cajas de efectivo', 'Abiertas · sin reposición', efectivos)
+       + seccion('💼 Caja chica', 'Fondo fijo · se repone', chicas);
+}
+
+function ccTarjetaFondo(f) {
         const saldo = parseFloat(f.saldo_actual||0);
         const asignado = parseFloat(f.fondo_asignado||0);
         const pct = asignado > 0 ? Math.max(0, Math.min(100, Math.round((saldo/asignado)*100))) : 0;
         const bajoFondo = asignado > 0 && saldo < asignado * 0.25;
+        // Verde para el efectivo, azul para la caja chica: se distinguen de un
+        // vistazo sin tener que leer la etiqueta.
         const grad = !f.activo ? 'linear-gradient(135deg,#6b7280,#9ca3af)'
                    : bajoFondo ? 'linear-gradient(135deg,#d97706,#fbbf24)'
+                   : esCajaEfectivo(f) ? 'linear-gradient(135deg,#059669,#10b981)'
                    : 'linear-gradient(135deg,#0891b2,#06b6d4)';
         return `
         <div style="background:#fff;border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.04);cursor:pointer;transition:all .2s"
@@ -16641,7 +16680,7 @@ async function loadFondosCC() {
                 : `<div style="position:absolute;top:10px;right:12px;width:56px;height:56px;display:flex;align-items:center;justify-content:center;font-size:32px;background:rgba(255,255,255,.18);border-radius:50%;border:2.5px solid rgba(255,255,255,.5);backdrop-filter:blur(4px)">${f.icono}</div>`
             ) : ''}
             <div style="padding-right:${f.icono?'72px':'0'}">
-              <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">${f.activo?'💼 Activo':'📦 Inactivo'}</div>
+              <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">${!f.activo?'📦 Inactivo':esCajaEfectivo(f)?'💵 Caja de efectivo':'💼 Caja chica'}</div>
               <div style="font-size:16px;font-weight:900;margin-top:2px">${f.nombre}</div>
               ${f.departamento?`<div style="font-size:11px;opacity:.88;margin-top:2px">${f.departamento}${f.responsable?' · '+f.responsable:''}</div>`:f.responsable?`<div style="font-size:11px;opacity:.88;margin-top:2px">${f.responsable}</div>`:''}
             </div>
@@ -16674,9 +16713,6 @@ async function loadFondosCC() {
             <div style="text-align:center;font-size:10px;color:var(--muted);margin-top:6px">${f.total_movimientos||0} movimiento${f.total_movimientos!=1?'s':''}</div>
           </div>
         </div>`;
-      }).join('')}
-    </div>`;
-  } catch(e) { $('cc-body').innerHTML = `<p class="empty">${e.message}</p>`; }
 }
 
 function onIconoCCFile(input) {
@@ -16719,11 +16755,33 @@ function quitarIconoCC() {
 
 function openFondoCC(id) {
   const f = id ? (window._ccFondos||[]).find(x=>x.id===id) : {};
+  const tipoAct = esCajaEfectivo(f) ? 'efectivo' : 'chica';
   $('modal-cc-fondo-body').innerHTML = `
-    <h4>${id?'Editar':'Nuevo'} Fondo de Caja Chica</h4>
+    <h4>${id?'Editar':'Nueva'} caja</h4>
+    <div style="background:#f8fafc;border:1.5px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.6px;margin-bottom:8px">Tipo de caja</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(228px,1fr));gap:8px">
+        <label id="cf-tipo-chica" style="display:block;cursor:pointer;background:#fff;border:2px solid var(--border);border-radius:9px;padding:10px 12px;transition:all .15s">
+          <div style="display:flex;align-items:center;gap:7px;font-weight:800;font-size:13px;color:var(--dark)">
+            <input type="radio" name="cf-tipo" value="chica" ${tipoAct==='chica'?'checked':''} onchange="ccTipoCajaCambio()"> 💼 Caja chica
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.45">
+            Fondo fijo: se autoriza un monto, se gasta y se repone hasta volver a ese monto.
+          </div>
+        </label>
+        <label id="cf-tipo-efectivo" style="display:block;cursor:pointer;background:#fff;border:2px solid var(--border);border-radius:9px;padding:10px 12px;transition:all .15s">
+          <div style="display:flex;align-items:center;gap:7px;font-weight:800;font-size:13px;color:var(--dark)">
+            <input type="radio" name="cf-tipo" value="efectivo" ${tipoAct==='efectivo'?'checked':''} onchange="ccTipoCajaCambio()"> 💵 Caja de efectivo
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.45">
+            Abierta: entra efectivo por depósitos o cobros y sale por gastos. No se repone.
+          </div>
+        </label>
+      </div>
+    </div>
     <div class="fg">
       <div class="fi full"><label>Nombre *</label>
-        <input id="cf-nombre" placeholder="Ej: Caja chica administración" value="${f.nombre||''}">
+        <input id="cf-nombre" placeholder="Ej: Caja general de efectivo" value="${f.nombre||''}">
       </div>
       <div class="fi"><label>Responsable</label>
         <input id="cf-resp" placeholder="Nombre" value="${f.responsable||''}">
@@ -16731,7 +16789,7 @@ function openFondoCC(id) {
       <div class="fi"><label>Departamento</label>
         <input id="cf-dep" placeholder="Ej: Administración" value="${f.departamento||''}">
       </div>
-      <div class="fi"><label>Fondo asignado</label>
+      <div class="fi" id="cf-asig-wrap"><label>Fondo asignado</label>
         <input type="text" inputmode="decimal" id="cf-asig" oninput="ensureNum(this)" value="${f.fondo_asignado||''}" placeholder="0.00">
       </div>
       <div class="fi"><label>Saldo inicial</label>
@@ -16768,6 +16826,23 @@ function openFondoCC(id) {
       <button class="btn bs" onclick="saveFondoCC(${id||'null'})">💾 Guardar</button>
     </div>`;
   openModal('modal-cc-fondo');
+  ccTipoCajaCambio();
+}
+
+// El fondo asignado solo existe en la caja chica. En una caja abierta no hay
+// monto objetivo, y dejar el campo a la vista invita a llenarlo con algo que
+// despues encenderia los avisos de reembolso.
+function ccTipoCajaCambio() {
+  const tipo = document.querySelector('input[name="cf-tipo"]:checked')?.value || 'chica';
+  const wrap = $('cf-asig-wrap');
+  if (wrap) wrap.style.display = tipo === 'efectivo' ? 'none' : '';
+  ['chica','efectivo'].forEach(t => {
+    const lbl = $(`cf-tipo-${t}`);
+    if (!lbl) return;
+    const activo = t === tipo;
+    lbl.style.borderColor = activo ? 'var(--primary)' : 'var(--border)';
+    lbl.style.background  = activo ? '#eff6ff' : '#fff';
+  });
 }
 
 async function saveFondoCC(id) {
@@ -16779,7 +16854,8 @@ async function saveFondoCC(id) {
     saldo_inicial    : $('cf-sini').value,
     notas            : $('cf-notas').value,
     clave_movimientos: $('cf-clave').value,
-    icono            : $('cf-icono')?.value || ''
+    icono            : $('cf-icono')?.value || '',
+    tipo             : document.querySelector('input[name="cf-tipo"]:checked')?.value || 'chica'
   };
   if (!body.nombre) return toast('Nombre requerido.', 'warn');
   try {
@@ -16818,20 +16894,28 @@ function renderDetalleFondoCC() {
   if (!f) return;
   const k = f.kpi || {};
 
-  // Cálculos de reembolso
+  // Cálculos de reembolso: solo aplican a la caja chica de fondo fijo.
+  const esEf     = esCajaEfectivo(f);
   const saldo    = parseFloat(k.saldo_actual)   || 0;
-  const asignado = parseFloat(f.fondo_asignado) || 0;
+  const asignado = esEf ? 0 : (parseFloat(f.fondo_asignado) || 0);
   const reembolsosPendientes = (f.movimientos||[])
     .filter(m => m.tipo === 'salida' && m.tipo_gasto === 'Reembolso pendiente de caja')
     .reduce((a,m) => a + parseFloat(m.monto||0), 0);
   const reembolsoBruto = Math.max(0, asignado - saldo);
   const reembolso = Math.max(0, reembolsoBruto - reembolsosPendientes);
   const pct = asignado > 0 ? Math.max(0, Math.min(100, (saldo/asignado)*100)) : 0;
-  const estado = asignado === 0 ? {label:'Sin fondo asignado', color:'#6b7280', bg:'#f3f4f6', accent:'#9ca3af'}
-               : pct >= 80      ? {label:'✅ Fondo completo',   color:'#166534', bg:'#dcfce7', accent:'#16a34a'}
-               : pct >= 40      ? {label:'⚠️ Reembolso pronto', color:'#92400e', bg:'#fef3c7', accent:'#d97706'}
-               : pct >= 10      ? {label:'🚨 Reembolso urgente',color:'#991b1b', bg:'#fee2e2', accent:'#dc2626'}
-                                : {label:'🚨 Fondo casi agotado',color:'#991b1b',bg:'#fee2e2',accent:'#dc2626'};
+  // En una caja abierta no existe "fondo completo": lo que se vigila es que haya
+  // efectivo y que el saldo nunca quede negativo, porque un saldo negativo
+  // significa que se registro una salida sin el deposito que la respalda.
+  const estado = esEf
+    ? (saldo  >  0 ? {label:'💵 Con efectivo',  color:'#166534', bg:'#dcfce7', accent:'#16a34a', calma:true}
+    :  saldo === 0 ? {label:'Caja en ceros',    color:'#6b7280', bg:'#f3f4f6', accent:'#9ca3af', calma:true}
+    :                {label:'🚨 Saldo negativo',color:'#991b1b', bg:'#fee2e2', accent:'#dc2626', pulsa:true})
+    : asignado === 0 ? {label:'Sin fondo asignado', color:'#6b7280', bg:'#f3f4f6', accent:'#9ca3af', calma:true}
+    : pct >= 80      ? {label:'✅ Fondo completo',   color:'#166534', bg:'#dcfce7', accent:'#16a34a', calma:true}
+    : pct >= 40      ? {label:'⚠️ Reembolso pronto', color:'#92400e', bg:'#fef3c7', accent:'#d97706'}
+    : pct >= 10      ? {label:'🚨 Reembolso urgente',color:'#991b1b', bg:'#fee2e2', accent:'#dc2626', pulsa:true}
+                     : {label:'🚨 Fondo casi agotado',color:'#991b1b',bg:'#fee2e2',accent:'#dc2626', pulsa:true};
 
   // Gastos por período (sobre movimientos ya cargados)
   const hoy = new Date().toISOString().slice(0,10);
@@ -16865,7 +16949,7 @@ function renderDetalleFondoCC() {
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${ccPuedeEditar()?`<button class="btn bo bsm" onclick="openFondoCC(${f.id})">✏️ Editar fondo</button>`:''}
         ${canAdmin()?`<button class="btn bo bsm" onclick="openPermisosCC(${f.id})">👥 Permisos</button>`:''}
-        <button class="btn bsm" style="background:linear-gradient(135deg,#d97706,#f59e0b);color:#fff;border:none;font-weight:800;box-shadow:0 2px 8px rgba(217,119,6,.3)" onclick="solicitarReembolsoCC()" title="Generar solicitud formal de reembolso para tesoreria (con desglose y comprobantes)">💰 Solicitar Reembolso</button>
+        ${esEf?'':`<button class="btn bsm" style="background:linear-gradient(135deg,#d97706,#f59e0b);color:#fff;border:none;font-weight:800;box-shadow:0 2px 8px rgba(217,119,6,.3)" onclick="solicitarReembolsoCC()" title="Generar solicitud formal de reembolso para tesoreria (con desglose y comprobantes)">💰 Solicitar Reembolso</button>`}
         <button class="btn bg bsm" onclick="openInformeReembolsoCC()">📋 Generar informe</button>
         <button class="btn bg bsm" onclick="openReporteCategoriasCC()">📊 Por categoría</button>
         ${canAdmin()?`<button class="btn bd bsm" onclick="eliminarCajaCC(${f.id},'${(f.nombre||'').replace(/'/g,"\\'")}')" title="Eliminar caja permanentemente">🗑 Eliminar caja</button>`:''}
@@ -16880,16 +16964,23 @@ function renderDetalleFondoCC() {
       <!-- LUZ DE ESTADO (arriba, centrada) -->
       <div style="display:flex;align-items:center;justify-content:center;gap:12px;padding-bottom:14px;border-bottom:1px solid var(--border);margin-bottom:16px">
         <div style="position:relative;width:22px;height:22px;flex-shrink:0">
-          <div style="position:absolute;inset:0;border-radius:50%;background:${estado.accent};box-shadow:0 0 0 4px ${estado.bg}, 0 0 18px ${estado.accent}${estado.label.includes('Fondo completo')?'':', 0 0 32px '+estado.accent+'55'};${estado.label.includes('urgente')||estado.label.includes('agotado')?'animation:pulseLuz 1.4s ease-in-out infinite;':''}"></div>
+          <div style="position:absolute;inset:0;border-radius:50%;background:${estado.accent};box-shadow:0 0 0 4px ${estado.bg}, 0 0 18px ${estado.accent}${estado.calma?'':', 0 0 32px '+estado.accent+'55'};${estado.pulsa?'animation:pulseLuz 1.4s ease-in-out infinite;':''}"></div>
         </div>
         <div>
-          <div style="font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted)">Estado del fondo</div>
+          <div style="font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted)">${esEf?'Estado de la caja':'Estado del fondo'}</div>
           <div style="font-size:15px;font-weight:900;color:${estado.color};line-height:1.2">${estado.label}</div>
         </div>
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;align-items:stretch">
 
+        ${esEf ? `
+        <!-- Entradas de efectivo -->
+        <div style="text-align:center;background:#fff;padding:14px;border-radius:10px;border:1.5px solid #e5e7eb">
+          <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">📥 Entradas</div>
+          <div style="font-size:22px;font-weight:900;color:#166534;margin-top:2px">${fmt(k.total_entradas)}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">${k.n_entradas||0} depósito${k.n_entradas!=1?'s':''}</div>
+        </div>` : `
         <!-- Fondo Fijo Objetivo (editable) -->
         <div style="text-align:center;background:#fff;padding:14px;border-radius:10px;border:1.5px solid #e5e7eb;position:relative">
           <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">🎯 Fondo Fijo Objetivo</div>
@@ -16900,20 +16991,29 @@ function renderDetalleFondoCC() {
             style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;border:1.5px solid #e5e7eb;background:#fff;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:all .15s"
             onmouseover="this.style.background='var(--red-xs)';this.style.borderColor='var(--red)';this.style.color='var(--red)'"
             onmouseout="this.style.background='#fff';this.style.borderColor='#e5e7eb';this.style.color=''">✏️</button>`:''}
-        </div>
+        </div>`}
 
         <!-- Saldo Disponible -->
         <div style="text-align:center;background:#fff;padding:14px;border-radius:10px;border:2px solid ${estado.accent}">
-          <div style="font-size:10px;font-weight:800;color:${estado.color};text-transform:uppercase;letter-spacing:.6px">💵 Saldo Disponible</div>
+          <div style="font-size:10px;font-weight:800;color:${estado.color};text-transform:uppercase;letter-spacing:.6px">💵 ${esEf?'Efectivo en caja':'Saldo Disponible'}</div>
           <div style="font-size:28px;font-weight:900;color:${estado.accent};margin-top:2px">${fmt(saldo)}</div>
+          ${esEf ? `
+          <div style="font-size:10.5px;color:var(--muted);margin-top:5px">Entradas − salidas</div>` : `
           <div style="margin-top:6px">
             <div style="background:#f3f4f6;height:8px;border-radius:99px;overflow:hidden">
               <div style="height:100%;width:${pct}%;background:${estado.accent};border-radius:99px;transition:width .6s"></div>
             </div>
             <div style="font-size:11px;color:${estado.accent};font-weight:800;margin-top:3px">${pct.toFixed(0)}% del fondo</div>
-          </div>
+          </div>`}
         </div>
 
+        ${esEf ? `
+        <!-- Salidas de efectivo -->
+        <div style="text-align:center;background:#fff;padding:14px;border-radius:10px;border:1.5px solid #e5e7eb">
+          <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">📤 Salidas</div>
+          <div style="font-size:22px;font-weight:900;color:#991b1b;margin-top:2px">${fmt(k.total_salidas)}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">${k.n_salidas||0} gasto${k.n_salidas!=1?'s':''}</div>
+        </div>` : `
         <!-- Reembolso -->
         <div style="text-align:center;background:${estado.bg};padding:14px;border-radius:10px;border:2px solid ${estado.accent}">
           <div style="font-size:10px;font-weight:800;color:${estado.color};text-transform:uppercase;letter-spacing:.6px">💰 Monto a Reembolsar</div>
@@ -16929,7 +17029,7 @@ function renderDetalleFondoCC() {
             💰 Registrar reembolso
           </button>` : reembolso === 0 && asignado > 0 ? `
           <div style="margin-top:8px;font-size:11px;font-weight:800;color:#16a34a">✅ Fondo al 100%</div>` : ''}
-        </div>
+        </div>`}
       </div>
     </div>
 
@@ -18213,8 +18313,12 @@ function openMovCC(tipo, id) {
   const hoy = new Date().toISOString().slice(0,10);
   const es = tipo === 'entrada';
   const saldoActual = parseFloat(f.kpi?.saldo_actual) || 0;
-  // Categorías separadas por tipo
-  const catsIngreso = ['Reposición','Reembolso','Ajuste','Devolución','Otros ingresos'];
+  // Categorías separadas por tipo. Las entradas dependen de qué clase de caja
+  // es: a la chica el dinero le entra porque se repone; a una caja de efectivo
+  // le entra porque se deposita o se cobra.
+  const catsIngreso = esCajaEfectivo(f)
+    ? ['Depósito de efectivo','Cobro de cliente','Venta en efectivo','Traspaso de otra caja','Ajuste','Otros ingresos']
+    : ['Reposición','Reembolso','Ajuste','Devolución','Otros ingresos'];
   const catsGasto   = ['Nóminas','Comisiones','Diligencias','Pago CFE','Pago Teléfono','Rentas','Mantenimiento','Seguros','Reparaciones','Estacionamiento','Papelería','Comidas','Transporte','Servicios','Insumos','Peajes','Regalos/Cortesías','Envíos/Mensajería','Suscripciones','Otros gastos'];
   const cats = es ? catsIngreso : catsGasto;
 

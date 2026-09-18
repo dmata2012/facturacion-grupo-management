@@ -15,6 +15,25 @@ router.use(verificarToken);
   catch (e) { console.warn('Migración tipo_gasto:', e.message); }
 })();
 
+// Hay dos formas de manejar efectivo y no son la misma:
+//
+//   'chica'    fondo fijo. Se autoriza un monto, se gasta, y se repone hasta
+//              volver al monto autorizado. El indicador que importa es cuanto
+//              falta para reponerlo.
+//   'efectivo' caja abierta. Entra efectivo (depositos, cobros) y sale (gastos).
+//              No hay monto objetivo ni reposicion: lo que importa es el saldo y
+//              el flujo del periodo.
+//
+// Los fondos que ya existen se quedan en 'chica' para que nadie vea cambiar su
+// pantalla.
+(async () => {
+  try { await query(`ALTER TABLE fac_caja_chica_fondos ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'chica'`); }
+  catch (e) { console.warn('Migración tipo de caja:', e.message); }
+})();
+
+const TIPOS_CAJA = ['chica', 'efectivo'];
+const tipoCaja = t => TIPOS_CAJA.includes(String(t || '').trim()) ? String(t).trim() : 'chica';
+
 // ══ COMPROBANTES (archivo) ══════════════════════════════════
 // Se guardan en la base de datos y no en la carpeta uploads/. En Render esa
 // carpeta vive dentro del contenedor y se borra en cada despliegue: un comprobante
@@ -211,11 +230,16 @@ router.post('/fondos', permiso('cajaChica', NIVEL.CAPTURAR), async (req, res) =>
   try {
     const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, notas, clave_movimientos, icono } = req.body;
     if (!nombre) return res.status(400).json({ error: 'Nombre requerido.' });
+    const tipo = tipoCaja(req.body.tipo);
+    // En una caja abierta no hay monto objetivo. Se guarda en cero y no en lo que
+    // venga, para que ningun calculo de reposicion se despierte solo despues.
+    const asignado = tipo === 'efectivo' ? 0 : (parseFloat(fondo_asignado) || 0);
     const r = await query(
-      `INSERT INTO fac_caja_chica_fondos(nombre,responsable,departamento,fondo_asignado,saldo_inicial,moneda,notas,clave_movimientos,icono,creado_por)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [nombre, responsable, departamento, parseFloat(fondo_asignado)||0, parseFloat(saldo_inicial)||0,
-       moneda||'MXN', notas, (clave_movimientos||'').trim() || null, (icono||'').trim() || null, req.usuario.id]
+      `INSERT INTO fac_caja_chica_fondos(nombre,responsable,departamento,fondo_asignado,saldo_inicial,moneda,notas,clave_movimientos,icono,tipo,creado_por)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [nombre, responsable, departamento, asignado, parseFloat(saldo_inicial)||0,
+       moneda||'MXN', notas, (clave_movimientos||'').trim() || null, (icono||'').trim() || null,
+       tipo, req.usuario.id]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -224,27 +248,34 @@ router.post('/fondos', permiso('cajaChica', NIVEL.CAPTURAR), async (req, res) =>
 router.put('/fondos/:id', permiso('cajaChica', NIVEL.EDITAR), async (req, res) => {
   try {
     const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, activo, notas, clave_movimientos, icono } = req.body;
+    // El tipo solo cambia si la pantalla lo manda; si no, se conserva el que tiene.
+    // Hay pantallas que editan un fondo sin saber de tipos (el lapiz del fondo
+    // fijo, por ejemplo) y no deben convertir la caja en otra cosa.
+    const actual = await query(`SELECT tipo FROM fac_caja_chica_fondos WHERE id=$1`, [req.params.id]);
+    if (!actual.rows.length) return res.status(404).json({ error: 'Caja no encontrada.' });
+    const tipo = req.body.tipo === undefined ? tipoCaja(actual.rows[0].tipo) : tipoCaja(req.body.tipo);
+    const asignado = tipo === 'efectivo' ? 0 : (parseFloat(fondo_asignado) || 0);
     // Si clave_movimientos NO viene en el body, conservar la existente
     if (clave_movimientos === undefined) {
       await query(
         `UPDATE fac_caja_chica_fondos SET
            nombre=$1, responsable=$2, departamento=$3,
            fondo_asignado=$4, saldo_inicial=$5, moneda=$6,
-           activo=$7, notas=$8, icono=$9, actualizado_en=NOW()
-         WHERE id=$10`,
-        [nombre, responsable, departamento, parseFloat(fondo_asignado)||0, parseFloat(saldo_inicial)||0,
-         moneda||'MXN', activo !== false, notas, (icono||'').trim() || null, req.params.id]
+           activo=$7, notas=$8, icono=$9, tipo=$10, actualizado_en=NOW()
+         WHERE id=$11`,
+        [nombre, responsable, departamento, asignado, parseFloat(saldo_inicial)||0,
+         moneda||'MXN', activo !== false, notas, (icono||'').trim() || null, tipo, req.params.id]
       );
     } else {
       await query(
         `UPDATE fac_caja_chica_fondos SET
            nombre=$1, responsable=$2, departamento=$3,
            fondo_asignado=$4, saldo_inicial=$5, moneda=$6,
-           activo=$7, notas=$8, clave_movimientos=$9, icono=$10, actualizado_en=NOW()
-         WHERE id=$11`,
-        [nombre, responsable, departamento, parseFloat(fondo_asignado)||0, parseFloat(saldo_inicial)||0,
+           activo=$7, notas=$8, clave_movimientos=$9, icono=$10, tipo=$11, actualizado_en=NOW()
+         WHERE id=$12`,
+        [nombre, responsable, departamento, asignado, parseFloat(saldo_inicial)||0,
          moneda||'MXN', activo !== false, notas, (clave_movimientos||'').trim() || null,
-         (icono||'').trim() || null, req.params.id]
+         (icono||'').trim() || null, tipo, req.params.id]
       );
     }
     res.json({ ok: true });
