@@ -16662,11 +16662,11 @@ function ccTarjetaFondo(f) {
         const asignado = parseFloat(f.fondo_asignado||0);
         const pct = asignado > 0 ? Math.max(0, Math.min(100, Math.round((saldo/asignado)*100))) : 0;
         const bajoFondo = asignado > 0 && saldo < asignado * 0.25;
-        // Verde para el efectivo, azul para la caja chica: se distinguen de un
+        // Morado para el efectivo, azul para la caja chica: se distinguen de un
         // vistazo sin tener que leer la etiqueta.
         const grad = !f.activo ? 'linear-gradient(135deg,#6b7280,#9ca3af)'
                    : bajoFondo ? 'linear-gradient(135deg,#d97706,#fbbf24)'
-                   : esCajaEfectivo(f) ? 'linear-gradient(135deg,#059669,#10b981)'
+                   : esCajaEfectivo(f) ? 'linear-gradient(135deg,#7c3aed,#a855f7)'
                    : 'linear-gradient(135deg,#0891b2,#06b6d4)';
         return `
         <div style="background:#fff;border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.04);cursor:pointer;transition:all .2s"
