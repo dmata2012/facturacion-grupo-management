@@ -915,8 +915,26 @@ function confirm2(msg) {
   return new Promise(res => res(window.confirm(msg)));
 }
 
-function closeModal(id) { $(id).classList.remove('open'); }
-function openModal(id)  { $(id).classList.add('open'); }
+// Un modal que se abre sobre otro tiene que quedar encima. Todos los .overlay
+// comparten z-index en la hoja de estilos, asi que sin esto gana el que va
+// despues en el documento: abrir "Editar fondo" desde el detalle de la caja
+// dejaba el formulario DEBAJO del detalle, invisible y sin poder usarse.
+function openModal(id) {
+  const el = $(id);
+  if (!el) return;
+  const otros = [...document.querySelectorAll('.overlay.open')]
+    .filter(o => o !== el)
+    .map(o => parseInt(o.style.zIndex) || 200);
+  if (otros.length) el.style.zIndex = Math.max(...otros) + 10;
+  el.classList.add('open');
+}
+
+function closeModal(id) {
+  const el = $(id);
+  if (!el) return;
+  el.classList.remove('open');
+  el.style.zIndex = '';   // vuelve al de la hoja de estilos para la proxima vez
+}
 
 // Cerrar modal al hacer clic fuera
 document.querySelectorAll('.overlay').forEach(ov => {
