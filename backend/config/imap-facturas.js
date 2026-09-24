@@ -91,7 +91,7 @@ function parsearCFDI(xmlText) {
 const limpiar    = s => (s || '').toString().trim().substring(0, 200) || null;
 const limpiarRFC = s => (s || '').toString().trim().toUpperCase().substring(0, 13);
 
-async function importarFactura(item, creadoPor, archivoXml, archivoPdf) {
+async function importarFactura(item, creadoPor, archivoXml, archivoPdf, lote) {
   // Duplicado por UUID
   if (item.uuid) {
     const dup = await query('SELECT id FROM fac_facturas WHERE uuid_cfdi=$1', [item.uuid]);
@@ -131,12 +131,13 @@ async function importarFactura(item, creadoPor, archivoXml, archivoPdf) {
 
   await query(
     `INSERT INTO fac_facturas(cliente_id,empresa_receptora_id,folio,uuid_cfdi,tipo_comprobante,
-       fecha_emision,subtotal,iva,total,moneda,concepto,rfc_detectado,archivo_xml,archivo_pdf,creado_por)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+       fecha_emision,subtotal,iva,total,moneda,concepto,rfc_detectado,archivo_xml,archivo_pdf,creado_por,
+       lote_importacion)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
     [cliente_id || null, empresa_receptora_id || null, limpiar(item.folio), item.uuid || null,
      item.tipo || 'I', item.fecha_emision, parseFloat(item.subtotal) || 0, parseFloat(item.iva) || 0,
      parseFloat(item.total) || 0, item.moneda || 'MXN', limpiar(item.concepto), rfcReceptor || null,
-     archivoXml || null, archivoPdf || null, creadoPor]
+     archivoXml || null, archivoPdf || null, creadoPor, lote || null]
   );
   return 'creada';
 }
@@ -167,6 +168,9 @@ async function revisarCorreo() {
              duplicadas: 0, errores: 0, detalles: [], buzon: IMAP_USER };
   }
   enCurso = true;
+  // Una tanda por revision del buzon: lo que entro en la misma pasada se puede
+  // deshacer junto si venia mal.
+  const lote = 'C' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
   // Usuario del sistema para creado_por (primer admin activo)
   let creadoPor = null;
@@ -225,7 +229,7 @@ async function revisarCorreo() {
             const nombreXml = guardarAdjunto(xmlAtt, '.xml');
             const nombrePdf = pdfs.length ? guardarAdjunto(pdfs[0], '.pdf') : null;
 
-            const r = await importarFactura(p.datos, creadoPor, nombreXml, nombrePdf);
+            const r = await importarFactura(p.datos, creadoPor, nombreXml, nombrePdf, lote);
             if (r === 'creada') creadas++;
             else if (r === 'duplicada') duplicadas++;
           }

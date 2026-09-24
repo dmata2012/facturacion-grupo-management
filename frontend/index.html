@@ -6403,6 +6403,8 @@ async function facturas(resetPage = true) {
       <button class="btn bo" id="fac-correo-btn" onclick="revisarCorreoFacturas()"
               title="Busca facturas nuevas en el buzón y las da de alta">📬 Revisar correo</button>
       <button class="btn bo" onclick="openImportarXML()">📥 Importar XMLs</button>
+      ${canAdmin() ? `<button class="btn bo" onclick="openLotesFac()"
+              title="Ver las cargas recientes y deshacer una completa">📦 Cargas</button>` : ''}
       <button class="btn bs" onclick="openFactura()">+ Nueva factura</button></div>` : ''}
   </div>
   <div class="card">
@@ -6426,8 +6428,11 @@ async function facturas(resetPage = true) {
         <option value="otro">⚠ Otra respuesta</option>
         <option value="sin_validar">⏳ Sin validar</option>
       </select>
-      <input id="f-desde" type="date" onchange="filtrarFacturas()">
-      <input id="f-hasta" type="date" onchange="filtrarFacturas()">
+      <input id="f-desde" type="date" onchange="filtrarFacturas()" title="Fecha del comprobante, desde">
+      <input id="f-hasta" type="date" onchange="filtrarFacturas()" title="Fecha del comprobante, hasta">
+      <input id="f-cargadas" type="date" onchange="filtrarFacturas()"
+             title="Solo las que se cargaron al sistema ese día (no la fecha del comprobante)"
+             style="border-color:#c7d2fe;background:#eef2ff">
       <button class="btn bo bsm" onclick="limpiarFiltrosFac()" title="Limpiar filtros">✕ Limpiar</button>
       <button class="btn bo bsm" onclick="exportarFacturas()">⬇ Excel</button>
     </div>
@@ -6471,6 +6476,7 @@ function limpiarFiltrosFac() {
   if ($('f-emisora')) $('f-emisora').value = '';
   if ($('f-cliente')) $('f-cliente').value = '';
   if ($('f-sat')) $('f-sat').value = '';
+  if ($('f-cargadas')) $('f-cargadas').value = '';
   _facPage = 1;
   loadFacturas();
 }
@@ -6530,6 +6536,248 @@ function mostrarErroresCorreo(r) {
   openModal('modal-gt-cats');
 }
 
+// ══ BORRAR FACTURAS EN BLOQUE ═══════════════════════════════
+// Una carga equivocada de cien facturas no se deshace de una en una. Pero
+// borrar facturas toca datos fiscales, asi que se conservan las mismas rejas
+// que tiene el borrado de una sola y se agrega una mas:
+//
+//   · solo administrador
+//   · nunca una factura CUADRADA (la pantalla ya lo prohibe de una en una)
+//   · las que tienen pagos se saltan por omision, porque borrar la factura se
+//     lleva sus pagos por cascada
+//
+// La seleccion se limita a la pagina que se esta viendo. Con 50 renglones por
+// pagina, arrastrar una seleccion invisible entre paginas y borrarla de golpe
+// es justo la forma de repetir el error que se esta tratando de arreglar.
+window._facSel = window._facSel || new Set();
+
+function facSelTodas(marcar) {
+  document.querySelectorAll('#fac-table .fac-sel').forEach(cb => {
+    cb.checked = marcar;
+    const id = parseInt(cb.dataset.id);
+    if (marcar) window._facSel.add(id); else window._facSel.delete(id);
+  });
+  facPintarBarraSel();
+}
+
+function facSelCambio() {
+  document.querySelectorAll('#fac-table .fac-sel').forEach(cb => {
+    const id = parseInt(cb.dataset.id);
+    if (cb.checked) window._facSel.add(id); else window._facSel.delete(id);
+  });
+  facPintarBarraSel();
+}
+
+// Lo seleccionado Y visible. Se filtra contra la pagina en pantalla para que
+// nunca se borre algo que el usuario no tiene enfrente.
+function facSeleccionVisible() {
+  const enPantalla = new Set(
+    [...document.querySelectorAll('#fac-table .fac-sel')].map(cb => parseInt(cb.dataset.id)));
+  return (window._facData?.data || [])
+    .filter(f => enPantalla.has(f.id) && window._facSel.has(f.id));
+}
+
+function facLimpiarSel() {
+  window._facSel.clear();
+  document.querySelectorAll('#fac-table .fac-sel').forEach(cb => { cb.checked = false; });
+  facPintarBarraSel();
+}
+
+function facPintarBarraSel() {
+  const barra = $('fac-barra-sel');
+  if (!barra) return;
+  const sel = facSeleccionVisible();
+  const cbTodas = $('fac-sel-todas');
+  if (cbTodas) {
+    const total = document.querySelectorAll('#fac-table .fac-sel').length;
+    cbTodas.checked = total > 0 && sel.length === total;
+    cbTodas.indeterminate = sel.length > 0 && sel.length < total;
+  }
+  if (!sel.length) { barra.innerHTML = ''; return; }
+  const monto    = sel.reduce((a, f) => a + (parseFloat(f.total) || 0), 0);
+  const conPagos = sel.filter(f => parseFloat(f.cobrado || 0) > 0);
+  barra.innerHTML = `
+    <div class="card" style="margin-bottom:12px;background:linear-gradient(135deg,#7f1d1d,#b91c1c);color:#fff;
+         display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div style="flex:1;min-width:190px">
+        <div style="font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.2px;opacity:.9">Seleccionadas</div>
+        <div style="font-size:22px;font-weight:900;line-height:1.15">
+          ${sel.length} factura${sel.length != 1 ? 's' : ''} · ${fmt(monto)}</div>
+        ${conPagos.length ? `<div style="font-size:11.5px;margin-top:3px;background:rgba(255,255,255,.18);
+             border-radius:6px;padding:3px 8px;display:inline-block">
+          ⚠ ${conPagos.length} ya tiene${conPagos.length != 1 ? 'n' : ''} pagos registrados</div>` : ''}
+      </div>
+      <button class="btn bo bsm" style="height:34px" onclick="facLimpiarSel()">✕ Quitar</button>
+      <button class="btn bsm" style="height:34px;background:#fff;color:#b91c1c;border:none;font-weight:900"
+              onclick="facBorrarSeleccion()">🗑 Eliminar seleccionadas</button>
+    </div>`;
+}
+
+async function facBorrarSeleccion() {
+  const sel = facSeleccionVisible();
+  if (!sel.length) return;
+  const monto    = sel.reduce((a, f) => a + (parseFloat(f.total) || 0), 0);
+  const conPagos = sel.filter(f => parseFloat(f.cobrado || 0) > 0);
+  if (!await confirm2(
+      `¿Eliminar ${sel.length} factura${sel.length != 1 ? 's' : ''}?\n\n` +
+      `${fmt(monto)} en total\n\n` +
+      (conPagos.length
+        ? `${conPagos.length} tiene${conPagos.length != 1 ? 'n' : ''} pagos registrados y se van a SALTAR.\n`
+        : '') +
+      `Esto no se puede deshacer.`)) return;
+  await facEjecutarBorrado(sel.map(f => f.id), false);
+}
+
+// El borrado de verdad, compartido por la seleccion a mano y por deshacer una
+// carga completa.
+async function facEjecutarBorrado(ids, incluirConPagos) {
+  try {
+    const r = await api('/facturas/eliminar-varias', {
+      method: 'POST',
+      body  : JSON.stringify({ ids, incluir_con_pagos: !!incluirConPagos })
+    });
+    window._facSel.clear();
+    const partes = [`${r.borradas} eliminada${r.borradas != 1 ? 's' : ''}`];
+    if (r.pagos_borrados)   partes.push(`${r.pagos_borrados} pago${r.pagos_borrados != 1 ? 's' : ''} borrado${r.pagos_borrados != 1 ? 's' : ''}`);
+    if (r.omitidas?.length) partes.push(`${r.omitidas.length} sin tocar`);
+    toast(partes.join(' · '), r.omitidas?.length ? 'warn' : 'ok');
+    await loadFacturas();
+    if (r.omitidas?.length) facMostrarOmitidas(r, ids);
+    return r;
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// Decir "se omitieron 7" sin decir cuales ni por que obliga a ir a buscarlas a
+// mano. Se listan, y si fue por pagos se ofrece el camino para incluirlas.
+function facMostrarOmitidas(r, idsOriginales) {
+  const porPagos = r.omitidas.filter(o => /pago/i.test(o.motivo));
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#92400e,#d97706);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Borrado en bloque</div>
+      <div style="font-size:19px;font-weight:900;margin-top:3px">
+        ${r.borradas} eliminada${r.borradas != 1 ? 's' : ''} · ${r.omitidas.length} sin tocar</div>
+    </div>
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:10px;line-height:1.5">
+      Estas no se eliminaron. Cada una dice por qué:
+    </div>
+    <div class="tscroll" style="max-height:44vh;overflow:auto">
+      ${r.omitidas.map(o => `
+        <div style="border-bottom:1px solid var(--border);padding:8px 2px;display:flex;gap:10px;align-items:baseline">
+          <div style="font-weight:800;font-size:12.5px;min-width:90px">${o.folio || '#' + o.id}</div>
+          <div style="font-size:12px;color:#b45309">${o.motivo}</div>
+        </div>`).join('')}
+    </div>
+    ${porPagos.length ? `
+    <div style="margin-top:12px;background:#fef2f2;border:1.5px solid #fecaca;border-radius:9px;padding:11px 13px">
+      <div style="font-size:12.5px;color:#991b1b;line-height:1.55">
+        <strong>${porPagos.length} se saltó${porPagos.length != 1 ? 'aron' : ''} por tener pagos.</strong>
+        Si las eliminas, <strong>también se borran esos pagos</strong> y el dinero
+        cobrado deja de aparecer en reportes y estados de cuenta.
+      </div>
+      <button class="btn bd bsm" style="margin-top:9px"
+              onclick="facBorrarIncluyendoPagos(${JSON.stringify(porPagos.map(o => o.id)).replace(/"/g, '&quot;')})">
+        🗑 Eliminarlas de todos modos, con sus pagos
+      </button>
+    </div>` : ''}
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button>
+    </div>`;
+  openModal('modal-gt-cats');
+}
+
+async function facBorrarIncluyendoPagos(ids) {
+  if (!await confirm2(
+      `¿Eliminar ${ids.length} factura${ids.length != 1 ? 's' : ''} CON sus pagos?\n\n` +
+      `Los pagos registrados en ellas se borran también. El dinero cobrado va a ` +
+      `desaparecer de los reportes.\n\nEsto no se puede deshacer.`)) return;
+  closeModal('modal-gt-cats');
+  await facEjecutarBorrado(ids, true);
+}
+
+// ══ CARGAS (LOTES DE IMPORTACIÓN) ═══════════════════════════
+// Agrupa las facturas por la tanda en que entraron para poder deshacer una
+// importacion equivocada completa, sin ir palomeando pagina por pagina.
+async function openLotesFac() {
+  $('modal-gt-cats-body').innerHTML = '<h4>Cargas recientes</h4><p class="empty">Cargando…</p>';
+  openModal('modal-gt-cats');
+  try {
+    const lotes = await api('/facturas/lotes');
+    window._facLotes = lotes;
+    $('modal-gt-cats-body').innerHTML = `
+      <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#1e293b,#475569);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Facturas</div>
+        <div style="font-size:19px;font-weight:900;margin-top:3px">Cargas recientes</div>
+        <div style="font-size:11.5px;opacity:.9;margin-top:4px">
+          Cada renglón es una tanda de facturas que entró junta.</div>
+      </div>
+      ${!lotes.length ? '<p class="empty">Todavía no hay cargas registradas.</p>' : `
+      <div class="tscroll" style="max-height:52vh;overflow:auto">
+        <table><thead><tr>
+          <th>Cuándo</th><th>Quién</th><th style="text-align:right">Facturas</th>
+          <th style="text-align:right">Total</th><th>Detalle</th><th></th>
+        </tr></thead>
+        <tbody>${lotes.map((l, i) => {
+          const borrables = l.n - l.n_cuadradas;
+          return `<tr>
+            <td style="white-space:nowrap;font-size:12px">
+              ${new Date(l.desde).toLocaleString('es-MX', { dateStyle:'medium', timeStyle:'short' })}
+              ${l.sellado ? '' : '<div style="font-size:10px;color:var(--muted)" title="Carga anterior a que se guardara la marca de lote: la tanda se dedujo por la hora">≈ deducida</div>'}
+            </td>
+            <td style="font-size:12px">${l.usuario || '—'}</td>
+            <td style="text-align:right;font-weight:800">${l.n}</td>
+            <td style="text-align:right;white-space:nowrap">${fmt(l.total)}</td>
+            <td style="font-size:11px;line-height:1.5">
+              ${l.n_cuadradas ? `<div style="color:#6b7280">🔒 ${l.n_cuadradas} cuadrada${l.n_cuadradas != 1 ? 's' : ''}</div>` : ''}
+              ${l.n_con_pagos ? `<div style="color:#b45309">⚠ ${l.n_con_pagos} con pagos</div>` : ''}
+              ${!l.n_cuadradas && !l.n_con_pagos ? '<span style="color:#16a34a">Sin ataduras</span>' : ''}
+            </td>
+            <td style="white-space:nowrap">
+              <button class="btn bo bsm" onclick="facVerLote(${i})" title="Ver estas facturas en la lista">👁 Ver</button>
+              ${borrables > 0
+                ? `<button class="btn bd bsm" onclick="facBorrarLote(${i})">🗑 Deshacer</button>`
+                : '<span style="font-size:10.5px;color:var(--muted);font-style:italic">nada que borrar</span>'}
+            </td>
+          </tr>`;
+        }).join('')}</tbody></table>
+      </div>`}
+      <div class="form-actions">
+        <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button>
+      </div>`;
+  } catch (e) {
+    $('modal-gt-cats-body').innerHTML =
+      `<h4>Cargas recientes</h4><p class="empty">${e.message}</p>
+       <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button></div>`;
+  }
+}
+
+// Filtra la lista por el dia de esa carga, para poder revisarla antes de borrar
+function facVerLote(i) {
+  const l = (window._facLotes || [])[i];
+  if (!l) return;
+  closeModal('modal-gt-cats');
+  limpiarFiltrosFac();
+  const dia = new Date(l.desde);
+  const iso = new Date(dia.getTime() - dia.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  if ($('f-cargadas')) $('f-cargadas').value = iso;
+  filtrarFacturas();
+  toast(`Mostrando lo cargado el ${fmtDate(iso)}.`);
+}
+
+async function facBorrarLote(i) {
+  const l = (window._facLotes || [])[i];
+  if (!l) return;
+  const cuando = new Date(l.desde).toLocaleString('es-MX', { dateStyle:'medium', timeStyle:'short' });
+  if (!await confirm2(
+      `¿Deshacer esta carga completa?\n\n` +
+      `${l.n} factura${l.n != 1 ? 's' : ''} · ${fmt(l.total)}\n` +
+      `Cargadas el ${cuando}${l.usuario ? ' por ' + l.usuario : ''}\n\n` +
+      (l.n_cuadradas ? `${l.n_cuadradas} está${l.n_cuadradas != 1 ? 'n' : ''} cuadrada${l.n_cuadradas != 1 ? 's' : ''} y NO se toca${l.n_cuadradas != 1 ? 'n' : ''}.\n` : '') +
+      (l.n_con_pagos ? `${l.n_con_pagos} tiene${l.n_con_pagos != 1 ? 'n' : ''} pagos y se va${l.n_con_pagos != 1 ? 'n' : ''} a saltar.\n` : '') +
+      `\nEsto no se puede deshacer.`)) return;
+  closeModal('modal-gt-cats');
+  await facEjecutarBorrado(l.ids, false);
+}
+
 async function loadFacturas() {
   const buscar  = $('f-buscar')?.value || '';
   const estatus = $('f-estatus')?.value || '';
@@ -6546,12 +6794,25 @@ async function loadFacturas() {
   if (cliente) url += `&cliente_id=${cliente}`;
   const sat = $('f-sat')?.value || '';
   if (sat) url += `&estatus_sat=${sat}`;
+  const cargadas = $('f-cargadas')?.value || '';
+  if (cargadas) url += `&cargadas_desde=${cargadas}&cargadas_hasta=${cargadas}`;
   try {
     const d = await api(url);
+    window._facData = d;
+    // El innerHTML de abajo es sincrono, asi que al correr el timeout la barra
+    // ya existe en el documento.
+    setTimeout(facPintarBarraSel, 0);
     $('fac-table').innerHTML = d.data.length ? `
+    <div id="fac-barra-sel"></div>
     <div class="tscroll"><table>
-      <thead><tr><th>Folio</th><th>Emisora</th><th>Cliente</th><th>Fecha</th><th>Vence</th><th style="text-align:right">Subtotal</th><th style="text-align:right">IVA</th><th style="text-align:right">Total</th><th>Cobrado</th><th>Saldo</th><th>Estatus</th><th>Estatus SAT</th><th>Acciones</th></tr></thead>
+      <thead><tr>${canAdmin() ? `<th style="width:28px;text-align:center">
+          <input type="checkbox" id="fac-sel-todas" onchange="facSelTodas(this.checked)"
+                 title="Seleccionar las de esta página que sí se pueden eliminar"></th>` : ''}<th>Folio</th><th>Emisora</th><th>Cliente</th><th>Fecha</th><th>Vence</th><th style="text-align:right">Subtotal</th><th style="text-align:right">IVA</th><th style="text-align:right">Total</th><th>Cobrado</th><th>Saldo</th><th>Estatus</th><th>Estatus SAT</th><th>Acciones</th></tr></thead>
       <tbody>${d.data.map(f=>`<tr>
+        ${canAdmin() ? `<td style="text-align:center">${f.desglose_validado
+          ? '<span title="Cuadrada: no se puede eliminar" style="color:var(--muted)">🔒</span>'
+          : `<input type="checkbox" class="fac-sel" data-id="${f.id}"
+                    ${window._facSel.has(f.id) ? 'checked' : ''} onchange="facSelCambio()">`}</td>` : ''}
         <td><a href="#" onclick="detalleFactura(${f.id})" style="color:var(--red);font-weight:600">${f.folio||'#'+f.id}</a></td>
         <td style="font-size:11px;font-weight:600" title="${f.emisora_razon_social||''}">${f.emisora_nombre_comercial||f.emisora_razon_social||'<span style="color:var(--muted)">—</span>'}</td>
         <td>${f.razon_social||'<span style="color:var(--muted)">Sin cliente</span>'}</td>
@@ -6602,7 +6863,7 @@ async function loadFacturas() {
         const paginas = Math.max(1, Math.ceil(d.total / d.limit));
         const cel = (v, extra) => `<td style="text-align:right;white-space:nowrap;${extra||''}">${fmt(v)}</td>`;
         return `<tfoot><tr style="background:#f1f5f9;font-weight:900;border-top:2.5px solid var(--dark)">
-          <td colspan="5" style="text-align:right;padding:9px 8px;font-size:11.5px;
+          <td colspan="${canAdmin() ? 6 : 5}" style="text-align:right;padding:9px 8px;font-size:11.5px;
               text-transform:uppercase;letter-spacing:.6px;color:var(--dark)">
             Total del periodo
             <span style="font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted)">

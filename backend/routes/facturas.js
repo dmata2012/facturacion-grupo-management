@@ -2,8 +2,26 @@ const router   = require('express').Router();
 const multer   = require('multer');
 const path     = require('path');
 const fs       = require('fs');
-const { query } = require('../config/db');
+const { query, getClient } = require('../config/db');
 const { verificarToken, requireRol } = require('../middleware/auth');
+
+// Marca de que importacion trajo cada factura. Sirve para deshacer una carga
+// equivocada completa sin tener que ir palomeando renglon por renglon.
+// Las facturas viejas no la traen; para esas la tanda se deduce agrupando por
+// quien las cargo y cuando (ver GET /lotes).
+(async () => {
+  try {
+    await query(`ALTER TABLE fac_facturas ADD COLUMN IF NOT EXISTS lote_importacion TEXT`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_fac_facturas_lote ON fac_facturas(lote_importacion)`);
+    // GET /lotes particiona por quien cargo y ordena por cuando; con este indice
+    // el agrupado por tanda no se degrada conforme crece la tabla.
+    await query(`CREATE INDEX IF NOT EXISTS idx_fac_facturas_carga
+                   ON fac_facturas(creado_por, creado_en)`);
+  } catch (e) { console.warn('Migración lote_importacion:', e.message); }
+})();
+
+// Identificador de una tanda de importacion
+const nuevoLote = () => 'L' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
 const UPLOADS = path.join(__dirname, '..', 'uploads');
 
@@ -53,6 +71,20 @@ router.get('/', async (req, res) => {
     }
     if (desde)      { params.push(desde);       where += ` AND f.fecha_emision>=$${params.length}`; }
     if (hasta)      { params.push(hasta);       where += ` AND f.fecha_emision<=$${params.length}`; }
+    // Fecha en que se CARGO al sistema, no la del comprobante. Es lo que se
+    // necesita para encontrar una importacion equivocada.
+    if (req.query.cargadas_desde) {
+      params.push(req.query.cargadas_desde);
+      where += ` AND f.creado_en >= $${params.length}::date`;
+    }
+    if (req.query.cargadas_hasta) {
+      params.push(req.query.cargadas_hasta);
+      where += ` AND f.creado_en < ($${params.length}::date + INTERVAL '1 day')`;
+    }
+    if (req.query.lote) {
+      params.push(req.query.lote);
+      where += ` AND f.lote_importacion = $${params.length}`;
+    }
     if (buscar) {
       params.push(`%${buscar}%`);
       where += ` AND (f.folio ILIKE $${params.length} OR c.razon_social ILIKE $${params.length} OR f.concepto ILIKE $${params.length})`;
@@ -146,6 +178,138 @@ router.post('/revisar-correo', requireRol('admin', 'capturista', 'tesoreria', 'g
 });
 
 // ── OBTENER UNA ───────────────────────────────
+// ── TANDAS DE IMPORTACIÓN ─────────────────────
+// Las facturas cargadas de golpe se agrupan para poder deshacer una carga
+// equivocada de una sola vez.
+//
+// Las importadas desde que existe lote_importacion se agrupan por esa marca.
+// Las anteriores no la tienen, asi que la tanda se deduce: facturas del mismo
+// usuario separadas por menos de 10 minutos son la misma carga. Sin esto, una
+// importacion equivocada hecha antes de este cambio no se podria deshacer.
+//
+// OJO: esta ruta va antes que GET /:id. Declarada despues, express interpreta
+// "lotes" como un id y nunca se llega aqui.
+router.get('/lotes', requireRol('admin'), async (req, res) => {
+  try {
+    const r = await query(`
+      WITH marcada AS (
+        SELECT f.id, f.total, f.creado_en, f.creado_por, f.desglose_validado,
+               f.lote_importacion,
+               CASE WHEN LAG(f.creado_en) OVER w IS NULL
+                     OR f.creado_en - LAG(f.creado_en) OVER w > INTERVAL '10 minutes'
+                    THEN 1 ELSE 0 END AS corte
+          FROM fac_facturas f
+        WINDOW w AS (PARTITION BY f.creado_por ORDER BY f.creado_en)
+      ),
+      agrupada AS (
+        SELECT m.*,
+               SUM(m.corte) OVER (PARTITION BY m.creado_por ORDER BY m.creado_en
+                                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS tanda
+          FROM marcada m
+      )
+      SELECT
+        COALESCE(a.lote_importacion,
+                 'auto:' || COALESCE(a.creado_por, 0) || ':' || a.tanda)   AS clave,
+        (a.lote_importacion IS NOT NULL)                                   AS sellado,
+        MIN(a.creado_en)                                                   AS desde,
+        MAX(a.creado_en)                                                   AS hasta,
+        COUNT(*)::int                                                      AS n,
+        SUM(a.total)                                                       AS total,
+        COUNT(*) FILTER (WHERE a.desglose_validado)::int                   AS n_cuadradas,
+        COUNT(*) FILTER (WHERE COALESCE(pg.cobrado, 0) > 0)::int           AS n_con_pagos,
+        u.nombre                                                           AS usuario,
+        ARRAY_AGG(a.id ORDER BY a.id)                                      AS ids
+      FROM agrupada a
+      LEFT JOIN fac_usuarios u ON u.id = a.creado_por
+      LEFT JOIN (
+        SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
+      ) pg ON pg.factura_id = a.id
+      GROUP BY 1, 2, u.nombre
+      ORDER BY MIN(a.creado_en) DESC
+      LIMIT 25
+    `);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── ELIMINAR VARIAS ───────────────────────────
+// Borrar facturas toca datos fiscales, asi que se ponen las mismas rejas que
+// tiene el borrado de una sola, y una mas:
+//
+//   · solo administrador (igual que DELETE /:id)
+//   · nunca una factura CUADRADA: la pantalla ya lo prohibe de una en una y
+//     hacerlo en bloque seria la puerta de atras a esa regla
+//   · las que ya tienen pagos se SALTAN por omision. Borrar la factura se lleva
+//     sus pagos por cascada, y eso es plata registrada desapareciendo sin que
+//     nadie lo haya pedido. Se pueden incluir, pero hay que pedirlo aparte.
+//
+// Lo que se salta se devuelve con nombre y razon, no como un numero: si alguien
+// selecciona 40 y se borran 33, tiene que poder ver cuales quedaron y por que.
+const TOPE_BORRADO = 2000;
+
+router.post('/eliminar-varias', requireRol('admin'), async (req, res) => {
+  const ids = [...new Set((req.body?.ids || []).map(Number).filter(Number.isInteger))];
+  if (!ids.length) return res.status(400).json({ error: 'No hay facturas seleccionadas.' });
+  if (ids.length > TOPE_BORRADO)
+    return res.status(400).json({ error: `Son demasiadas de una vez. El máximo es ${TOPE_BORRADO}.` });
+
+  const incluirConPagos = req.body?.incluir_con_pagos === true;
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+    const info = await client.query(`
+      SELECT f.id, f.folio, f.total, f.desglose_validado,
+             COALESCE(pg.cobrado, 0)   AS cobrado,
+             COALESCE(pg.n, 0)::int    AS n_pagos,
+             COALESCE(dg.n, 0)::int    AS n_desglose
+        FROM fac_facturas f
+        LEFT JOIN (
+          SELECT factura_id, SUM(monto) AS cobrado, COUNT(*) AS n
+            FROM fac_pagos GROUP BY factura_id
+        ) pg ON pg.factura_id = f.id
+        LEFT JOIN (
+          SELECT factura_id, COUNT(*) AS n FROM fac_desglose_rh GROUP BY factura_id
+        ) dg ON dg.factura_id = f.id
+       WHERE f.id = ANY($1::int[])
+    `, [ids]);
+
+    const omitidas = [];
+    const aBorrar  = [];
+    for (const f of info.rows) {
+      if (f.desglose_validado) {
+        omitidas.push({ id: f.id, folio: f.folio, motivo: 'Tiene el desglose cuadrado' });
+      } else if (f.n_pagos > 0 && !incluirConPagos) {
+        omitidas.push({ id: f.id, folio: f.folio,
+                        motivo: `Tiene ${f.n_pagos} pago${f.n_pagos != 1 ? 's' : ''} registrado${f.n_pagos != 1 ? 's' : ''} por ${f.cobrado}` });
+      } else {
+        aBorrar.push(f);
+      }
+    }
+
+    if (!aBorrar.length) {
+      await client.query('ROLLBACK');
+      return res.json({ borradas: 0, omitidas, pagos_borrados: 0, desglose_borrado: 0, total_borrado: 0 });
+    }
+
+    const idsBorrar = aBorrar.map(f => f.id);
+    const del = await client.query(
+      `DELETE FROM fac_facturas WHERE id = ANY($1::int[]) RETURNING id`, [idsBorrar]);
+    await client.query('COMMIT');
+
+    res.json({
+      borradas     : del.rows.length,
+      omitidas,
+      // Se borran por cascada; se reportan para que quede claro que se fue con ellas
+      pagos_borrados  : aBorrar.reduce((a, f) => a + f.n_pagos, 0),
+      desglose_borrado: aBorrar.reduce((a, f) => a + f.n_desglose, 0),
+      total_borrado   : aBorrar.reduce((a, f) => a + (parseFloat(f.total) || 0), 0)
+    });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+
 router.get('/:id', async (req, res) => {
   try {
     const r = await query(`
@@ -261,6 +425,7 @@ router.post('/importar-masivo', requireRol('admin', 'capturista', 'gerente'), as
 
   let creadas = 0, duplicadas = 0;
   const errores = [];
+  const lote = nuevoLote();
 
   // Función para limpiar texto del XML (quita caracteres problemáticos)
   const limpiar = s => (s || '').toString().trim().substring(0, 200) || null;
@@ -323,8 +488,8 @@ router.post('/importar-masivo', requireRol('admin', 'capturista', 'gerente'), as
 
       await query(
         `INSERT INTO fac_facturas(cliente_id,empresa_receptora_id,folio,uuid_cfdi,tipo_comprobante,
-          fecha_emision,subtotal,iva,total,moneda,concepto,rfc_detectado,creado_por)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          fecha_emision,subtotal,iva,total,moneda,concepto,rfc_detectado,creado_por,lote_importacion)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
         [cliente_id    || null,
          empresa_receptora_id || null,
          limpiar(item.folio) || null,
@@ -337,7 +502,8 @@ router.post('/importar-masivo', requireRol('admin', 'capturista', 'gerente'), as
          item.moneda  || 'MXN',
          limpiar(item.concepto) || null,
          rfcReceptor  || null,
-         req.usuario.id]
+         req.usuario.id,
+         lote]
       );
       creadas++;
     } catch(e) {
@@ -346,7 +512,7 @@ router.post('/importar-masivo', requireRol('admin', 'capturista', 'gerente'), as
     }
   }
 
-  res.json({ creadas, duplicadas, errores });
+  res.json({ creadas, duplicadas, errores, lote: creadas ? lote : null });
 });
 
 // ── CANCELAR ──────────────────────────────────
