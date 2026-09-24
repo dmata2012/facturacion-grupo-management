@@ -6421,7 +6421,7 @@ async function facturas(resetPage = true) {
       <button class="btn bo" id="fac-correo-btn" onclick="revisarCorreoFacturas()"
               title="Busca facturas nuevas en el buzón y las da de alta">📬 Revisar correo</button>
       <button class="btn bo" onclick="openImportarXML()">📥 Importar XMLs</button>
-      ${canAdmin() ? `<button class="btn bo" onclick="openLotesFac()"
+      ${facPuedeBorrar() ? `<button class="btn bo" onclick="openLotesFac()"
               title="Ver las cargas recientes y deshacer una completa">📦 Cargas</button>` : ''}
       <button class="btn bs" onclick="openFactura()">+ Nueva factura</button></div>` : ''}
   </div>
@@ -6553,6 +6553,11 @@ function mostrarErroresCorreo(r) {
     </div>`;
   openModal('modal-gt-cats');
 }
+
+// Quien puede eliminar facturas. Con el motor de permisos apagado cae al
+// comportamiento de siempre —solo administrador—, asi que encenderlo o no
+// nunca regala el permiso a nadie.
+const facPuedeBorrar = () => puedeO('facturas', NIVEL.TODO, canAdmin());
 
 // ══ BORRAR FACTURAS EN BLOQUE ═══════════════════════════════
 // Una carga equivocada de cien facturas no se deshace de una en una. Pero
@@ -6823,11 +6828,11 @@ async function loadFacturas() {
     $('fac-table').innerHTML = d.data.length ? `
     <div id="fac-barra-sel"></div>
     <div class="tscroll"><table>
-      <thead><tr>${canAdmin() ? `<th style="width:28px;text-align:center">
+      <thead><tr>${facPuedeBorrar() ? `<th style="width:28px;text-align:center">
           <input type="checkbox" id="fac-sel-todas" onchange="facSelTodas(this.checked)"
                  title="Seleccionar las de esta página que sí se pueden eliminar"></th>` : ''}<th>Folio</th><th>Emisora</th><th>Cliente</th><th>Fecha</th><th>Vence</th><th style="text-align:right">Subtotal</th><th style="text-align:right">IVA</th><th style="text-align:right">Total</th><th>Cobrado</th><th>Saldo</th><th>Estatus</th><th>Estatus SAT</th><th>Acciones</th></tr></thead>
       <tbody>${d.data.map(f=>`<tr>
-        ${canAdmin() ? `<td style="text-align:center">${f.desglose_validado
+        ${facPuedeBorrar() ? `<td style="text-align:center">${f.desglose_validado
           ? '<span title="Cuadrada: no se puede eliminar" style="color:var(--muted)">🔒</span>'
           : `<input type="checkbox" class="fac-sel" data-id="${f.id}"
                     ${window._facSel.has(f.id) ? 'checked' : ''} onchange="facSelCambio()">`}</td>` : ''}
@@ -6869,7 +6874,7 @@ async function loadFacturas() {
             : canFacturar()
               ? `<button class="btn bd bsm" onclick="cancelarFactura(${f.id},${!!f.desglose_validado})" title="${f.desglose_validado?'Cancelar factura (está cuadrada — pedirá confirmación)':'Cancelar factura'}">✕</button>`
               : `<span style="color:#b45309;font-size:10.5px;font-style:italic" title="Tu perfil (${(ME&&ME.rol)||'—'}) no tiene permiso de cancelar facturas. Lo pueden hacer admin, gerente, capturista y tesorería.">sin permiso de cancelar</span>`}
-          ${canAdmin()&&!f.desglose_validado?`<button class="btn bd bsm" onclick="eliminarFactura(${f.id})" title="Eliminar factura" style="background:#fff0f0;border-color:#ffd7d7">🗑️</button>`:''}
+          ${facPuedeBorrar()&&!f.desglose_validado?`<button class="btn bd bsm" onclick="eliminarFactura(${f.id})" title="Eliminar factura" style="background:#fff0f0;border-color:#ffd7d7">🗑️</button>`:''}
           ${f.desglose_validado?`<span title="Desglose cuadrado: no se puede editar ni eliminar. Cancelar sí está permitido, con confirmación." style="color:var(--muted);font-size:11px;font-style:italic">🔒 sin edición</span>`:''}
         </td>
       </tr>`).join('')}</tbody>
@@ -6881,7 +6886,7 @@ async function loadFacturas() {
         const paginas = Math.max(1, Math.ceil(d.total / d.limit));
         const cel = (v, extra) => `<td style="text-align:right;white-space:nowrap;${extra||''}">${fmt(v)}</td>`;
         return `<tfoot><tr style="background:#f1f5f9;font-weight:900;border-top:2.5px solid var(--dark)">
-          <td colspan="${canAdmin() ? 6 : 5}" style="text-align:right;padding:9px 8px;font-size:11.5px;
+          <td colspan="${facPuedeBorrar() ? 6 : 5}" style="text-align:right;padding:9px 8px;font-size:11.5px;
               text-transform:uppercase;letter-spacing:.6px;color:var(--dark)">
             Total del periodo
             <span style="font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted)">

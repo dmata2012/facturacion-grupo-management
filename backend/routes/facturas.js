@@ -4,6 +4,24 @@ const path     = require('path');
 const fs       = require('fs');
 const { query, getClient } = require('../config/db');
 const { verificarToken, requireRol } = require('../middleware/auth');
+// Borrar facturas ya no es "solo el rol admin" sino un nivel de la matriz:
+// Facturas en Administrar. Asi se le puede dar a una persona concreta sin
+// volverla administradora de todo el sistema.
+const { permiso, NIVEL, permisosDeUsuario } = require('../middleware/permiso');
+
+// permiso() deja pasar a CUALQUIERA cuando el motor de permisos todavia no esta
+// listo, para que un deploy a medias no deje el sistema inservible. Para la
+// mayoria de las pantallas es lo correcto; para borrar facturas no: es
+// destructivo e irreversible. Si la matriz no esta disponible se aplica la regla
+// estricta de antes, solo administrador, en vez de la permisiva.
+function puedeBorrarFacturas(req, res, next) {
+  if (!req.usuario) return res.status(401).json({ error: 'Sesión no válida.' });
+  permisosDeUsuario(req.usuario.id, req.usuario.rol)
+    .then(p => p.listo
+      ? permiso('facturas', NIVEL.TODO)(req, res, next)
+      : requireRol('admin')(req, res, next))
+    .catch(() => requireRol('admin')(req, res, next));
+}
 
 // Marca de que importacion trajo cada factura. Sirve para deshacer una carga
 // equivocada completa sin tener que ir palomeando renglon por renglon.
@@ -189,7 +207,7 @@ router.post('/revisar-correo', requireRol('admin', 'capturista', 'tesoreria', 'g
 //
 // OJO: esta ruta va antes que GET /:id. Declarada despues, express interpreta
 // "lotes" como un id y nunca se llega aqui.
-router.get('/lotes', requireRol('admin'), async (req, res) => {
+router.get('/lotes', puedeBorrarFacturas, async (req, res) => {
   try {
     const r = await query(`
       WITH marcada AS (
@@ -247,7 +265,7 @@ router.get('/lotes', requireRol('admin'), async (req, res) => {
 // selecciona 40 y se borran 33, tiene que poder ver cuales quedaron y por que.
 const TOPE_BORRADO = 2000;
 
-router.post('/eliminar-varias', requireRol('admin'), async (req, res) => {
+router.post('/eliminar-varias', puedeBorrarFacturas, async (req, res) => {
   const ids = [...new Set((req.body?.ids || []).map(Number).filter(Number.isInteger))];
   if (!ids.length) return res.status(400).json({ error: 'No hay facturas seleccionadas.' });
   if (ids.length > TOPE_BORRADO)
@@ -526,7 +544,7 @@ router.patch('/:id/cancelar', requireRol('admin', 'capturista', 'gerente', 'teso
 });
 
 // ── ELIMINAR ──────────────────────────────────
-router.delete('/:id', requireRol('admin'), async (req, res) => {
+router.delete('/:id', puedeBorrarFacturas, async (req, res) => {
   try {
     // Eliminar en cascada: desglose y pagos se borran por ON DELETE CASCADE
     const r = await query(`DELETE FROM fac_facturas WHERE id=$1 RETURNING id`, [req.params.id]);
