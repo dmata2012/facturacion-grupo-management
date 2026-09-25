@@ -420,6 +420,8 @@ tbody tr:hover td{background:#FAFBFF}
   transition:border .18s
 }
 .filters input:focus,.filters select:focus{outline:none;border-color:var(--red)}
+/* Rótulo corto para agrupar campos dentro de la barra de filtros */
+.f-rot{font-size:10.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
 
 /* ══ TABS ═══════════════════════════════════════════════════════ */
 .tabs{display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:18px}
@@ -6446,13 +6448,23 @@ async function facturas(resetPage = true) {
         <option value="otro">⚠ Otra respuesta</option>
         <option value="sin_validar">⏳ Sin validar</option>
       </select>
-      <input id="f-desde" type="date" onchange="filtrarFacturas()" title="Fecha del comprobante, desde">
-      <input id="f-hasta" type="date" onchange="filtrarFacturas()" title="Fecha del comprobante, hasta">
-      <input id="f-cargadas" type="date" onchange="filtrarFacturas()"
-             title="Solo las que se cargaron al sistema ese día (no la fecha del comprobante)"
-             style="border-color:#c7d2fe;background:#eef2ff">
+      <!-- Tres campos de fecha seguidos y sin nombre no se distinguen: uno es la
+           fecha del comprobante y el otro la del dia en que se subio al sistema.
+           Agrupados y con rotulo, ademas no se parten al acomodarse. -->
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="f-rot">Emitidas</span>
+        <input id="f-desde" type="date" onchange="filtrarFacturas()" title="Fecha del comprobante, desde">
+        <input id="f-hasta" type="date" onchange="filtrarFacturas()" title="Fecha del comprobante, hasta">
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="f-rot" style="color:#4338ca">Cargadas</span>
+        <input id="f-cargadas" type="date" onchange="filtrarFacturas()"
+               title="Solo las que se subieron al sistema ese día (no la fecha del comprobante)"
+               style="border-color:#c7d2fe;background:#eef2ff">
+      </div>
       <button class="btn bo bsm" onclick="limpiarFiltrosFac()" title="Limpiar filtros">✕ Limpiar</button>
-      <button class="btn bo bsm" onclick="exportarFacturas()">⬇ Excel</button>
+      <button class="btn bo bsm" id="fac-excel-btn" onclick="exportarFacturas()"
+              title="Exporta TODAS las facturas del periodo filtrado, no solo esta página">⬇ Excel</button>
     </div>
     <div id="fac-table"><p class="empty">Cargando...</p></div>
   </div>`;
@@ -6801,24 +6813,28 @@ async function facBorrarLote(i) {
   await facEjecutarBorrado(l.ids, false);
 }
 
+// Los filtros de la pantalla, en un solo lugar. La tabla y la exportacion a
+// Excel tienen que pedir EXACTAMENTE lo mismo; armandolos por separado se
+// separan al primer filtro nuevo y el Excel deja de coincidir con lo que se ve.
+function facFiltrosQS() {
+  const v = id => ($(id)?.value || '').trim();
+  const p = new URLSearchParams();
+  if (v('f-buscar'))   p.set('buscar',      v('f-buscar'));
+  if (v('f-estatus'))  p.set('estatus',     v('f-estatus'));
+  if (v('f-desde'))    p.set('desde',       v('f-desde'));
+  if (v('f-hasta'))    p.set('hasta',       v('f-hasta'));
+  if (v('f-emisora'))  p.set('emisora_id',  v('f-emisora'));
+  if (v('f-cliente'))  p.set('cliente_id',  v('f-cliente'));
+  if (v('f-sat'))      p.set('estatus_sat', v('f-sat'));
+  if (v('f-cargadas')) {
+    p.set('cargadas_desde', v('f-cargadas'));
+    p.set('cargadas_hasta', v('f-cargadas'));
+  }
+  return p.toString();
+}
+
 async function loadFacturas() {
-  const buscar  = $('f-buscar')?.value || '';
-  const estatus = $('f-estatus')?.value || '';
-  const desde   = $('f-desde')?.value || '';
-  const hasta   = $('f-hasta')?.value || '';
-  const emisora = $('f-emisora')?.value || '';
-  const cliente = $('f-cliente')?.value || '';
-  let url = `/facturas?page=${_facPage}&limit=50`;
-  if (buscar)  url += `&buscar=${encodeURIComponent(buscar)}`;
-  if (estatus) url += `&estatus=${estatus}`;
-  if (desde)   url += `&desde=${desde}`;
-  if (hasta)   url += `&hasta=${hasta}`;
-  if (emisora) url += `&emisora_id=${emisora}`;
-  if (cliente) url += `&cliente_id=${cliente}`;
-  const sat = $('f-sat')?.value || '';
-  if (sat) url += `&estatus_sat=${sat}`;
-  const cargadas = $('f-cargadas')?.value || '';
-  if (cargadas) url += `&cargadas_desde=${cargadas}&cargadas_hasta=${cargadas}`;
+  const url = `/facturas?page=${_facPage}&limit=50&${facFiltrosQS()}`;
   try {
     const d = await api(url);
     window._facData = d;
@@ -19551,14 +19567,50 @@ function exportToExcel(data, cols, name) {
   XLSX.writeFile(wb, `${name}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
-function exportarFacturas() {
-  if(!window._facData) return toast('Carga las facturas primero.','warn');
-  exportToExcel(window._facData,[
-    ['folio','Folio'],
-    ['emisora_nombre_comercial','Emisora'],['emisora_rfc','RFC Emisora'],
-    ['razon_social','Cliente'],['rfc','RFC Cliente'],['fecha_emision','Emisión'],
-    ['fecha_vencimiento','Vencimiento'],['total','Total'],['cobrado','Cobrado'],['saldo','Saldo'],['estatus','Estatus']
-  ],'Facturas');
+// Excel de Facturas. Tenia dos problemas: _facData nunca se asignaba, asi que
+// el boton solo sacaba el aviso de "carga las facturas primero"; y cuando si
+// hay dato, es la respuesta completa {data, total, page...} y exportToExcel
+// necesita el arreglo, de modo que reventaba sin decir nada.
+//
+// Se exporta el PERIODO FILTRADO COMPLETO y no los 50 renglones de la pagina:
+// bajar solo lo visible daria un Excel incompleto sin avisar, que es peor que
+// no dar nada. Por eso se recorren las paginas.
+async function exportarFacturas() {
+  const btn = $('fac-excel-btn');
+  const original = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Preparando…'; }
+  try {
+    const qs = facFiltrosQS();
+    const POR_PAGINA = 500, TOPE_PAGINAS = 40;   // 20 000 renglones
+    let pagina = 1, filas = [], total = 0;
+    do {
+      const d = await api(`/facturas?page=${pagina}&limit=${POR_PAGINA}&${qs}`);
+      filas = filas.concat(d.data || []);
+      total = d.total || 0;
+      pagina++;
+      if (btn && total > POR_PAGINA) btn.textContent = `⏳ ${filas.length} de ${total}…`;
+    } while (filas.length < total && pagina <= TOPE_PAGINAS);
+
+    if (!filas.length) return toast('No hay facturas que exportar con esos filtros.', 'warn');
+    if (filas.length < total)
+      toast(`Son ${total} facturas; se exportan las primeras ${filas.length}. Acota los filtros.`, 'warn');
+
+    exportToExcel(filas, [
+      ['folio','Folio'], ['uuid_cfdi','UUID'],
+      ['emisora_nombre_comercial','Emisora'], ['emisora_rfc','RFC Emisora'],
+      ['razon_social','Cliente'], ['rfc','RFC Cliente'],
+      ['fecha_emision','Emisión'], ['fecha_vencimiento','Vencimiento'],
+      ['subtotal','Subtotal'], ['iva','IVA'], ['total','Total'],
+      ['cobrado','Cobrado'], ['saldo','Saldo'],
+      ['estatus','Estatus'], ['estatus_sat','Estatus SAT']
+    ], 'Facturas');
+    toast(`${filas.length} factura${filas.length != 1 ? 's' : ''} exportada${filas.length != 1 ? 's' : ''}.`);
+  } catch (e) {
+    // Antes un fallo aqui no se veia por ningun lado y parecia que el boton no servia
+    toast('No se pudo exportar: ' + e.message, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = original; }
+  }
 }
 
 function exportarCobranza() {
