@@ -16746,8 +16746,16 @@ async function imprimirSolicitudVac(id) {
     const diasDeEsta = aplic.reduce((a,x)=>a+parseFloat(x.dias_aplicados||0),0);
     const porPeriodo = {};
     aplic.forEach(x => { porPeriodo[x.periodo_id] = parseFloat(x.dias_aplicados||0); });
-    const tomAntes  = totTom  - diasDeEsta;
-    const pendAntes = totPend + diasDeEsta;
+
+    // totTom y totPend son el saldo de HOY. Si se imprimen tal cual, todas las
+    // solicitudes del mismo colaborador salen con el mismo "pendientes", aunque
+    // entre una y otra ya se hayan tomado dias. Sumando lo que consumieron las
+    // solicitudes POSTERIORES se reconstruye el saldo que habia en el momento de
+    // esta, que es lo que debe decir la hoja que se firmo ese dia.
+    const diasPost    = parseFloat(s.dias_posteriores || 0);
+    const tomAntes    = totTom  - diasDeEsta - diasPost;   // tomados antes de esta
+    const pendDespues = totPend + diasPost;                // quedaban al terminar esta
+    const pendAntes   = pendDespues + diasDeEsta;          // quedaban antes de pedirla
     const fmtDateLg = d => {
       if (!d) return '—';
       const iso = String(d).slice(0,10);
@@ -16824,14 +16832,14 @@ async function imprimirSolicitudVac(id) {
             <tbody><tr>
               <td style="border:1px solid #888;padding:6px;text-align:center;font-size:15px">${tomAntes.toFixed(0)}</td>
               <td style="border:1px solid #888;padding:6px;text-align:center;font-size:18px;font-weight:700">${parseFloat(s.dias_solicitados).toFixed(0)}</td>
-              <td style="border:1px solid #888;padding:6px;text-align:center;font-size:15px">${totPend.toFixed(0)}</td>
+              <td style="border:1px solid #888;padding:6px;text-align:center;font-size:15px">${pendDespues.toFixed(0)}</td>
             </tr></tbody>
           </table>
         </div>
 
         ${diasDeEsta ? `<div style="font-size:11.5px;margin-bottom:8px;border:1px solid #888;padding:5px 8px;background:#f9fafb">
           <strong>Estos días se aplican a:</strong> ${aplic.map(x=>`${parseFloat(x.dias_aplicados).toFixed(0)} del ${x.num_periodo}° periodo`).join(' · ')}
-          <span style="color:#555">— saldo antes: ${pendAntes.toFixed(0)} días · después: ${totPend.toFixed(0)} días</span>
+          <span style="color:#555">— saldo antes: ${pendAntes.toFixed(0)} días · después: ${pendDespues.toFixed(0)} días</span>
         </div>` : ''}
         <div style="font-size:12px;margin-bottom:6px"><strong>Por lo que tomaré mis vacaciones en la fecha señalada del día:</strong> ${fmtDateLg(s.fecha_inicio)} al ${fmtDateLg(s.fecha_fin)}</div>
         <div style="font-size:12px;margin-bottom:6px"><strong>Presentándome a laborar el día:</strong> ${fmtDateRet(s.fecha_regreso)}</div>

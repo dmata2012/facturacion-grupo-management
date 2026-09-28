@@ -654,9 +654,23 @@ router.get('/solicitudes/:id', async (req, res) => {
         ORDER BY p.num_periodo`,
       [req.params.id]);
 
+    // Dias consumidos por solicitudes POSTERIORES a esta. Sin esto, el formato
+    // imprime el saldo de hoy en todas las solicitudes por igual: quien imprime
+    // una solicitud de hace tres meses ve los dias que le quedan ahora, no los
+    // que le quedaban entonces. Con este dato se reconstruye el saldo al momento
+    // de cada solicitud. Se ordena por id porque ese es el orden en que se
+    // aplicaron a los periodos.
+    const post = await query(
+      `SELECT COALESCE(SUM(sp.dias_aplicados), 0) AS dias
+         FROM fac_vacaciones_solicitud_periodos sp
+         JOIN fac_vacaciones_solicitudes s2 ON s2.id = sp.solicitud_id
+        WHERE s2.empleado_id = $1 AND s2.id > $2`,
+      [sol.empleado_id, req.params.id]);
+
     res.json({
       ...sol,
       aplicaciones: apl.rows,
+      dias_posteriores: parseFloat(post.rows[0].dias) || 0,
       empleado: {
         id: sol.empleado_id, nombre: sol.nombre, puesto: sol.puesto,
         departamento: sol.departamento, numero_colaborador: sol.numero_colaborador,
