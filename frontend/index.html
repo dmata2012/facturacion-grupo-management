@@ -17144,8 +17144,20 @@ function openFondoCC(id) {
       </div>
       <div class="fi full" style="background:#fef9c3;border:1.5px solid #fde68a;border-radius:8px;padding:10px 12px">
         <label style="color:#854d0e"><strong>🔐 Clave del responsable</strong> <span style="font-weight:400;color:#78350f;font-size:11px">(requerida para registrar movimientos)</span></label>
-        <input id="cf-clave" placeholder="${f.clave_movimientos?'••••••':'Ej: caja2026'}" value="${f.clave_movimientos||''}">
-        <div style="font-size:10.5px;color:#78350f;margin-top:4px">Deja en blanco para no requerir clave. Solo admin puede ver/cambiar esta clave.</div>
+        <input id="cf-clave" type="password" autocomplete="new-password"
+               placeholder="${f.tiene_clave?'Escribe una nueva para cambiarla':'Ej: caja2026'}">
+        <div style="font-size:10.5px;color:#78350f;margin-top:4px;line-height:1.5">
+          ${f.tiene_clave
+            ? `Esta caja <strong>ya tiene clave</strong>. Se guarda cifrada y no se puede consultar,
+               ni siquiera desde aquí: si se olvidó, escribe una nueva.
+               <label style="display:inline-flex;align-items:center;gap:6px;margin-top:6px;cursor:pointer;
+                             text-transform:none;letter-spacing:0;font-size:11.5px;font-weight:600;color:#78350f">
+                 <input type="checkbox" id="cf-clave-quitar"
+                        style="width:auto;flex:0 0 auto;margin:0;padding:0">
+                 Quitar la clave (dejar de pedirla)
+               </label>`
+            : `Deja en blanco para no pedir clave. Se guarda cifrada: después podrá cambiarse, pero no consultarse.`}
+        </div>
       </div>
       <div class="fi full"><label>Notas</label>
         <textarea id="cf-notas" rows="2">${f.notas||''}</textarea>
@@ -17183,7 +17195,11 @@ async function saveFondoCC(id) {
     fondo_asignado   : $('cf-asig').value,
     saldo_inicial    : $('cf-sini').value,
     notas            : $('cf-notas').value,
-    clave_movimientos: $('cf-clave').value,
+    // La clave ya no viaja al navegador, asi que el campo siempre llega vacio.
+    // Mandarlo tal cual borraria la clave de la caja al guardar cualquier otro
+    // cambio. Solo se manda si se escribio una nueva o se pidio quitarla.
+    ...(($('cf-clave-quitar')?.checked) ? { clave_movimientos: '' }
+        : ($('cf-clave').value.trim() ? { clave_movimientos: $('cf-clave').value.trim() } : {})),
     icono            : $('cf-icono')?.value || '',
     tipo             : document.querySelector('input[name="cf-tipo"]:checked')?.value || 'chica'
   };

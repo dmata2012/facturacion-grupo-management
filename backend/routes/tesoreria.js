@@ -1,4 +1,5 @@
 const router = require('express').Router();
+const bcrypt = require('bcryptjs');
 const { query, getClient } = require('../config/db');
 const { verificarToken, requireRol } = require('../middleware/auth');
 const { permiso, NIVEL } = require('../middleware/permiso');
@@ -30,6 +31,50 @@ router.use(verificarToken);
   try { await query(`ALTER TABLE fac_caja_chica_fondos ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'chica'`); }
   catch (e) { console.warn('Migración tipo de caja:', e.message); }
 })();
+
+// ══ CLAVE DEL RESPONSABLE ═══════════════════════════════════
+// Estaba en texto plano en la base Y viajaba al navegador de cualquiera que
+// pudiera ver la caja (el listado hace SELECT f.*), asi que con las
+// herramientas del navegador se leia sin esfuerzo. Eso no frena a nadie.
+//
+// Ahora se guarda el hash, igual que las contrasenas de usuario, y nunca sale
+// del servidor: las pantallas solo reciben si la caja TIENE clave o no.
+// Consecuencia deliberada: una clave olvidada ya no se puede consultar, se
+// cambia por otra. Es el precio de que no se pueda leer.
+(async () => {
+  try {
+    await query(`ALTER TABLE fac_caja_chica_fondos ADD COLUMN IF NOT EXISTS clave_hash TEXT`);
+    await query(`CREATE TABLE IF NOT EXISTS fac_migraciones_aplicadas (
+                   clave TEXT PRIMARY KEY, aplicada_en TIMESTAMP DEFAULT NOW())`);
+    const ya = await query(`SELECT 1 FROM fac_migraciones_aplicadas WHERE clave=$1`,
+                           ['claves_caja_a_hash']);
+    if (!ya.rows.length) {
+      // Se convierten las que ya existen y se borra el texto plano. La columna
+      // vieja se conserva vacia: quitarla obligaria a coordinar el despliegue.
+      const conClave = await query(
+        `SELECT id, clave_movimientos FROM fac_caja_chica_fondos
+          WHERE NULLIF(TRIM(clave_movimientos), '') IS NOT NULL`);
+      for (const f of conClave.rows) {
+        const hash = await bcrypt.hash(String(f.clave_movimientos).trim(), 10);
+        await query(
+          `UPDATE fac_caja_chica_fondos SET clave_hash=$1, clave_movimientos=NULL WHERE id=$2`,
+          [hash, f.id]);
+      }
+      await query(`INSERT INTO fac_migraciones_aplicadas(clave) VALUES($1)
+                   ON CONFLICT (clave) DO NOTHING`, ['claves_caja_a_hash']);
+      if (conClave.rows.length)
+        console.log(`Claves de caja convertidas a hash: ${conClave.rows.length}`);
+    }
+  } catch (e) { console.warn('Migración claves de caja:', e.message); }
+})();
+
+// Ni el hash ni el texto plano salen nunca en una respuesta. Solo se dice si la
+// caja tiene clave, que es lo unico que la pantalla necesita saber.
+function sinClave(f) {
+  if (!f) return f;
+  const { clave_movimientos, clave_hash, ...resto } = f;
+  return { ...resto, tiene_clave: !!(clave_hash || (clave_movimientos || '').trim()) };
+}
 
 const TIPOS_CAJA = ['chica', 'efectivo'];
 const tipoCaja = t => TIPOS_CAJA.includes(String(t || '').trim()) ? String(t).trim() : 'chica';
@@ -136,7 +181,7 @@ router.get('/fondos', async (req, res) => {
       ${where}
       ORDER BY f.activo DESC, f.nombre
     `, params);
-    res.json(r.rows);
+    res.json(r.rows.map(sinClave));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -222,7 +267,7 @@ router.get('/fondos/:id', async (req, res) => {
     const k = kpi.rows[0];
     const saldo = parseFloat(fondo.saldo_inicial) + parseFloat(k.total_entradas) - parseFloat(k.total_salidas);
 
-    res.json({ ...fondo, movimientos: mov.rows, kpi: { ...k, saldo_actual: saldo }, por_categoria: cat.rows });
+    res.json({ ...sinClave(fondo), movimientos: mov.rows, kpi: { ...k, saldo_actual: saldo }, por_categoria: cat.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -231,17 +276,19 @@ router.post('/fondos', permiso('cajaChica', NIVEL.CAPTURAR), async (req, res) =>
     const { nombre, responsable, departamento, fondo_asignado, saldo_inicial, moneda, notas, clave_movimientos, icono } = req.body;
     if (!nombre) return res.status(400).json({ error: 'Nombre requerido.' });
     const tipo = tipoCaja(req.body.tipo);
+    const claveNueva = (clave_movimientos || '').trim();
+    const hashNuevo = claveNueva ? await bcrypt.hash(claveNueva, 10) : null;
     // En una caja abierta no hay monto objetivo. Se guarda en cero y no en lo que
     // venga, para que ningun calculo de reposicion se despierte solo despues.
     const asignado = tipo === 'efectivo' ? 0 : (parseFloat(fondo_asignado) || 0);
     const r = await query(
-      `INSERT INTO fac_caja_chica_fondos(nombre,responsable,departamento,fondo_asignado,saldo_inicial,moneda,notas,clave_movimientos,icono,tipo,creado_por)
+      `INSERT INTO fac_caja_chica_fondos(nombre,responsable,departamento,fondo_asignado,saldo_inicial,moneda,notas,clave_hash,icono,tipo,creado_por)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [nombre, responsable, departamento, asignado, parseFloat(saldo_inicial)||0,
-       moneda||'MXN', notas, (clave_movimientos||'').trim() || null, (icono||'').trim() || null,
+       moneda||'MXN', notas, hashNuevo, (icono||'').trim() || null,
        tipo, req.usuario.id]
     );
-    res.status(201).json(r.rows[0]);
+    res.status(201).json(sinClave(r.rows[0]));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -255,29 +302,27 @@ router.put('/fondos/:id', permiso('cajaChica', NIVEL.EDITAR), async (req, res) =
     if (!actual.rows.length) return res.status(404).json({ error: 'Caja no encontrada.' });
     const tipo = req.body.tipo === undefined ? tipoCaja(actual.rows[0].tipo) : tipoCaja(req.body.tipo);
     const asignado = tipo === 'efectivo' ? 0 : (parseFloat(fondo_asignado) || 0);
-    // Si clave_movimientos NO viene en el body, conservar la existente
-    if (clave_movimientos === undefined) {
+    // La clave se maneja aparte del resto: no viene = se conserva; cadena vacia
+    // = se quita a proposito; con texto = se cambia. Antes la pantalla mandaba
+    // siempre el campo, asi que ahora que ya no recibe la clave, mandarlo vacio
+    // la habria borrado sin que nadie lo pidiera.
+    if (clave_movimientos !== undefined) {
+      const nueva = String(clave_movimientos).trim();
+      const hash = nueva ? await bcrypt.hash(nueva, 10) : null;
       await query(
-        `UPDATE fac_caja_chica_fondos SET
-           nombre=$1, responsable=$2, departamento=$3,
-           fondo_asignado=$4, saldo_inicial=$5, moneda=$6,
-           activo=$7, notas=$8, icono=$9, tipo=$10, actualizado_en=NOW()
-         WHERE id=$11`,
-        [nombre, responsable, departamento, asignado, parseFloat(saldo_inicial)||0,
-         moneda||'MXN', activo !== false, notas, (icono||'').trim() || null, tipo, req.params.id]
-      );
-    } else {
-      await query(
-        `UPDATE fac_caja_chica_fondos SET
-           nombre=$1, responsable=$2, departamento=$3,
-           fondo_asignado=$4, saldo_inicial=$5, moneda=$6,
-           activo=$7, notas=$8, clave_movimientos=$9, icono=$10, tipo=$11, actualizado_en=NOW()
-         WHERE id=$12`,
-        [nombre, responsable, departamento, asignado, parseFloat(saldo_inicial)||0,
-         moneda||'MXN', activo !== false, notas, (clave_movimientos||'').trim() || null,
-         (icono||'').trim() || null, tipo, req.params.id]
-      );
+        `UPDATE fac_caja_chica_fondos SET clave_hash=$1, clave_movimientos=NULL WHERE id=$2`,
+        [hash, req.params.id]);
     }
+    // El resto de los campos se guarda igual, sin tocar la clave
+    await query(
+      `UPDATE fac_caja_chica_fondos SET
+         nombre=$1, responsable=$2, departamento=$3,
+         fondo_asignado=$4, saldo_inicial=$5, moneda=$6,
+         activo=$7, notas=$8, icono=$9, tipo=$10, actualizado_en=NOW()
+       WHERE id=$11`,
+      [nombre, responsable, departamento, asignado, parseFloat(saldo_inicial)||0,
+       moneda||'MXN', activo !== false, notas, (icono||'').trim() || null, tipo, req.params.id]
+    );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -285,13 +330,17 @@ router.put('/fondos/:id', permiso('cajaChica', NIVEL.EDITAR), async (req, res) =
 // Helper: valida clave del fondo (admin no la requiere)
 async function validarClaveFondo(fondoId, claveRecibida, usuario) {
   if (usuario.rol === 'admin') return { ok: true };
-  const r = await query(`SELECT clave_movimientos FROM fac_caja_chica_fondos WHERE id=$1`, [fondoId]);
+  const r = await query(
+    `SELECT clave_hash, clave_movimientos FROM fac_caja_chica_fondos WHERE id=$1`, [fondoId]);
   if (!r.rows.length) return { ok: false, code: 404, error: 'Fondo no encontrado.' };
-  const claveFondo = (r.rows[0].clave_movimientos || '').trim();
-  if (!claveFondo) return { ok: true }; // sin clave configurada, pasa
-  if (!claveRecibida || String(claveRecibida).trim() !== claveFondo) {
-    return { ok: false, code: 403, error: 'Clave del responsable incorrecta.' };
-  }
+  const hash  = r.rows[0].clave_hash;
+  // Texto plano solo mientras la migracion no haya corrido todavia
+  const plano = (r.rows[0].clave_movimientos || '').trim();
+  if (!hash && !plano) return { ok: true };            // sin clave configurada, pasa
+  const recibida = String(claveRecibida || '').trim();
+  if (!recibida) return { ok: false, code: 403, error: 'Clave del responsable incorrecta.' };
+  const ok = hash ? await bcrypt.compare(recibida, hash) : recibida === plano;
+  if (!ok) return { ok: false, code: 403, error: 'Clave del responsable incorrecta.' };
   return { ok: true };
 }
 
