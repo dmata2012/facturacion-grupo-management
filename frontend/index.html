@@ -16246,7 +16246,10 @@ function periodoFila(p, i, fechaIngreso) {
   return `<tr id="vp-row-${i}">
     <td><input type="number" value="${num}" id="vp-${i}-n" style="width:70px" title="1 periodo = 1 año laborado"></td>
     <td id="vp-${i}-fg" style="font-size:11px;color:var(--muted)">${fechaGanado}</td>
-    <td id="vp-${i}-fv" style="font-size:11px;color:${vencido?'var(--danger)':'var(--muted)'};font-weight:${vencido?'700':'400'}">${fechaVence}${vencido?' ⚠':''}</td>
+    <td id="vp-${i}-fv" style="font-size:11px;color:${vencido?'var(--danger)':'var(--muted)'};font-weight:${vencido?'700':'400'}"
+        title="${vencido
+          ? `Se pasó la fecha: por la LFT las vacaciones deben disfrutarse dentro de los 6 meses siguientes a cumplir el año, y aquí quedan ${dp.toFixed(1)} día(s) sin tomar.`
+          : 'Fecha límite para disfrutar este periodo (6 meses después de cumplir el año, según la LFT).'}">${fechaVence}${vencido?' ⚠':''}</td>
     <td><input type="number" step="0.5" value="${dc}" id="vp-${i}-dc" style="width:90px" oninput="recalcPeriodo(${i})"></td>
     <td id="vp-${i}-dt-cell" style="font-weight:600;color:var(--warning);background:#fef3c7;padding:6px 8px;border-radius:6px;text-align:center;white-space:nowrap">
       <span id="vp-${i}-dt" title="Días tomados por solicitudes registradas">${dt.toFixed(1)}</span>
@@ -16734,6 +16737,17 @@ async function imprimirSolicitudVac(id) {
     const totDias = periodos.reduce((a,p)=>a+parseFloat(p.dias_correspondientes||0),0);
     const totTom = periodos.reduce((a,p)=>a+parseFloat(p.dias_tomados||0),0);
     const totPend = totDias - totTom;
+
+    // Los dias de esta solicitud YA estan descontados en dias_tomados: se
+    // aplican al crearla. Si el formato imprime esos totales tal cual, quien
+    // firma lee "has disfrutado 37, vas a disfrutar 9, te quedan 9" cuando los
+    // 37 ya incluyen esos 9. Se separa en antes / esto / despues.
+    const aplic = s.aplicaciones || [];
+    const diasDeEsta = aplic.reduce((a,x)=>a+parseFloat(x.dias_aplicados||0),0);
+    const porPeriodo = {};
+    aplic.forEach(x => { porPeriodo[x.periodo_id] = parseFloat(x.dias_aplicados||0); });
+    const tomAntes  = totTom  - diasDeEsta;
+    const pendAntes = totPend + diasDeEsta;
     const fmtDateLg = d => {
       if (!d) return '—';
       const iso = String(d).slice(0,10);
@@ -16790,27 +16804,35 @@ async function imprimirSolicitudVac(id) {
           <table style="border-collapse:collapse;font-size:12px;width:100%">
             <thead><tr>
               <th style="border:1px solid #888;padding:4px;background:#e5e7eb;text-align:left">PERIODO VACACIONAL</th>
-              <th style="border:1px solid #888;padding:4px;background:#e5e7eb;text-align:center">DÍAS (TOMADOS)</th>
+              <th style="border:1px solid #888;padding:4px;background:#e5e7eb;text-align:center">TOMADOS</th>
+              <th style="border:1px solid #888;padding:4px;background:#e5e7eb;text-align:center">DE ESTA<br>SOLICITUD</th>
             </tr></thead>
-            <tbody>${periodos.map(p=>`<tr>
+            <tbody>${periodos.map(p=>{
+              const deEsta = porPeriodo[p.id] || 0;
+              return `<tr>
               <td style="border:1px solid #888;padding:3px 6px">${p.num_periodo}° Periodo (${parseFloat(p.dias_correspondientes).toFixed(0)} días)</td>
               <td style="border:1px solid #888;padding:3px 6px;text-align:right">${parseFloat(p.dias_tomados).toFixed(0)}</td>
-            </tr>`).join('')}</tbody>
+              <td style="border:1px solid #888;padding:3px 6px;text-align:right;font-weight:${deEsta?'700':'400'}">${deEsta ? deEsta.toFixed(0) : '—'}</td>
+            </tr>`;}).join('')}</tbody>
           </table>
           <table style="border-collapse:collapse;font-size:12px;width:100%">
             <thead><tr>
-              <th style="border:1px solid #888;padding:4px;background:#e5e7eb">DÍAS DISFRUTADOS</th>
+              <th style="border:1px solid #888;padding:4px;background:#e5e7eb">DÍAS DISFRUTADOS<br><span style="font-weight:400;font-size:9.5px">antes de esta solicitud</span></th>
               <th style="border:1px solid #888;padding:4px;background:#e5e7eb">DÍAS A DISFRUTAR</th>
-              <th style="border:1px solid #888;padding:4px;background:#e5e7eb">DÍAS PENDIENTES</th>
+              <th style="border:1px solid #888;padding:4px;background:#e5e7eb">DÍAS PENDIENTES<br><span style="font-weight:400;font-size:9.5px">después de esta solicitud</span></th>
             </tr></thead>
             <tbody><tr>
-              <td style="border:1px solid #888;padding:6px;vertical-align:top">${totTom.toFixed(0)}</td>
+              <td style="border:1px solid #888;padding:6px;text-align:center;font-size:15px">${tomAntes.toFixed(0)}</td>
               <td style="border:1px solid #888;padding:6px;text-align:center;font-size:18px;font-weight:700">${parseFloat(s.dias_solicitados).toFixed(0)}</td>
-              <td style="border:1px solid #888;padding:6px;vertical-align:top">${totPend.toFixed(0)}</td>
+              <td style="border:1px solid #888;padding:6px;text-align:center;font-size:15px">${totPend.toFixed(0)}</td>
             </tr></tbody>
           </table>
         </div>
 
+        ${diasDeEsta ? `<div style="font-size:11.5px;margin-bottom:8px;border:1px solid #888;padding:5px 8px;background:#f9fafb">
+          <strong>Estos días se aplican a:</strong> ${aplic.map(x=>`${parseFloat(x.dias_aplicados).toFixed(0)} del ${x.num_periodo}° periodo`).join(' · ')}
+          <span style="color:#555">— saldo antes: ${pendAntes.toFixed(0)} días · después: ${totPend.toFixed(0)} días</span>
+        </div>` : ''}
         <div style="font-size:12px;margin-bottom:6px"><strong>Por lo que tomaré mis vacaciones en la fecha señalada del día:</strong> ${fmtDateLg(s.fecha_inicio)} al ${fmtDateLg(s.fecha_fin)}</div>
         <div style="font-size:12px;margin-bottom:6px"><strong>Presentándome a laborar el día:</strong> ${fmtDateRet(s.fecha_regreso)}</div>
         <div style="font-size:12px;margin-bottom:30px"><strong>Observaciones:</strong> ${s.observaciones||''}</div>

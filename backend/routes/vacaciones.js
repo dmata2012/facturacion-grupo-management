@@ -641,8 +641,22 @@ router.get('/solicitudes/:id', async (req, res) => {
          FROM fac_vacaciones_periodos WHERE empleado_id=$1 ORDER BY num_periodo`,
       [sol.empleado_id]);
 
+    // De que periodo salieron los dias de ESTA solicitud. Hace falta para el
+    // formato impreso: dias_tomados de cada periodo ya trae descontada esta
+    // solicitud (se aplica al crearla), asi que sin este dato no hay forma de
+    // reconstruir el saldo que tenia el colaborador ANTES de pedirla, que es lo
+    // que espera leer quien firma la hoja.
+    const apl = await query(
+      `SELECT sp.periodo_id, sp.dias_aplicados, p.num_periodo
+         FROM fac_vacaciones_solicitud_periodos sp
+         JOIN fac_vacaciones_periodos p ON p.id = sp.periodo_id
+        WHERE sp.solicitud_id = $1
+        ORDER BY p.num_periodo`,
+      [req.params.id]);
+
     res.json({
       ...sol,
+      aplicaciones: apl.rows,
       empleado: {
         id: sol.empleado_id, nombre: sol.nombre, puesto: sol.puesto,
         departamento: sol.departamento, numero_colaborador: sol.numero_colaborador,
