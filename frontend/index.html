@@ -16035,7 +16035,10 @@ function renderVacPorAutorizar(d) {
         </div>
         ${x.vobo_en ? `<div style="margin-top:9px;font-size:11.5px;color:#166534;background:#f0fdf4;
           border:1px solid #bbf7d0;border-radius:8px;padding:5px 9px;display:inline-block">
-          ✓ Con visto bueno del jefe${x.vobo_nombre ? ' · ' + x.vobo_nombre : ''} · ${fmtDate(x.vobo_en)}</div>` : ''}
+          ✓ Con visto bueno del jefe${x.vobo_nombre ? ' · ' + x.vobo_nombre : ''} · ${fmtDate(x.vobo_en)}</div>`
+        : `<div style="margin-top:9px;font-size:11.5px;color:#92400e;background:#fffbeb;
+          border:1px solid #fde68a;border-radius:8px;padding:5px 9px;display:inline-block">
+          ⚠ Nadie dio el visto bueno. Si el colaborador tuviera jefe asignado, pasaría por él primero.</div>`}
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">
           <button class="btn bo bsm" onclick="imprimirSolicitudVac(${x.id})">🖨 Ver formato</button>
           <button class="btn bd bsm" onclick="rechazarSolicitudVac(${x.id})">✕ Rechazar</button>

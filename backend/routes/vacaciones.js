@@ -566,10 +566,16 @@ router.put('/empleados/:id/periodos', requireRol('admin', 'capturista'), async (
   } finally { client.release(); }
 });
 
-// ── CREAR SOLICITUD ── (cualquier usuario autenticado puede solicitar)
+// ── CREAR SOLICITUD ──
 // Alta de solicitud. Se extrae a funcion con nombre porque el autoservicio la
 // reutiliza: asi el reparto de dias por periodo vive en un solo lugar.
-router.post('/solicitudes', (req, res) => crearSolicitud(req, res));
+//
+// La RUTA exige permiso de captura porque da de alta a nombre de OTRO: sin eso,
+// cualquier usuario con sesion podia crear vacaciones ya aprobadas para quien
+// quisiera. El autoservicio (/mis-solicitudes) no pasa por aqui: llama a la
+// funcion directamente, forzando su propio empleado_id.
+router.post('/solicitudes', permiso('vacaciones', NIVEL.CAPTURAR),
+            (req, res) => crearSolicitud(req, res));
 
 async function crearSolicitud(req, res) {
   const client = await getClient();
@@ -591,7 +597,11 @@ async function crearSolicitud(req, res) {
 
     // Distribuir días — manual si viene distribucion, o FIFO automática
     // Solo vacaciones consume periodos. Permisos e incapacidades no descuentan.
-    const est = estatus || 'aprobada';
+    // Las vacaciones de quien tiene jefe asignado NO pueden nacer autorizadas:
+    // la regla es que no se autorizan sin su visto bueno, y capturarlas ya
+    // aprobadas seria la puerta de atras a esa regla. Se mandan a su bandeja.
+    let est = estatus || 'aprobada';
+    if (esVacaciones && est === 'aprobada' && await jefeDe(empleado_id)) est = 'pendiente';
     let asignaciones = [];
     let resumen = null;
     if (est !== 'rechazada' && esVacaciones) {
