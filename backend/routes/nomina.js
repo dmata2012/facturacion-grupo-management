@@ -17,10 +17,13 @@ router.use(verificarToken);
 router.get('/empleados', async (req, res) => {
   try {
     const r = await query(`
-      SELECT *,
-        TO_CHAR(fecha_ingreso,'YYYY-MM-DD')     AS fecha_ingreso,
-        TO_CHAR(fecha_nacimiento,'YYYY-MM-DD')  AS fecha_nacimiento
-      FROM fac_empleados WHERE activo=TRUE ORDER BY nombre`);
+      SELECT e.*,
+        TO_CHAR(e.fecha_ingreso,'YYYY-MM-DD')     AS fecha_ingreso,
+        TO_CHAR(e.fecha_nacimiento,'YYYY-MM-DD')  AS fecha_nacimiento,
+        j.nombre AS jefe_nombre
+      FROM fac_empleados e
+      LEFT JOIN fac_empleados j ON j.id = e.jefe_id
+      WHERE e.activo=TRUE ORDER BY e.nombre`);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -61,14 +64,15 @@ router.post('/empleados', requireRol('admin', 'capturista'), async (req, res) =>
     const { numero_colaborador, nombre, puesto, departamento, salario_base,
             fecha_ingreso, fecha_nacimiento, telefono, email, notas } = req.body;
     if (!nombre) return res.status(400).json({ error: 'Nombre requerido.' });
+    const jefe = parseInt(req.body.jefe_id) || null;
     const r = await query(
       `INSERT INTO fac_empleados(numero_colaborador,nombre,puesto,departamento,salario_base,
-         fecha_ingreso,fecha_nacimiento,telefono,email,notas)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+         fecha_ingreso,fecha_nacimiento,telefono,email,notas,jefe_id)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [(numero_colaborador||'').toString().trim() || null,
        nombre, puesto, departamento, parseFloat(salario_base) || 0,
        fecha_ingreso || null, fecha_nacimiento || null,
-       telefono || null, email || null, notas]
+       telefono || null, email || null, notas, jefe]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -78,15 +82,18 @@ router.put('/empleados/:id', requireRol('admin', 'capturista'), async (req, res)
   try {
     const { numero_colaborador, nombre, puesto, departamento, salario_base,
             fecha_ingreso, fecha_nacimiento, telefono, email, activo, notas } = req.body;
+    // Nadie puede ser su propio jefe: la solicitud nunca saldria de su bandeja.
+    let jefe = parseInt(req.body.jefe_id) || null;
+    if (jefe && String(jefe) === String(req.params.id)) jefe = null;
     await query(
       `UPDATE fac_empleados SET numero_colaborador=$1,nombre=$2,puesto=$3,departamento=$4,
          salario_base=$5,fecha_ingreso=$6,fecha_nacimiento=$7,telefono=$8,email=$9,
-         activo=$10,notas=$11,actualizado_en=NOW()
-       WHERE id=$12`,
+         activo=$10,notas=$11,jefe_id=$12,actualizado_en=NOW()
+       WHERE id=$13`,
       [(numero_colaborador||'').toString().trim() || null,
        nombre, puesto, departamento, parseFloat(salario_base) || 0,
        fecha_ingreso || null, fecha_nacimiento || null,
-       telefono || null, email || null, activo, notas, req.params.id]
+       telefono || null, email || null, activo, notas, jefe, req.params.id]
     );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }

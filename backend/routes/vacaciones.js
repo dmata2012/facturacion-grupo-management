@@ -50,7 +50,34 @@ router.use(verificarToken);
     try { await query(`ALTER TABLE fac_vacaciones_solicitudes ADD COLUMN IF NOT EXISTS ${col}`); }
     catch (e) { console.warn('Migración autorización:', e.message); }
   }
+  // Visto bueno del jefe directo, previo a la autorización de RH. El rastro va
+  // aparte del de autorización porque son dos firmas distintas y el formato
+  // impreso tiene una línea para cada una.
+  for (const col of ['vobo_por INT', 'vobo_en TIMESTAMP', 'vobo_nota TEXT']) {
+    try { await query(`ALTER TABLE fac_vacaciones_solicitudes ADD COLUMN IF NOT EXISTS ${col}`); }
+    catch (e) { console.warn('Migración visto bueno:', e.message); }
+  }
+  // A quién reporta cada colaborador. Se guarda por persona y no por
+  // departamento porque el departamento es texto libre, y porque hay quien
+  // reporta a alguien que no es el jefe de su área.
+  try {
+    await query(`ALTER TABLE fac_empleados ADD COLUMN IF NOT EXISTS jefe_id INT`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_fac_empleados_jefe ON fac_empleados(jefe_id)`);
+  } catch (e) { console.warn('Migración jefe_id:', e.message); }
 })();
+
+// ══ ESTATUS DE UNA SOLICITUD ════════════════════════════════
+//   pendiente  espera el visto bueno del jefe directo
+//   vo_bo      el jefe ya dio su visto bueno; espera la autorización de RH
+//   aprobada   autorizada en firme
+//   rechazada  rechazada por el jefe o por RH (los días se devuelven)
+//
+// Quien no tiene jefe asignado se salta el primer paso: su solicitud nace en
+// 'vo_bo'. Sin eso, nadie podría darle entrada y quedaría atorada para siempre.
+async function jefeDe(empleadoId) {
+  const r = await query(`SELECT jefe_id FROM fac_empleados WHERE id=$1`, [empleadoId]);
+  return r.rows[0]?.jefe_id || null;
+}
 
 // Tabla LFT (post-reforma 2023): años cumplidos → días de vacaciones
 function diasPorAnio(anio) {
@@ -154,7 +181,8 @@ router.post('/mis-solicitudes', async (req, res) => {
       dias_solicitados: dias,
       observaciones: observaciones || null,
       tipo: tipo || 'vacaciones',
-      estatus: 'pendiente'
+      // Con jefe asignado pasa primero por él; sin jefe va directo a RH
+      estatus: (await jefeDe(empId)) ? 'pendiente' : 'vo_bo'
     };
     return crearSolicitud(req, res);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -507,14 +535,14 @@ router.get('/solicitudes-pendientes', autorizaVacaciones, async (req, res) => {
         FROM fac_vacaciones_solicitudes s
         JOIN fac_empleados e ON e.id = s.empleado_id
         LEFT JOIN fac_usuarios u ON u.id = s.creado_por
-       WHERE s.estatus = 'pendiente'
+       WHERE s.estatus = 'vo_bo'
          AND ($1::int IS NULL OR s.empleado_id <> $1::int)
        ORDER BY s.fecha_inicio, s.id
     `, [mi]);
     // Las propias se cuentan aparte para poder explicar por qué no salen en la lista
     const propias = mi ? await query(
       `SELECT COUNT(*)::int AS n FROM fac_vacaciones_solicitudes
-        WHERE estatus='pendiente' AND empleado_id=$1`, [mi]) : { rows: [{ n: 0 }] };
+        WHERE estatus IN ('pendiente','vo_bo') AND empleado_id=$1`, [mi]) : { rows: [{ n: 0 }] };
     res.json({ solicitudes: r.rows, propias_en_espera: propias.rows[0].n });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -532,9 +560,88 @@ router.get('/solicitudes-pendientes/conteo', async (req, res) => {
     const mi = await miEmpleadoId(req.usuario.id);
     const r = await query(
       `SELECT COUNT(*)::int AS n FROM fac_vacaciones_solicitudes
-        WHERE estatus='pendiente' AND ($1::int IS NULL OR empleado_id <> $1::int)`, [mi]);
+        WHERE estatus='vo_bo' AND ($1::int IS NULL OR empleado_id <> $1::int)`, [mi]);
     res.json({ n: r.rows[0].n });
   } catch (e) { res.json({ n: 0 }); }
+});
+
+// ══ VISTO BUENO DEL JEFE DIRECTO ════════════════════
+// Primer paso del flujo. Lo da el jefe asignado al colaborador, que puede ser
+// un usuario sin ningun permiso sobre el modulo de vacaciones: por eso esta
+// ruta NO usa autorizaVacaciones, sino que comprueba el parentesco directo.
+//
+// Se deja pasar tambien a quien administra vacaciones (nivel Administrar) para
+// que una solicitud no se quede atorada cuando el jefe esta de vacaciones el
+// mismo. Quede quien quede, el nombre que se guarda es el de quien lo dio, y
+// ese es el que sale impreso.
+async function puedeDarVoBo(req, solicitudId) {
+  const r = await query(
+    `SELECT s.empleado_id, s.estatus, e.jefe_id, e.nombre
+       FROM fac_vacaciones_solicitudes s
+       JOIN fac_empleados e ON e.id = s.empleado_id
+      WHERE s.id = $1`, [solicitudId]);
+  if (!r.rows.length) return { ok: false, code: 404, error: 'Solicitud no encontrada.' };
+  const sol = r.rows[0];
+
+  const mi = await miEmpleadoId(req.usuario.id);
+  if (mi && sol.empleado_id === mi)
+    return { ok: false, code: 403, error: 'No puedes dar el visto bueno a tu propia solicitud.' };
+
+  if (mi && sol.jefe_id && sol.jefe_id === mi) return { ok: true, sol };
+
+  const perm = await permisosDeUsuario(req.usuario.id, req.usuario.rol);
+  if (!perm.listo || (perm.niveles.vacaciones ?? 0) >= NIVEL.TODO) return { ok: true, sol };
+
+  return { ok: false, code: 403,
+           error: `Solo el jefe directo de ${sol.nombre} puede dar el visto bueno.` };
+}
+
+// Lo que espera MI visto bueno: solicitudes de la gente que me reporta.
+router.get('/por-visto-bueno', async (req, res) => {
+  try {
+    const mi = await miEmpleadoId(req.usuario.id);
+    if (!mi) return res.json({ solicitudes: [], es_jefe: false });
+    const r = await query(`
+      SELECT s.*, e.nombre, e.puesto, e.departamento, e.numero_colaborador,
+             (SELECT COALESCE(SUM(dias_correspondientes - dias_tomados), 0)
+                FROM fac_vacaciones_periodos WHERE empleado_id = s.empleado_id) AS le_quedan
+        FROM fac_vacaciones_solicitudes s
+        JOIN fac_empleados e ON e.id = s.empleado_id
+       WHERE s.estatus = 'pendiente' AND e.jefe_id = $1 AND s.empleado_id <> $1
+       ORDER BY s.fecha_inicio, s.id`, [mi]);
+    const equipo = await query(
+      `SELECT COUNT(*)::int AS n FROM fac_empleados WHERE jefe_id=$1 AND activo IS NOT FALSE`, [mi]);
+    res.json({ solicitudes: r.rows, es_jefe: equipo.rows[0].n > 0, a_mi_cargo: equipo.rows[0].n });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Contador para el menu del jefe
+router.get('/por-visto-bueno/conteo', async (req, res) => {
+  try {
+    const mi = await miEmpleadoId(req.usuario.id);
+    if (!mi) return res.json({ n: 0 });
+    const r = await query(
+      `SELECT COUNT(*)::int AS n
+         FROM fac_vacaciones_solicitudes s
+         JOIN fac_empleados e ON e.id = s.empleado_id
+        WHERE s.estatus='pendiente' AND e.jefe_id=$1 AND s.empleado_id <> $1`, [mi]);
+    res.json({ n: r.rows[0].n });
+  } catch (e) { res.json({ n: 0 }); }
+});
+
+router.patch('/solicitudes/:id/visto-bueno', async (req, res) => {
+  try {
+    const permiso = await puedeDarVoBo(req, req.params.id);
+    if (!permiso.ok) return res.status(permiso.code).json({ error: permiso.error });
+    const r = await query(
+      `UPDATE fac_vacaciones_solicitudes
+          SET estatus='vo_bo', vobo_por=$1, vobo_en=NOW(), vobo_nota=$2
+        WHERE id=$3 AND estatus='pendiente' RETURNING *`,
+      [req.usuario.id, (req.body.nota || '').trim() || null, req.params.id]);
+    if (!r.rows.length)
+      return res.status(400).json({ error: 'Esa solicitud ya no está esperando visto bueno.' });
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── AUTORIZAR ──
@@ -548,10 +655,16 @@ router.patch('/solicitudes/:id/autorizar', autorizaVacaciones, async (req, res) 
     const r = await query(
       `UPDATE fac_vacaciones_solicitudes
           SET estatus='aprobada', autorizado_por=$1, autorizado_en=NOW(), nota_autorizacion=$2
-        WHERE id=$3 AND estatus='pendiente' RETURNING *`,
+        WHERE id=$3 AND estatus='vo_bo' RETURNING *`,
       [req.usuario.id, (req.body.nota || '').trim() || null, req.params.id]);
-    if (!r.rows.length)
+    if (!r.rows.length) {
+      // Distinguir "ya resuelta" de "todavía le falta el jefe": son dos
+      // situaciones distintas y la segunda tiene algo que hacer al respecto.
+      const q = await query(`SELECT estatus FROM fac_vacaciones_solicitudes WHERE id=$1`, [req.params.id]);
+      if (q.rows[0]?.estatus === 'pendiente')
+        return res.status(400).json({ error: 'Falta el visto bueno del jefe directo. Hasta entonces no se puede autorizar.' });
       return res.status(400).json({ error: 'Esa solicitud ya fue resuelta o no existe.' });
+    }
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -560,7 +673,16 @@ router.patch('/solicitudes/:id/autorizar', autorizaVacaciones, async (req, res) 
 // Devuelve los días a sus periodos. Si no se devolvieran, un "no" le costaría al
 // colaborador los mismos días que si se hubiera ido de vacaciones.
 const MIN_MOTIVO = 5;
-router.patch('/solicitudes/:id/rechazar', autorizaVacaciones, async (req, res) => {
+// Rechazar lo puede hacer RH en cualquiera de los dos pasos, y tambien el jefe
+// directo mientras la solicitud espera su visto bueno: quien puede aprobar algo
+// tiene que poder negarlo, si no el unico camino que se le deja es decir que si.
+async function puedeRechazar(req, res, next) {
+  const vb = await puedeDarVoBo(req, req.params.id).catch(() => ({ ok: false }));
+  if (vb.ok && vb.sol && vb.sol.estatus === 'pendiente') return next();
+  return autorizaVacaciones(req, res, next);
+}
+
+router.patch('/solicitudes/:id/rechazar', puedeRechazar, async (req, res) => {
   const client = await getClient();
   try {
     const nota = (req.body.nota || '').trim();
@@ -571,7 +693,8 @@ router.patch('/solicitudes/:id/rechazar', autorizaVacaciones, async (req, res) =
 
     await client.query('BEGIN');
     const s = await client.query(
-      `SELECT id FROM fac_vacaciones_solicitudes WHERE id=$1 AND estatus='pendiente' FOR UPDATE`,
+      `SELECT id FROM fac_vacaciones_solicitudes
+        WHERE id=$1 AND estatus IN ('pendiente','vo_bo') FOR UPDATE`,
       [req.params.id]);
     if (!s.rows.length) {
       await client.query('ROLLBACK');
@@ -620,10 +743,14 @@ router.get('/solicitudes/:id', async (req, res) => {
     const r = await query(`
       SELECT s.*, e.nombre, e.puesto, e.departamento, e.fecha_ingreso,
              e.numero_colaborador,
-             a.nombre AS autorizante
+             a.nombre  AS autorizante,
+             vb.nombre AS vobo_nombre,
+             j.nombre  AS jefe_nombre, j.puesto AS jefe_puesto
       FROM fac_vacaciones_solicitudes s
       JOIN fac_empleados e ON e.id = s.empleado_id
-      LEFT JOIN fac_usuarios a ON a.id = s.autorizado_por
+      LEFT JOIN fac_usuarios a  ON a.id = s.autorizado_por
+      LEFT JOIN fac_usuarios vb ON vb.id = s.vobo_por
+      LEFT JOIN fac_empleados j ON j.id = e.jefe_id
       WHERE s.id=$1
     `, [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Solicitud no encontrada.' });

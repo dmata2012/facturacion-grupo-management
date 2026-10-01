@@ -8914,13 +8914,15 @@ async function loadEmpleados() {
 
 async function openEmpleado(id=null) {
   let e = { numero_colaborador:'', nombre:'', puesto:'', departamento:'',
-            salario_base:'', fecha_ingreso:'', fecha_nacimiento:'', telefono:'', email:'' };
+            salario_base:'', fecha_ingreso:'', fecha_nacimiento:'', telefono:'', email:'',
+            jefe_id:'' };
+  // La lista completa hace falta siempre, no solo al editar: alimenta el
+  // selector de jefe directo.
+  let todos = [];
+  try { todos = await api('/nomina/empleados'); } catch(err) {}
   if (id) {
-    try {
-      const d = await api('/nomina/empleados');
-      const f = d.find(x => x.id == id);
-      if (f) e = { ...e, ...f };
-    } catch(err) {}
+    const f = todos.find(x => x.id == id);
+    if (f) e = { ...e, ...f };
   }
   const sv = v => (v == null ? '' : String(v)).replace(/"/g,'&quot;');
 
@@ -8997,6 +8999,19 @@ async function openEmpleado(id=null) {
             </div>
             <div class="fi"><label>Departamento</label>
               <input id="em-depto" value="${sv(e.departamento)}" placeholder="Ej: Administración" oninput="_epPreview()">
+            </div>
+            <div class="fi full"><label>👤 Jefe directo
+              <span style="font-weight:400;color:var(--muted);font-size:10px;text-transform:none;letter-spacing:0">
+                (da el visto bueno a sus solicitudes de vacaciones)</span></label>
+              <select id="em-jefe">
+                <option value="">— Sin jefe asignado —</option>
+                ${todos.filter(x => String(x.id) !== String(id))
+                       .map(x => `<option value="${x.id}" ${String(e.jefe_id||'') === String(x.id) ? 'selected' : ''}>${
+                         sv(x.nombre)}${x.puesto ? ' · ' + sv(x.puesto) : ''}</option>`).join('')}
+              </select>
+              <div style="font-size:10.5px;color:var(--muted);margin-top:4px;line-height:1.45">
+                Sin jefe asignado, sus solicitudes pasan directo a Recursos Humanos.
+              </div>
             </div>
           </div>
         </div>
@@ -9139,6 +9154,7 @@ async function saveEmpleado(id) {
     nombre      : $('em-nombre').value.trim(),
     puesto      : $('em-puesto').value.trim(),
     departamento: $('em-depto').value.trim(),
+    jefe_id     : $('em-jefe')?.value || null,
     salario_base: $('em-sal').value,
     fecha_ingreso   : $('em-ingreso').value || null,
     fecha_nacimiento: $('em-nacimiento').value || null,
@@ -15543,6 +15559,8 @@ async function misVacaciones() {
               background:#fff;color:#0f766e;font-weight:900;border:none">＋ Solicitar vacaciones</button>
     </div>
 
+    <div id="mv-vobo"></div>
+
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">
       <div class="card">
         <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:10px">
@@ -15596,6 +15614,83 @@ async function misVacaciones() {
         </table></div>` : '<p class="empty">Aún no has solicitado vacaciones.</p>'}
       </div>
     </div>`;
+  cargarVoBoEquipo();
+}
+
+// ══ VISTO BUENO DEL EQUIPO ══════════════════════════════════
+// El jefe directo da el primer paso: hasta que no lo da, la solicitud no llega
+// a Recursos Humanos. Vive dentro de Mis Vacaciones y no en un menú aparte
+// porque un jefe suele ser alguien sin acceso al módulo de vacaciones: su
+// pantalla es esta.
+async function cargarVoBoEquipo() {
+  const cont = $('mv-vobo');
+  if (!cont) return;
+  try {
+    const d = await api('/vacaciones/por-visto-bueno');
+    window._mvVoBo = d;
+    // Quien no tiene gente a su cargo no ve nada: ni la tarjeta vacía
+    if (!d.es_jefe && !d.solicitudes.length) { cont.innerHTML = ''; return; }
+    cont.innerHTML = `
+      <div class="card" style="margin-bottom:14px;border:2px solid ${d.solicitudes.length ? '#f59e0b' : 'var(--border)'}">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:${d.solicitudes.length?'12px':'0'}">
+          <div>
+            <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">
+              Mi equipo</div>
+            <div style="font-size:15px;font-weight:900;color:var(--dark)">
+              ${d.solicitudes.length
+                ? `${d.solicitudes.length} solicitud${d.solicitudes.length!=1?'es':''} esperando tu visto bueno`
+                : 'Nada pendiente de tu visto bueno'}</div>
+          </div>
+          <div style="font-size:11.5px;color:var(--muted)">
+            ${d.a_mi_cargo} persona${d.a_mi_cargo!=1?'s':''} a tu cargo</div>
+        </div>
+        ${d.solicitudes.map(x => {
+          const quedan = parseFloat(x.le_quedan || 0);
+          return `
+          <div style="border:1.5px solid var(--border);border-radius:11px;padding:12px 14px;margin-bottom:9px">
+            <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+              <div style="flex:1;min-width:200px">
+                <div style="font-weight:900;font-size:14px">${x.nombre}</div>
+                <div style="font-size:11.5px;color:var(--muted)">${x.puesto || ''}${x.departamento ? ' · ' + x.departamento : ''}</div>
+                <div style="font-size:12.5px;margin-top:6px">
+                  <strong>${fmtDate(x.fecha_inicio)}</strong> al <strong>${fmtDate(x.fecha_fin)}</strong>
+                  ${x.fecha_regreso ? ` · se reincorpora el ${fmtDate(x.fecha_regreso)}` : ''}
+                </div>
+                ${x.observaciones ? `<div style="margin-top:6px;background:var(--bg-alt);border-radius:8px;
+                   padding:6px 9px;font-size:12px;color:#334155;line-height:1.45">${x.observaciones}</div>` : ''}
+              </div>
+              <div style="text-align:right;white-space:nowrap">
+                <div style="font-size:24px;font-weight:900;color:#0d9488">${x.dias_solicitados}</div>
+                <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">días</div>
+                <div style="font-size:10.5px;color:var(--muted);margin-top:5px">le quedan ${quedan.toFixed(1)}</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:11px;flex-wrap:wrap">
+              <button class="btn bo bsm" onclick="imprimirSolicitudVac(${x.id})">🖨 Ver formato</button>
+              <button class="btn bd bsm" onclick="rechazarSolicitudVac(${x.id}, true)">✕ Rechazar</button>
+              <button class="btn bs bsm" onclick="darVoBo(${x.id})">✓ Dar visto bueno</button>
+            </div>
+          </div>`;
+        }).join('')}
+        ${d.solicitudes.length ? `<div style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-top:4px">
+          Con tu visto bueno la solicitud pasa a Recursos Humanos para la autorización final.
+        </div>` : ''}
+      </div>`;
+  } catch(e) { cont.innerHTML = ''; }
+}
+
+async function darVoBo(id) {
+  const x = (window._mvVoBo?.solicitudes || []).find(v => v.id === id);
+  if (!x) return;
+  if (!await confirm2(
+      `¿Dar tu visto bueno a las vacaciones de ${x.nombre}?\n\n` +
+      `${fmtDate(x.fecha_inicio)} al ${fmtDate(x.fecha_fin)} · ${x.dias_solicitados} días\n\n` +
+      `Pasa a Recursos Humanos para la autorización final. Tu nombre queda en el formato.`)) return;
+  try {
+    await api(`/vacaciones/solicitudes/${id}/visto-bueno`, { method:'PATCH', body: JSON.stringify({}) });
+    toast('Visto bueno registrado.');
+    misVacaciones();
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 function openMiSolicitud() {
@@ -15851,6 +15946,9 @@ function renderVacPorAutorizar(d) {
             </div>
           </div>
         </div>
+        ${x.vobo_en ? `<div style="margin-top:9px;font-size:11.5px;color:#166534;background:#f0fdf4;
+          border:1px solid #bbf7d0;border-radius:8px;padding:5px 9px;display:inline-block">
+          ✓ Con visto bueno del jefe${x.vobo_nombre ? ' · ' + x.vobo_nombre : ''} · ${fmtDate(x.vobo_en)}</div>` : ''}
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">
           <button class="btn bo bsm" onclick="imprimirSolicitudVac(${x.id})">🖨 Ver formato</button>
           <button class="btn bd bsm" onclick="rechazarSolicitudVac(${x.id})">✕ Rechazar</button>
@@ -15875,9 +15973,13 @@ async function autorizarSolicitudVac(id) {
 
 // El motivo es obligatorio: un "no" sin explicación acaba en una plática de
 // pasillo y el sistema se queda sin memoria de por qué se rechazó.
-function rechazarSolicitudVac(id) {
-  const x = (window._vacAut?.solicitudes || []).find(v => v.id === id);
+// Se usa desde las dos bandejas: la del jefe (Mis Vacaciones) y la de RH. El
+// segundo argumento dice cual, para refrescar la que corresponde al terminar.
+function rechazarSolicitudVac(id, desdeVoBo) {
+  const lista = desdeVoBo ? (window._mvVoBo?.solicitudes || []) : (window._vacAut?.solicitudes || []);
+  const x = lista.find(v => v.id === id);
   if (!x) return;
+  window._vacRechDesdeVoBo = !!desdeVoBo;
   $('modal-gt-cats-body').innerHTML = `
     <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#991b1b,#dc2626);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
       <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Rechazar solicitud</div>
@@ -15909,7 +16011,7 @@ async function confirmarRechazoVac(id) {
     });
     closeModal('modal-gt-cats');
     toast(`Rechazada. Regresaron ${(+r.dias_devueltos||0).toFixed(1)} días a sus periodos.`);
-    await loadVacPorAutorizar();
+    if (window._vacRechDesdeVoBo) misVacaciones(); else await loadVacPorAutorizar();
   } catch(e) { toast(e.message, 'err'); }
 }
 
@@ -16847,7 +16949,13 @@ async function imprimirSolicitudVac(id) {
 
         <table style="width:100%;font-size:11px;margin-top:40px">
           <tr style="text-align:center">
-            <td style="border-top:1px solid #000;padding-top:4px;width:33%">Jefe del Depto. / Gte. Del Área</td>
+            <td style="border-top:1px solid #000;padding-top:4px;width:33%">${
+              // Quien dio el visto bueno; si todavia no lo da, el jefe asignado,
+              // para que la hoja llegue con el nombre de quien debe firmarla.
+              s.vobo_nombre ? `${s.vobo_nombre}<br>` : (s.jefe_nombre ? `${s.jefe_nombre}<br>` : '')
+            }Jefe del Depto. / Gte. Del Área${
+              s.vobo_en ? `<br><span style="font-size:9.5px">Visto bueno ${fmtDate(s.vobo_en)}</span>` : ''
+            }</td>
             <td></td>
             <td style="border-top:1px solid #000;padding-top:4px;width:33%">${emp.nombre}<br>Colaborador</td>
             <td></td>
