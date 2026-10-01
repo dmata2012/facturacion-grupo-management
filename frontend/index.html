@@ -15531,91 +15531,208 @@ async function misVacaciones() {
   }
 
   const e = d.empleado;
-  const disp = d.dias_disponibles;
+  const disp = parseFloat(d.dias_disponibles) || 0;
+
+  // Resumen del expediente, para el anillo y los indicadores del encabezado
+  const totAsignados = d.periodos.reduce((a, p) => a + (parseFloat(p.dias_correspondientes) || 0), 0);
+  const totUsados    = d.periodos.reduce((a, p) => a + (parseFloat(p.dias_tomados) || 0), 0);
+  const apartados    = parseFloat(d.dias_apartados) || 0;
+  const pctDisp      = totAsignados > 0 ? Math.round(disp / totAsignados * 100) : 0;
+
+  // Hasta cuándo puede disfrutar cada periodo (LFT: 6 meses después de cumplir
+  // el año). Se calcula aquí porque el colaborador también debe verlo, no solo RH.
+  const vigencia = num => {
+    const iso = String(e.fecha_ingreso || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || !(num > 0)) return null;
+    const g = new Date(iso + 'T00:00:00');
+    if (isNaN(g.getTime())) return null;
+    g.setFullYear(g.getFullYear() + num);
+    const v = new Date(g); v.setMonth(v.getMonth() + 6);
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const dias = Math.round((v - hoy) / 86400000);
+    return { vence: v.toISOString().slice(0, 10), dias };
+  };
+
   $('content').innerHTML = `
     <style>
-      .mv-hero{background:linear-gradient(135deg,#0f766e 0%,#0d9488 55%,#14b8a6 100%);
-        border-radius:16px;padding:24px 28px;color:#fff;margin-bottom:16px;position:relative;overflow:hidden}
-      .mv-hero::after{content:'🏖';position:absolute;right:26px;bottom:-24px;font-size:118px;opacity:.1;line-height:1}
-      .mv-dias{font-size:52px;font-weight:900;line-height:1;letter-spacing:-2px}
-      .mv-p{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 14px;
-        border:1.5px solid var(--border);border-radius:12px;margin-bottom:8px;background:#fff}
-      .mv-barra{height:7px;background:#f1f5f9;border-radius:99px;overflow:hidden;margin-top:5px;width:170px}
-      .mv-barra i{display:block;height:100%;background:linear-gradient(90deg,#14b8a6,#0d9488);border-radius:99px}
+      .mv-hero{background:linear-gradient(135deg,#6B0F1A 0%,#9B1528 55%,#C41E3A 100%);
+        border-radius:18px;padding:22px 24px;color:#fff;margin-bottom:14px;position:relative;overflow:hidden}
+      .mv-hero::after{content:'🏖';position:absolute;right:18px;bottom:-30px;font-size:150px;opacity:.09;line-height:1;pointer-events:none}
+      .mv-top{display:flex;align-items:center;gap:22px;flex-wrap:wrap;position:relative;z-index:1}
+      /* Anillo: la parte blanca es lo que le queda por disfrutar */
+      .mv-ring{width:124px;height:124px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;
+        background:conic-gradient(#fff var(--pct), rgba(255,255,255,.26) 0)}
+      .mv-ring i{width:96px;height:96px;border-radius:50%;background:#8d1424;display:grid;
+        place-items:center;align-content:center;font-style:normal;text-align:center}
+      .mv-ring b{display:block;font-size:34px;font-weight:900;line-height:1;letter-spacing:-1px}
+      .mv-ring span{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:.9;margin-top:3px}
+      .mv-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;position:relative;z-index:1}
+      .mv-chip{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.26);border-radius:11px;
+        padding:7px 12px;backdrop-filter:blur(3px);min-width:92px}
+      .mv-chip b{display:block;font-size:17px;font-weight:900;line-height:1.1}
+      .mv-chip span{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;opacity:.88;margin-top:2px}
+      .mv-btn{background:#fff;color:var(--red);font-weight:900;border:none;margin-top:16px;position:relative;z-index:1}
+
+      .mv-sec{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.7px;
+        color:var(--muted);margin:0 2px 9px}
+      /* Rejilla propia: con auto-fit la tarjeta se quedaba en una columna
+         angosta y el texto se partía en tres renglones. */
+      .mv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(216px,1fr));gap:11px}
+
+      .mv-p{border:1.5px solid var(--border);border-radius:14px;padding:13px 15px;background:#fff;
+        transition:border-color .15s, transform .15s}
+      .mv-p:hover{border-color:var(--red-l);transform:translateY(-1px)}
+      .mv-p.agotado{background:var(--bg-alt);opacity:.78}
+      .mv-p-t{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+      .mv-p-n{font-weight:900;font-size:13.5px;color:var(--dark)}
+      .mv-p-d{font-size:27px;font-weight:900;line-height:1;letter-spacing:-1px}
+      .mv-barra{height:8px;background:#eef2f5;border-radius:99px;overflow:hidden;margin-top:10px;width:100%}
+      .mv-barra i{display:block;height:100%;border-radius:99px;transition:width .5s}
+      .mv-pie{display:flex;justify-content:space-between;gap:8px;margin-top:7px;font-size:11px;color:var(--muted)}
+      .mv-vence{font-weight:700}
+
+      .mv-s{border:1.5px solid var(--border);border-radius:14px;padding:13px 15px;background:#fff;
+        display:flex;flex-direction:column;gap:9px}
+      .mv-s-f{font-size:13.5px;font-weight:800;color:var(--dark);line-height:1.35}
+      .mv-s-m{font-size:11.5px;color:var(--muted)}
+      .mv-s-a{display:flex;gap:7px;flex-wrap:wrap;margin-top:auto;padding-top:3px}
+
+      @media (max-width:640px){
+        .mv-hero{padding:18px 16px;border-radius:14px}
+        .mv-top{gap:16px}
+        .mv-ring{width:98px;height:98px}
+        .mv-ring i{width:76px;height:76px}
+        .mv-ring b{font-size:27px}
+        .mv-chip{flex:1 1 calc(50% - 4px);min-width:0}
+        .mv-btn{width:100%}
+        .mv-grid{grid-template-columns:1fr;gap:9px}
+      }
     </style>
 
     <div class="mv-hero">
-      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">
-        ${e.nombre}${e.puesto ? ` · ${e.puesto}` : ''}
-      </div>
-      <div style="display:flex;align-items:flex-end;gap:14px;margin-top:8px;position:relative;z-index:1">
-        <div class="mv-dias">${disp}</div>
-        <div style="padding-bottom:7px">
-          <div style="font-size:15px;font-weight:800">día${disp!=1?'s':''} disponible${disp!=1?'s':''}</div>
-          <div style="font-size:12px;opacity:.85">${e.antiguedad_anios} año${e.antiguedad_anios!=1?'s':''} de antigüedad</div>
+      <div class="mv-top">
+        <div class="mv-ring" style="--pct:${pctDisp}%"><i>
+          <b>${disp}</b><span>días</span>
+        </i></div>
+        <div style="flex:1;min-width:170px">
+          <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.3px;opacity:.9">
+            ${e.nombre}</div>
+          <div style="font-size:19px;font-weight:900;margin-top:4px;line-height:1.25">
+            ${disp > 0 ? `Tienes ${disp} día${disp!=1?'s':''} para disfrutar` : 'No tienes días disponibles'}</div>
+          <div style="font-size:12px;opacity:.9;margin-top:4px">
+            ${e.puesto ? e.puesto + ' · ' : ''}${e.antiguedad_anios} año${e.antiguedad_anios!=1?'s':''} de antigüedad</div>
         </div>
       </div>
-      <button class="btn" onclick="openMiSolicitud()" style="margin-top:16px;position:relative;z-index:1;
-              background:#fff;color:#0f766e;font-weight:900;border:none">＋ Solicitar vacaciones</button>
+
+      <div class="mv-chips">
+        <div class="mv-chip"><b>${totAsignados}</b><span>Te tocan</span></div>
+        <div class="mv-chip"><b>${totUsados}</b><span>Disfrutados</span></div>
+        <div class="mv-chip"><b>${disp}</b><span>Disponibles</span></div>
+        ${apartados > 0 ? `<div class="mv-chip" title="Días de solicitudes que todavía no se autorizan">
+          <b>${apartados}</b><span>Apartados</span></div>` : ''}
+      </div>
+
+      <button class="btn mv-btn" onclick="openMiSolicitud()">＋ Solicitar vacaciones</button>
     </div>
 
     <div id="mv-vobo"></div>
 
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">
-      <div class="card">
-        <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:10px">
-          Mis periodos
-        </div>
-        ${d.periodos.length ? d.periodos.map(p => {
-          const pend = parseFloat(p.pendientes), tot = parseFloat(p.dias_correspondientes);
-          return `<div class="mv-p">
-            <div>
-              <div style="font-weight:800;font-size:13px">${p.num_periodo}° periodo</div>
-              <div style="font-size:11px;color:var(--muted)">
-                ${parseFloat(p.dias_tomados)} de ${tot} días usados
-              </div>
-            </div>
-            <div style="text-align:right">
-              <div style="font-size:17px;font-weight:900;color:${pend>0?'#0d9488':'var(--muted)'}">${pend}</div>
-              <div class="mv-barra"><i style="width:${tot>0?(parseFloat(p.dias_tomados)/tot*100):0}%"></i></div>
-            </div>
-          </div>`;
-        }).join('') : '<p class="empty">Todavía no tienes periodos generados. Recursos Humanos los da de alta.</p>'}
-      </div>
+    <div class="mv-sec">Mis periodos</div>
+    ${d.periodos.length ? (() => {
+      // Lo que sirve va primero. Con once periodos y nueve en cero, en el
+      // celular hay que bajar por todos antes de llegar a los que todavía
+      // tienen días; los agotados se guardan detrás de un botón.
+      const conDias  = d.periodos.filter(x => (parseFloat(x.pendientes) || 0) > 0);
+      const agotados = d.periodos.filter(x => (parseFloat(x.pendientes) || 0) <= 0);
+      const rejilla = lista => `<div class="mv-grid">${
+        lista.map(x => mvTarjetaPeriodo(x, vigencia)).join('')}</div>`;
+      return (conDias.length ? rejilla(conDias) : `
+        <div class="card" style="text-align:center;padding:22px 18px;font-size:12.5px;color:var(--muted)">
+          Ya disfrutaste todos los días de tus periodos.</div>`)
+        + (agotados.length ? `
+        <button class="btn bo bsm" id="mv-ver-agotados" style="margin-top:10px"
+                onclick="mvVerAgotados()">Ver ${agotados.length} ya disfrutado${agotados.length!=1?'s':''} ▾</button>
+        <div id="mv-agotados" style="display:none;margin-top:10px">${rejilla(agotados)}</div>` : '')
+        + '<div style="height:18px"></div>';
+    })() : `<div class="card" style="text-align:center;padding:28px 20px;margin-bottom:18px">
+      <div style="font-size:34px">📅</div>
+      <div style="font-size:13.5px;font-weight:800;margin-top:6px">Todavía no tienes periodos</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;line-height:1.5">
+        Se generan solos al cumplir tu primer año. Si ya lo cumpliste, avísale a Recursos Humanos.</div>
+    </div>`}
 
-      <!-- Ancho completo: con la tarjeta a media pantalla la tabla se desborda y
-           la columna de botones queda fuera de vista, sin nada que lo indique. -->
-      <div class="card" style="grid-column:1/-1">
-        <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:10px">
-          Mis solicitudes
-        </div>
-        <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;line-height:1.5">
-          Cuando una solicitud quede <strong>aprobada</strong> aparece el botón 🖨 para
-          imprimir tu formato firmado.
-        </div>
-        ${d.solicitudes.length ? `<div class="tscroll" style="max-height:52vh;overflow:auto"><table style="font-size:12px">
-          <thead><tr><th>Del</th><th>Al</th><th style="text-align:center">Días</th><th>Estatus</th><th></th></tr></thead>
-          <tbody>${d.solicitudes.map(s => {
-            const futura = s.fecha_inicio > new Date().toISOString().slice(0,10);
-            return `<tr>
-              <td style="white-space:nowrap">${fmtDate(s.fecha_inicio)}</td>
-              <td style="white-space:nowrap">${fmtDate(s.fecha_fin)}</td>
-              <td style="text-align:center;font-weight:800">${s.dias_solicitados}</td>
-              <td><span class="gt-pill ${/aprob/i.test(s.estatus)?'vig':/rechaz/i.test(s.estatus)?'can':'sin'}"
-                        title="${etiquetaEstatusVac(s.estatus).ayuda}">${etiquetaEstatusVac(s.estatus).texto}</span></td>
-              <td style="text-align:right;white-space:nowrap">
-                ${/aprob/i.test(s.estatus||'')
-                  ? `<button class="btn bs bsm" onclick="imprimirSolicitudVac(${s.id})"
-                             title="Imprimir mi solicitud autorizada">🖨 Imprimir</button>` : ''}
-                ${futura
-                  ? `<button class="btn bd bsm" style="padding:3px 7px" onclick="cancelarMiSolicitud(${s.id})" title="Cancelar">✕</button>` : ''}
-              </td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table></div>` : '<p class="empty">Aún no has solicitado vacaciones.</p>'}
-      </div>
-    </div>`;
+    <div class="mv-sec">Mis solicitudes</div>
+    ${d.solicitudes.length ? `<div class="mv-grid">
+      ${d.solicitudes.map(x => {
+        const futura = x.fecha_inicio > new Date().toISOString().slice(0,10);
+        const et = etiquetaEstatusVac(x.estatus);
+        const ap = /aprob/i.test(x.estatus || '');
+        return `<div class="mv-s">
+          <div>
+            <div class="mv-s-f">${fmtDate(x.fecha_inicio)} <span style="color:var(--muted);font-weight:600">al</span> ${fmtDate(x.fecha_fin)}</div>
+            <div class="mv-s-m" style="margin-top:3px">
+              ${x.dias_solicitados} día${x.dias_solicitados!=1?'s':''}${
+                x.fecha_regreso ? ` · regresas el ${fmtDate(x.fecha_regreso)}` : ''}</div>
+          </div>
+          <div><span class="gt-pill ${ap?'vig':/rechaz/i.test(x.estatus)?'can':'sin'}"
+                     title="${et.ayuda}">${et.texto}</span></div>
+          ${x.nota_autorizacion && /rechaz/i.test(x.estatus||'')
+            ? `<div style="font-size:11.5px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;
+                 padding:6px 9px;color:#991b1b;line-height:1.45">${x.nota_autorizacion}</div>` : ''}
+          <div class="mv-s-a">
+            ${ap ? `<button class="btn bs bsm" onclick="imprimirSolicitudVac(${x.id})">🖨 Imprimir</button>` : ''}
+            ${futura ? `<button class="btn bd bsm" onclick="cancelarMiSolicitud(${x.id})">✕ Cancelar</button>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>` : `<div class="card" style="text-align:center;padding:28px 20px">
+      <div style="font-size:34px">🧳</div>
+      <div style="font-size:13.5px;font-weight:800;margin-top:6px">Aún no has solicitado vacaciones</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;line-height:1.5">
+        Usa el botón de arriba. Cuando quede aprobada, aquí mismo podrás imprimir tu formato.</div>
+    </div>`}`;
   cargarVoBoEquipo();
+}
+
+// Una tarjeta de periodo. Sale de la plantilla para poder pintar por separado
+// los que tienen días y los que ya se agotaron.
+function mvTarjetaPeriodo(p, vigencia) {
+  const tot  = parseFloat(p.dias_correspondientes) || 0;
+  const usa  = parseFloat(p.dias_tomados) || 0;
+  const pend = parseFloat(p.pendientes) || 0;
+  const pct  = tot > 0 ? Math.min(100, usa / tot * 100) : 0;
+  const v = vigencia(parseInt(p.num_periodo));
+  // Ámbar cuando está por agotarse el plazo, rojo cuando ya pasó
+  const alerta = v && pend > 0 && v.dias < 0   ? 'vencido'
+               : v && pend > 0 && v.dias <= 60 ? 'pronto' : null;
+  const color = pend <= 0 ? '#B0B0B0' : alerta === 'vencido' ? 'var(--danger)'
+              : alerta === 'pronto' ? 'var(--warning)' : 'var(--gray-d)';
+  return `<div class="mv-p ${pend <= 0 ? 'agotado' : ''}">
+    <div class="mv-p-t">
+      <div class="mv-p-n">${p.num_periodo}° periodo</div>
+      <div class="mv-p-d" style="color:${color}">${pend}</div>
+    </div>
+    <div class="mv-barra"><i style="width:${pct}%;background:${
+      pend <= 0 ? '#cbd5e1' : 'var(--grad-red)'}"></i></div>
+    <div class="mv-pie">
+      <span>${usa} de ${tot} usados</span>
+      ${alerta === 'vencido'
+        ? `<span class="mv-vence" style="color:#dc2626"
+                 title="Por la LFT debían disfrutarse dentro de los 6 meses siguientes a cumplir el año">⚠ Venció</span>`
+        : alerta === 'pronto'
+        ? `<span class="mv-vence" style="color:#d97706"
+                 title="Vence el ${fmtDate(v.vence)}">⏳ ${v.dias} día${v.dias!=1?'s':''}</span>`
+        : pend <= 0 ? '<span>Completo</span>' : ''}
+    </div>
+  </div>`;
+}
+
+function mvVerAgotados() {
+  const c = $('mv-agotados'), b = $('mv-ver-agotados');
+  if (!c) return;
+  const abierto = c.style.display !== 'none';
+  c.style.display = abierto ? 'none' : '';
+  if (b) b.textContent = b.textContent.replace(abierto ? '▴' : '▾', abierto ? '▾' : '▴');
 }
 
 // 'vo_bo' es la clave que guarda la base, no algo que se le pueda enseñar a
@@ -15673,7 +15790,7 @@ async function cargarVoBoEquipo() {
                    padding:6px 9px;font-size:12px;color:#334155;line-height:1.45">${x.observaciones}</div>` : ''}
               </div>
               <div style="text-align:right;white-space:nowrap">
-                <div style="font-size:24px;font-weight:900;color:#0d9488">${x.dias_solicitados}</div>
+                <div style="font-size:24px;font-weight:900;color:var(--gray-d)">${x.dias_solicitados}</div>
                 <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">días</div>
                 <div style="font-size:10.5px;color:var(--muted);margin-top:5px">le quedan ${quedan.toFixed(1)}</div>
               </div>
