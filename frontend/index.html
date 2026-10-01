@@ -15601,7 +15601,8 @@ async function misVacaciones() {
               <td style="white-space:nowrap">${fmtDate(s.fecha_inicio)}</td>
               <td style="white-space:nowrap">${fmtDate(s.fecha_fin)}</td>
               <td style="text-align:center;font-weight:800">${s.dias_solicitados}</td>
-              <td><span class="gt-pill ${/aprob/i.test(s.estatus)?'vig':/rechaz/i.test(s.estatus)?'can':'sin'}">${s.estatus||'pendiente'}</span></td>
+              <td><span class="gt-pill ${/aprob/i.test(s.estatus)?'vig':/rechaz/i.test(s.estatus)?'can':'sin'}"
+                        title="${etiquetaEstatusVac(s.estatus).ayuda}">${etiquetaEstatusVac(s.estatus).texto}</span></td>
               <td style="text-align:right;white-space:nowrap">
                 ${/aprob/i.test(s.estatus||'')
                   ? `<button class="btn bs bsm" onclick="imprimirSolicitudVac(${s.id})"
@@ -15615,6 +15616,18 @@ async function misVacaciones() {
       </div>
     </div>`;
   cargarVoBoEquipo();
+}
+
+// 'vo_bo' es la clave que guarda la base, no algo que se le pueda enseñar a
+// nadie. Cada estatus se traduce a lo que el colaborador necesita entender:
+// de quién depende su solicitud ahora mismo.
+function etiquetaEstatusVac(e) {
+  const v = String(e || 'pendiente');
+  if (/aprob/i.test(v))  return { texto: 'aprobada',  ayuda: 'Autorizada en firme.' };
+  if (/rechaz/i.test(v)) return { texto: 'rechazada', ayuda: 'No fue autorizada. Revisa el motivo.' };
+  if (v === 'vo_bo')     return { texto: 'con visto bueno',
+                                  ayuda: 'Tu jefe ya dio el visto bueno. Falta la autorización de Recursos Humanos.' };
+  return { texto: 'pendiente', ayuda: 'Esperando el visto bueno de tu jefe directo.' };
 }
 
 // ══ VISTO BUENO DEL EQUIPO ══════════════════════════════════

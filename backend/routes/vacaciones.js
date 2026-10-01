@@ -64,6 +64,28 @@ router.use(verificarToken);
     await query(`ALTER TABLE fac_empleados ADD COLUMN IF NOT EXISTS jefe_id INT`);
     await query(`CREATE INDEX IF NOT EXISTS idx_fac_empleados_jefe ON fac_empleados(jefe_id)`);
   } catch (e) { console.warn('Migración jefe_id:', e.message); }
+
+  // Antes de que existiera el visto bueno, 'pendiente' significaba "esperando a
+  // Recursos Humanos". Al agregar el paso del jefe, la bandeja de RH pasó a
+  // mirar 'vo_bo' y las solicitudes que ya estaban en espera desaparecieron de
+  // ahí; tampoco las veía ningún jefe, porque nadie tenía jefe asignado todavía.
+  // Se les pone el visto bueno por omisión, sin nombre: nadie lo dio, y el
+  // formato no debe acreditar una firma que no ocurrió.
+  try {
+    await query(`CREATE TABLE IF NOT EXISTS fac_migraciones_aplicadas (
+                   clave TEXT PRIMARY KEY, aplicada_en TIMESTAMP DEFAULT NOW())`);
+    const ya = await query(`SELECT 1 FROM fac_migraciones_aplicadas WHERE clave=$1`,
+                           ['vacaciones_pendientes_a_vobo']);
+    if (!ya.rows.length) {
+      const r = await query(
+        `UPDATE fac_vacaciones_solicitudes SET estatus='vo_bo'
+          WHERE estatus='pendiente' RETURNING id`);
+      await query(`INSERT INTO fac_migraciones_aplicadas(clave) VALUES($1)
+                   ON CONFLICT (clave) DO NOTHING`, ['vacaciones_pendientes_a_vobo']);
+      if (r.rows.length)
+        console.log(`Solicitudes en espera devueltas a la bandeja de RH: ${r.rows.length}`);
+    }
+  } catch (e) { console.warn('Migración pendientes a visto bueno:', e.message); }
 })();
 
 // ══ ESTATUS DE UNA SOLICITUD ════════════════════════════════
@@ -146,7 +168,7 @@ router.get('/mi-info', async (req, res) => {
     // en la pantalla le explica adónde se fueron.
     const apart = await query(
       `SELECT COALESCE(SUM(dias_solicitados),0) AS n FROM fac_vacaciones_solicitudes
-        WHERE empleado_id=$1 AND estatus='pendiente'`, [empId]);
+        WHERE empleado_id=$1 AND estatus IN ('pendiente','vo_bo')`, [empId]);
     res.json({
       vinculado: true,
       empleado: { ...emp.rows[0], antiguedad_anios: anios(emp.rows[0].fecha_ingreso) },
