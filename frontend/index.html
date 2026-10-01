@@ -16868,6 +16868,11 @@ async function imprimirSolicitudVac(id) {
     // solicitudes POSTERIORES se reconstruye el saldo que habia en el momento de
     // esta, que es lo que debe decir la hoja que se firmo ese dia.
     const diasPost    = parseFloat(s.dias_posteriores || 0);
+    // Lo mismo pero periodo por periodo, para la columna de la tabla
+    const postPorPeriodo = {};
+    (s.posteriores_por_periodo || []).forEach(x => {
+      postPorPeriodo[x.periodo_id] = parseFloat(x.dias || 0);
+    });
     const tomAntes    = totTom  - diasDeEsta - diasPost;   // tomados antes de esta
     const pendDespues = totPend + diasPost;                // quedaban al terminar esta
     const pendAntes   = pendDespues + diasDeEsta;          // quedaban antes de pedirla
@@ -16927,14 +16932,19 @@ async function imprimirSolicitudVac(id) {
           <table style="border-collapse:collapse;font-size:12px;width:100%">
             <thead><tr>
               <th style="border:1px solid #888;padding:4px;background:#e5e7eb;text-align:left">PERIODO VACACIONAL</th>
-              <th style="border:1px solid #888;padding:4px;background:#e5e7eb;text-align:center">TOMADOS</th>
+              <th style="border:1px solid #888;padding:4px;background:#e5e7eb;text-align:center">TOMADOS<br><span style="font-weight:400;font-size:9px">antes</span></th>
               <th style="border:1px solid #888;padding:4px;background:#e5e7eb;text-align:center">DE ESTA<br>SOLICITUD</th>
             </tr></thead>
             <tbody>${periodos.map(p=>{
               const deEsta = porPeriodo[p.id] || 0;
+              // dias_tomados es el acumulado de HOY. Para que la hoja diga lo que
+              // habia cuando se pidio, se le quitan los dias de esta solicitud y
+              // los de las posteriores en ese mismo periodo.
+              const tomAntesP = Math.max(0,
+                parseFloat(p.dias_tomados || 0) - deEsta - (postPorPeriodo[p.id] || 0));
               return `<tr>
               <td style="border:1px solid #888;padding:3px 6px">${p.num_periodo}° Periodo (${parseFloat(p.dias_correspondientes).toFixed(0)} días)</td>
-              <td style="border:1px solid #888;padding:3px 6px;text-align:right">${parseFloat(p.dias_tomados).toFixed(0)}</td>
+              <td style="border:1px solid #888;padding:3px 6px;text-align:right">${tomAntesP.toFixed(0)}</td>
               <td style="border:1px solid #888;padding:3px 6px;text-align:right;font-weight:${deEsta?'700':'400'}">${deEsta ? deEsta.toFixed(0) : '—'}</td>
             </tr>`;}).join('')}</tbody>
           </table>

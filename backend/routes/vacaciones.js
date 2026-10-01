@@ -809,17 +809,23 @@ router.get('/solicitudes/:id', async (req, res) => {
     // que le quedaban entonces. Con este dato se reconstruye el saldo al momento
     // de cada solicitud. Se ordena por id porque ese es el orden en que se
     // aplicaron a los periodos.
+    // Desglosado POR PERIODO, no solo el total: la tabla del formato imprime los
+    // dias tomados de cada periodo, y ese numero tambien tiene que ser el que
+    // habia en el momento de esta solicitud. Con el total suelto, la columna
+    // seguia mostrando el valor de hoy y no cuadraba con sus propios totales.
     const post = await query(
-      `SELECT COALESCE(SUM(sp.dias_aplicados), 0) AS dias
+      `SELECT sp.periodo_id, COALESCE(SUM(sp.dias_aplicados), 0) AS dias
          FROM fac_vacaciones_solicitud_periodos sp
          JOIN fac_vacaciones_solicitudes s2 ON s2.id = sp.solicitud_id
-        WHERE s2.empleado_id = $1 AND s2.id > $2`,
+        WHERE s2.empleado_id = $1 AND s2.id > $2
+        GROUP BY sp.periodo_id`,
       [sol.empleado_id, req.params.id]);
 
     res.json({
       ...sol,
       aplicaciones: apl.rows,
-      dias_posteriores: parseFloat(post.rows[0].dias) || 0,
+      posteriores_por_periodo: post.rows,
+      dias_posteriores: post.rows.reduce((a, x) => a + (parseFloat(x.dias) || 0), 0),
       empleado: {
         id: sol.empleado_id, nombre: sol.nombre, puesto: sol.puesto,
         departamento: sol.departamento, numero_colaborador: sol.numero_colaborador,
