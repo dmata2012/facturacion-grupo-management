@@ -15834,6 +15834,7 @@ async function vacaciones() {
       </div>` : ''}
       <div class="tab" onclick="showTab(this,'vtab-grafica');renderGraficaVac()">📊 Gráfica de pendientes</div>
       <div class="tab" onclick="showTab(this,'vtab-vencer');loadVacPorVencer()">⏰ Por vencer</div>
+      <div class="tab" onclick="showTab(this,'vtab-revision');loadRevisionVac()">🔎 Revisión de números</div>
     </div>
 
     ${puede('vacaciones', NIVEL.EDITAR) !== false ? `
@@ -15863,8 +15864,81 @@ async function vacaciones() {
       <div class="card">
         <div id="vac-vencer-body"><p class="empty">Cargando...</p></div>
       </div>
+    </div>
+
+    <div class="tab-panel" id="vtab-revision">
+      <div class="card">
+        <div id="vac-revision-body"><p class="empty">Cargando...</p></div>
+      </div>
     </div>`;
   await loadVacEmpleados();
+}
+
+// ══ REVISIÓN DE NÚMEROS ═════════════════════════════════════
+// Comprueba que el expediente de cada quien cuadre. Lo que se revisa:
+//
+//   · periodos que faltan por antigüedad
+//   · días tomados que no coinciden con las solicitudes registradas
+//   · periodos con más días tomados que los que corresponden
+//   · solicitudes que no están descontadas de ningún periodo
+//   · días distintos a los de la LFT (solo aviso: puede ser a propósito)
+async function loadRevisionVac() {
+  const cont = $('vac-revision-body');
+  if (!cont) return;
+  cont.innerHTML = '<p class="empty">Revisando expedientes…</p>';
+  try {
+    const d = await api('/vacaciones/auditoria');
+    const graves = d.empleados.filter(e => e.problemas.some(p => p.gravedad === 'alta'));
+    const soloAviso = d.empleados.filter(e => !e.problemas.some(p => p.gravedad === 'alta'));
+
+    const tarjeta = (e, alta) => `
+      <div style="border:1.5px solid ${alta ? '#fca5a5' : '#fde68a'};background:${alta ? '#fff5f5' : '#fffbeb'};
+           border-radius:11px;padding:12px 14px;margin-bottom:9px">
+        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline">
+          <div>
+            <span style="font-weight:900;font-size:13.5px">${e.nombre}</span>
+            <span style="font-size:11px;color:var(--muted);margin-left:6px">
+              ${e.numero_colaborador ? '#' + e.numero_colaborador + ' · ' : ''}${e.antiguedad} año${e.antiguedad!=1?'s':''}
+              · ingresó ${fmtDate(e.fecha_ingreso)}</span>
+          </div>
+          <button class="btn bo bsm" onclick="openVacEmpleado(${e.empleado_id})">Abrir expediente →</button>
+        </div>
+        <ul style="margin:8px 0 0;padding-left:18px;font-size:12px;line-height:1.65;color:#334155">
+          ${e.problemas.map(p => `<li>${p.gravedad === 'alta' ? '' : '<span style="color:var(--muted)">Aviso: </span>'}${p.detalle}</li>`).join('')}
+        </ul>
+      </div>`;
+
+    cont.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <div>
+          <div style="font-size:15px;font-weight:900;color:var(--dark)">
+            ${d.con_hallazgos === 0
+              ? '✅ Todos los expedientes cuadran'
+              : `${graves.length} expediente${graves.length!=1?'s':''} con diferencias`}</div>
+          <div style="font-size:11.5px;color:var(--muted)">
+            Se revisaron ${d.revisados} colaborador${d.revisados!=1?'es':''} activo${d.revisados!=1?'s':''}</div>
+        </div>
+        <button class="btn bo bsm" onclick="loadRevisionVac()">↻ Volver a revisar</button>
+      </div>
+      ${d.con_hallazgos === 0 ? `
+        <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:11px;padding:14px;
+             font-size:12.5px;color:#166534;line-height:1.6">
+          Los días tomados de cada periodo coinciden con las solicitudes registradas,
+          nadie se pasó de sus días, y a nadie le faltan periodos por su antigüedad.
+        </div>` : ''}
+      ${graves.length ? `<div style="font-size:11px;font-weight:900;text-transform:uppercase;
+        letter-spacing:.6px;color:#991b1b;margin:4px 0 8px">Requieren revisión</div>
+        ${graves.map(e => tarjeta(e, true)).join('')}` : ''}
+      ${soloAviso.length ? `<div style="font-size:11px;font-weight:900;text-transform:uppercase;
+        letter-spacing:.6px;color:#92400e;margin:14px 0 8px">Solo avisos</div>
+        ${soloAviso.map(e => tarjeta(e, false)).join('')}` : ''}
+      <div style="font-size:11.5px;color:var(--muted);line-height:1.6;margin-top:12px">
+        Los periodos se crean solos cuando alguien cumple un año más, según su fecha de ingreso.
+        Si aquí aparece que faltan, abre su expediente para que se generen al momento.
+      </div>`;
+  } catch(e) {
+    cont.innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`;
+  }
 }
 
 // ══ BANDEJA DE AUTORIZACIÓN ════════════════════

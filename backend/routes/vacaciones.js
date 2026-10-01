@@ -119,7 +119,14 @@ function diasPorAnio(anio) {
 
 function anios(fechaIngreso) {
   if (!fechaIngreso) return 0;
-  const ing = new Date(fechaIngreso);
+  // Una fecha sin hora ('2015-01-01') la interpreta como medianoche UTC, y al
+  // leerla con getDate() en hora local se recorre un dia hacia atras: en
+  // America/Cancun (UTC-5) el 2 se vuelve el 1. El aniversario caia un dia
+  // antes y los dias del periodo nuevo aparecian antes de tiempo.
+  const txt = String(fechaIngreso).slice(0, 10);
+  const ing = /^\d{4}-\d{2}-\d{2}$/.test(txt)
+    ? new Date(txt + 'T00:00:00')   // medianoche LOCAL
+    : new Date(fechaIngreso);       // ya viene como Date desde la base
   const hoy = new Date();
   let a = hoy.getFullYear() - ing.getFullYear();
   const m = hoy.getMonth() - ing.getMonth();
@@ -141,6 +148,9 @@ router.get('/mi-info', async (req, res) => {
   try {
     const empId = await miEmpleadoId(req.usuario.id);
     if (!empId) return res.json({ vinculado: false });
+    // Al abrir su pantalla ve los periodos al día, sin esperar al barrido diario:
+    // el día que cumple años ya le aparecen sus días nuevos.
+    await generarPeriodosFaltantes(empId).catch(() => {});
 
     const emp = await query(
       `SELECT id, nombre, puesto, departamento, TO_CHAR(fecha_ingreso,'YYYY-MM-DD') AS fecha_ingreso
@@ -293,6 +303,8 @@ router.get('/empleados/:id', verPlantilla, async (req, res) => {
   try {
     const emp = await query(`SELECT * FROM fac_empleados WHERE id=$1`, [req.params.id]);
     if (!emp.rows.length) return res.status(404).json({ error: 'Empleado no encontrado.' });
+    // Abrir el expediente deja los periodos al corriente
+    await generarPeriodosFaltantes(req.params.id, emp.rows[0].fecha_ingreso).catch(() => {});
 
     const periodos = await query(`
       SELECT * FROM fac_vacaciones_periodos WHERE empleado_id=$1 ORDER BY num_periodo
@@ -313,26 +325,161 @@ router.get('/empleados/:id', verPlantilla, async (req, res) => {
 });
 
 // ── GENERAR PERIODOS POR ANTIGÜEDAD ──
+// ══ AUDITORIA DEL EXPEDIENTE VACACIONAL ═════════════════════
+// Revisa que los numeros cuadren. El invariante que importa:
+//
+//   periodo.dias_tomados  ==  suma de dias_aplicados de ese periodo
+//
+// Se cumple porque los dias se descuentan al crear la solicitud y se devuelven
+// al rechazarla o borrarla, borrando el reparto. Si no cuadra, o alguien edito
+// dias_tomados a mano (hay una ruta para eso, con clave) o algo se perdio.
+//
+// Tambien se revisa lo que se puede saber sin interpretar: periodos que
+// faltan por antiguedad, periodos con mas dias tomados que los que
+// corresponden, y dias que no coinciden con la tabla de la LFT.
+router.get('/auditoria', verPlantilla, async (req, res) => {
+  try {
+    const filas = await query(`
+      SELECT e.id AS empleado_id, e.nombre, e.numero_colaborador,
+             TO_CHAR(e.fecha_ingreso,'YYYY-MM-DD') AS fecha_ingreso,
+             p.id AS periodo_id, p.num_periodo,
+             p.dias_correspondientes, p.dias_tomados,
+             COALESCE(ap.aplicado, 0) AS aplicado
+        FROM fac_empleados e
+        LEFT JOIN fac_vacaciones_periodos p ON p.empleado_id = e.id
+        LEFT JOIN (
+          SELECT periodo_id, SUM(dias_aplicados) AS aplicado
+            FROM fac_vacaciones_solicitud_periodos GROUP BY periodo_id
+        ) ap ON ap.periodo_id = p.id
+       WHERE e.activo IS NOT FALSE
+       ORDER BY e.nombre, p.num_periodo`);
+
+    // Solicitudes vivas sin reparto: sus dias no estan descontados de ningun
+    // periodo, asi que el saldo del colaborador esta mas alto de lo real.
+    const huerfanas = await query(`
+      SELECT s.id, s.empleado_id, e.nombre, s.dias_solicitados, s.estatus,
+             TO_CHAR(s.fecha_inicio,'YYYY-MM-DD') AS fecha_inicio
+        FROM fac_vacaciones_solicitudes s
+        JOIN fac_empleados e ON e.id = s.empleado_id
+       WHERE COALESCE(s.tipo,'vacaciones') = 'vacaciones'
+         AND s.estatus <> 'rechazada'
+         AND NOT EXISTS (SELECT 1 FROM fac_vacaciones_solicitud_periodos sp
+                          WHERE sp.solicitud_id = s.id)
+       ORDER BY e.nombre, s.fecha_inicio`);
+
+    const porEmp = new Map();
+    for (const f of filas.rows) {
+      if (!porEmp.has(f.empleado_id)) {
+        porEmp.set(f.empleado_id, {
+          empleado_id: f.empleado_id, nombre: f.nombre,
+          numero_colaborador: f.numero_colaborador, fecha_ingreso: f.fecha_ingreso,
+          antiguedad: anios(f.fecha_ingreso), periodos: [], problemas: []
+        });
+      }
+      if (f.periodo_id) porEmp.get(f.empleado_id).periodos.push(f);
+    }
+
+    const n2 = v => Math.round((parseFloat(v) || 0) * 100) / 100;
+
+    for (const emp of porEmp.values()) {
+      const nums = new Set(emp.periodos.map(p => p.num_periodo));
+      const faltan = [];
+      for (let n = 1; n <= emp.antiguedad; n++) if (!nums.has(n)) faltan.push(n);
+      if (faltan.length) emp.problemas.push({
+        tipo: 'periodos_faltantes', gravedad: 'alta',
+        detalle: `Le faltan ${faltan.length} periodo(s): ${faltan.join('°, ')}°. ` +
+                 `Tiene ${emp.antiguedad} año(s) cumplidos.`
+      });
+
+      for (const p of emp.periodos) {
+        const tom = n2(p.dias_tomados), apl = n2(p.aplicado), corr = n2(p.dias_correspondientes);
+        if (Math.abs(tom - apl) > 0.01) emp.problemas.push({
+          tipo: 'descuadre', gravedad: 'alta', num_periodo: p.num_periodo,
+          detalle: `${p.num_periodo}° periodo: dice ${tom} día(s) tomados, pero las solicitudes ` +
+                   `registradas suman ${apl}. Diferencia de ${n2(tom - apl)}.`
+        });
+        if (tom - corr > 0.01) emp.problemas.push({
+          tipo: 'sobregiro', gravedad: 'alta', num_periodo: p.num_periodo,
+          detalle: `${p.num_periodo}° periodo: tomó ${tom} de ${corr} día(s). Se pasó por ${n2(tom - corr)}.`
+        });
+        const lft = diasPorAnio(p.num_periodo);
+        if (Math.abs(corr - lft) > 0.01) emp.problemas.push({
+          tipo: 'dias_distintos_lft', gravedad: 'info', num_periodo: p.num_periodo,
+          detalle: `${p.num_periodo}° periodo: tiene ${corr} día(s); la LFT marca ${lft}. ` +
+                   `Puede ser un ajuste a propósito.`
+        });
+      }
+    }
+
+    for (const h of huerfanas.rows) {
+      const emp = porEmp.get(h.empleado_id);
+      const d = `Solicitud del ${h.fecha_inicio} (${h.dias_solicitados} día(s), ${h.estatus}) ` +
+                `no está descontada de ningún periodo.`;
+      if (emp) emp.problemas.push({ tipo: 'solicitud_sin_reparto', gravedad: 'alta', detalle: d });
+    }
+
+    const todos = [...porEmp.values()];
+    res.json({
+      revisados: todos.length,
+      con_hallazgos: todos.filter(e => e.problemas.length).length,
+      empleados: todos.map(e => ({ ...e, periodos: undefined })).filter(e => e.problemas.length)
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Crea los periodos que le falten a un colaborador segun su antiguedad.
+// Es idempotente: ON CONFLICT DO NOTHING respeta los que ya existen, incluidos
+// los que RH haya ajustado a mano.
+async function generarPeriodosFaltantes(empleadoId, fechaIngreso) {
+  let ingreso = fechaIngreso;
+  if (ingreso === undefined) {
+    const e = await query(`SELECT fecha_ingreso FROM fac_empleados WHERE id=$1`, [empleadoId]);
+    if (!e.rows.length) return { ok: false, error: 'Empleado no encontrado.' };
+    ingreso = e.rows[0].fecha_ingreso;
+  }
+  const a = anios(ingreso);
+  if (a < 1) return { ok: true, periodos_creados: 0, antiguedad: a, mensaje: 'Aún no cumple 1 año.' };
+  let creados = 0;
+  for (let n = 1; n <= a; n++) {
+    const r = await query(
+      `INSERT INTO fac_vacaciones_periodos(empleado_id, num_periodo, dias_correspondientes)
+       VALUES($1, $2, $3)
+       ON CONFLICT (empleado_id, num_periodo) DO NOTHING
+       RETURNING id`,
+      [empleadoId, n, diasPorAnio(n)]);
+    if (r.rowCount) creados++;
+  }
+  return { ok: true, periodos_creados: creados, antiguedad: a };
+}
+
+// ══ ALTA AUTOMATICA DE PERIODOS ═════════════════════════════
+// Antes habia que acordarse de pulsar "generar periodos" por cada quien cumplia
+// años. Quien se olvidaba, al colaborador le faltaban dias sin que nadie se
+// enterara. Ahora se revisa a toda la plantilla al arrancar y una vez al dia.
+async function generarPeriodosDeTodos() {
+  try {
+    const emps = await query(
+      `SELECT id, fecha_ingreso FROM fac_empleados
+        WHERE activo IS NOT FALSE AND fecha_ingreso IS NOT NULL`);
+    let total = 0, conNuevos = 0;
+    for (const e of emps.rows) {
+      const r = await generarPeriodosFaltantes(e.id, e.fecha_ingreso);
+      if (r.periodos_creados) { total += r.periodos_creados; conNuevos++; }
+    }
+    if (total) console.log(`Periodos de vacaciones creados: ${total} en ${conNuevos} colaborador(es)`);
+    return { periodos: total, colaboradores: conNuevos };
+  } catch (e) { console.warn('Alta automática de periodos:', e.message); return null; }
+}
+
+// Al arrancar se espera un poco, para no competir con las migraciones
+setTimeout(generarPeriodosDeTodos, 30000);
+setInterval(generarPeriodosDeTodos, 24 * 60 * 60 * 1000);
+
 router.post('/empleados/:id/generar-periodos', requireRol('admin', 'capturista'), async (req, res) => {
   try {
-    const emp = await query(`SELECT fecha_ingreso FROM fac_empleados WHERE id=$1`, [req.params.id]);
-    if (!emp.rows.length) return res.status(404).json({ error: 'Empleado no encontrado.' });
-    const a = anios(emp.rows[0].fecha_ingreso);
-    if (a < 1) return res.json({ ok: true, periodos_creados: 0, mensaje: 'Aún no cumple 1 año.' });
-
-    let creados = 0;
-    for (let n = 1; n <= a; n++) {
-      const dias = diasPorAnio(n);
-      const r = await query(
-        `INSERT INTO fac_vacaciones_periodos(empleado_id, num_periodo, dias_correspondientes)
-         VALUES($1, $2, $3)
-         ON CONFLICT (empleado_id, num_periodo) DO NOTHING
-         RETURNING id`,
-        [req.params.id, n, dias]
-      );
-      if (r.rowCount) creados++;
-    }
-    res.json({ ok: true, periodos_creados: creados, antiguedad: a });
+    const r = await generarPeriodosFaltantes(req.params.id);
+    if (!r.ok) return res.status(404).json({ error: r.error });
+    res.json(r);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
