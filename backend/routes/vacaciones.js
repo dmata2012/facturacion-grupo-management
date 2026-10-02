@@ -427,6 +427,52 @@ router.get('/auditoria', verPlantilla, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Devolver una solicitud al visto bueno de su jefe. Para las que se
+// capturaron antes de que existiera el flujo: se autorizaron sin que nadie las
+// firmara, y ahora su jefe si existe.
+//
+// Dos rejas, y las dos importan:
+//  - solo si NADIE la firmo (vobo_por nulo). Una con visto bueno real no se
+//    deshace por aqui.
+//  - solo si TODAVIA NO EMPIEZA. Devolver unas vacaciones ya tomadas las
+//    volveria a contar como falta en asistencia.
+// Los dias no se mueven: siguen descontados del periodo, como desde que se
+// capturo. Solo cambia a quien le toca resolverla.
+router.patch('/solicitudes/:id/regresar-a-jefe', autorizaVacaciones, async (req, res) => {
+  try {
+    const q = await query(`
+      SELECT s.estatus, s.vobo_por, e.jefe_id, j.nombre AS jefe_nombre,
+             TO_CHAR(s.fecha_inicio,'YYYY-MM-DD') AS fecha_inicio,
+             COALESCE(s.tipo,'vacaciones') AS tipo
+        FROM fac_vacaciones_solicitudes s
+        JOIN fac_empleados e ON e.id = s.empleado_id
+        LEFT JOIN fac_empleados j ON j.id = e.jefe_id
+       WHERE s.id=$1`, [req.params.id]);
+    if (!q.rows.length) return res.status(404).json({ error: 'Solicitud no encontrada.' });
+    const x = q.rows[0];
+
+    if (x.tipo !== 'vacaciones')
+      return res.status(400).json({ error: 'Los permisos e incapacidades no pasan por visto bueno.' });
+    if (!x.jefe_id)
+      return res.status(400).json({ error: 'Ese colaborador no tiene jefe directo asignado. Asigna uno primero.' });
+    if (x.vobo_por)
+      return res.status(400).json({ error: 'Esa solicitud ya tiene el visto bueno de su jefe; no se puede deshacer desde aqui.' });
+    if (!['aprobada', 'vo_bo', 'pendiente'].includes(x.estatus))
+      return res.status(400).json({ error: 'Esa solicitud ya fue rechazada o no se puede devolver.' });
+    if (!(x.fecha_inicio > new Date().toISOString().slice(0, 10)))
+      return res.status(400).json({
+        error: 'Esas vacaciones ya empezaron. Devolverlas le contaria los dias como falta en asistencia.' });
+
+    const r = await query(
+      `UPDATE fac_vacaciones_solicitudes
+          SET estatus='pendiente', vobo_por=NULL, vobo_en=NULL, vobo_nota=NULL,
+              autorizado_por=NULL, autorizado_en=NULL
+        WHERE id=$1 RETURNING id`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Solicitud no encontrada.' });
+    res.json({ ok: true, jefe: x.jefe_nombre });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ══ DIAGNOSTICO DEL VISTO BUENO ═════════════════════════════
 // "A fulano no le aparecen las solicitudes" tiene varias causas posibles y
 // desde afuera se ven iguales. Esto las separa: por cada jefe, su gente y en
@@ -456,6 +502,15 @@ router.get('/diagnostico-vobo', verPlantilla, async (req, res) => {
        WHERE e.jefe_id IS NOT NULL AND e.activo IS NOT FALSE
        ORDER BY e.nombre, s.fecha_inicio`);
 
+    // Una solicitud se puede devolver al jefe solo si nadie la firmo Y todavia
+    // no empieza. Si ya se tomaron las vacaciones, regresarla volveria a
+    // contarle esos dias como falta en asistencia: se arreglaria una cosa
+    // rompiendo otra.
+    const hoy = new Date().toISOString().slice(0, 10);
+    const puedeRegresar = r =>
+      !!r.solicitud_id && r.tipo === 'vacaciones' && !r.vobo_por &&
+      ['aprobada', 'vo_bo', 'pendiente'].includes(r.estatus) && r.fecha_inicio > hoy;
+
     // Donde esta parada cada solicitud, con las mismas reglas de las bandejas
     const donde = r => {
       if (!r.solicitud_id) return null;
@@ -476,7 +531,8 @@ router.get('/diagnostico-vobo', verPlantilla, async (req, res) => {
       const d = donde(r);
       if (d) g.solicitudes.push({
         id: r.solicitud_id, nombre: r.nombre, estatus: r.estatus, donde: d,
-        dias: r.dias_solicitados, fecha_inicio: r.fecha_inicio, capturada: r.capturada
+        dias: r.dias_solicitados, fecha_inicio: r.fecha_inicio, capturada: r.capturada,
+        puede_regresar: puedeRegresar(r)
       });
     }
 
@@ -777,7 +833,7 @@ router.get('/solicitudes-pendientes', autorizaVacaciones, async (req, res) => {
        -- Lo que sigue esperando a un jefe no se muestra aqui, para no
        -- autorizarlo por delante de el. Si nadie firmo Y ya tiene jefe, le toca
        -- a el; si no tiene jefe, no hay a quien esperar y entra normal.
-       WHERE s.estatus = 'vo_bo'
+       WHERE s.estatus IN ('pendiente','vo_bo')
          AND (s.vobo_por IS NOT NULL OR e.jefe_id IS NULL)
          AND ($1::int IS NULL OR s.empleado_id <> $1::int)
        ORDER BY s.fecha_inicio, s.id
@@ -805,7 +861,7 @@ router.get('/solicitudes-pendientes/conteo', async (req, res) => {
       `SELECT COUNT(*)::int AS n
          FROM fac_vacaciones_solicitudes s
          JOIN fac_empleados e ON e.id = s.empleado_id
-        WHERE s.estatus='vo_bo'
+        WHERE s.estatus IN ('pendiente','vo_bo')
           AND (s.vobo_por IS NOT NULL OR e.jefe_id IS NULL)
           AND ($1::int IS NULL OR s.empleado_id <> $1::int)`, [mi]);
     res.json({ n: r.rows[0].n });
@@ -917,7 +973,7 @@ router.patch('/solicitudes/:id/autorizar', autorizaVacaciones, async (req, res) 
     const r = await query(
       `UPDATE fac_vacaciones_solicitudes
           SET estatus='aprobada', autorizado_por=$1, autorizado_en=NOW(), nota_autorizacion=$2
-        WHERE id=$3 AND estatus='vo_bo'
+        WHERE id=$3 AND estatus IN ('pendiente','vo_bo')
           AND (vobo_por IS NOT NULL
                OR (SELECT jefe_id FROM fac_empleados WHERE id=empleado_id) IS NULL)
         RETURNING *`,

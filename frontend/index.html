@@ -16080,6 +16080,25 @@ async function loadRevisionVac() {
   }
 }
 
+// Devuelve al jefe una solicitud que se capturo antes de que existiera el flujo.
+// No toca los dias: siguen descontados del periodo. Solo cambia a quien le toca
+// resolverla.
+async function regresarAJefe(id, nombre) {
+  if (!await confirm2(
+      `¿Mandar esta solicitud de ${nombre} al visto bueno de su jefe?
+
+` +
+      `Se capturo sin pasar por el. Vuelve a quedar pendiente y le aparece en su pantalla.
+
+` +
+      `Los dias siguen descontados de su periodo: eso no cambia.`)) return;
+  try {
+    const r = await api(`/vacaciones/solicitudes/${id}/regresar-a-jefe`, { method:'PATCH', body: JSON.stringify({}) });
+    toast(`Mandada a ${r.jefe || 'su jefe'}.`);
+    cargarDiagnosticoVoBo();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
 // Por que a un jefe no le aparecen solicitudes. Desde fuera todas las causas se
 // ven igual —la tarjeta vacia— y hay que poder distinguirlas sin entrar a la base.
 async function cargarDiagnosticoVoBo() {
@@ -16124,7 +16143,7 @@ async function cargarDiagnosticoVoBo() {
             Su equipo: ${j.equipo.map(x => x.nombre).join(' · ') || '—'}</div>
           ${j.solicitudes.length ? `
           <div class="tscroll" style="margin-top:8px"><table style="font-size:11.5px">
-            <thead><tr><th>Colaborador</th><th>Del</th><th style="text-align:center">Días</th><th>Dónde está</th></tr></thead>
+            <thead><tr><th>Colaborador</th><th>Del</th><th style="text-align:center">Días</th><th>Dónde está</th><th></th></tr></thead>
             <tbody>${j.solicitudes.map(x => {
               const et = ETIQ[x.donde] || [x.donde, '#6b7280', '#f3f4f6'];
               return `<tr>
@@ -16133,6 +16152,12 @@ async function cargarDiagnosticoVoBo() {
                 <td style="text-align:center;font-weight:700">${x.dias}</td>
                 <td><span style="background:${et[2]};color:${et[1]};border-radius:20px;padding:2px 9px;
                      font-size:11px;font-weight:700;white-space:nowrap">${et[0]}</span></td>
+                <td style="text-align:right;white-space:nowrap">${x.puede_regresar
+                  ? `<button class="btn bo bsm" style="padding:3px 8px;font-size:10.5px"
+                       onclick="regresarAJefe(${x.id},'${(x.nombre||'').replace(/'/g,"\'")}')"
+                       title="Nadie le dio visto bueno y todavía no empieza: se puede mandar a su jefe">
+                       ↩ Mandar al jefe</button>`
+                  : ''}</td>
               </tr>`;
             }).join('')}</tbody>
           </table></div>` : `
