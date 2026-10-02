@@ -16045,6 +16045,7 @@ async function loadRevisionVac() {
       </div>`;
 
     cont.innerHTML = `
+      <div id="vac-diag-vobo" style="margin-bottom:18px"><p class="empty">Revisando el flujo de vistos buenos…</p></div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
         <div>
           <div style="font-size:15px;font-weight:900;color:var(--dark)">
@@ -16071,9 +16072,7 @@ async function loadRevisionVac() {
       <div style="font-size:11.5px;color:var(--muted);line-height:1.6;margin-top:12px">
         Los periodos se crean solos cuando alguien cumple un año más, según su fecha de ingreso.
         Si aquí aparece que faltan, abre su expediente para que se generen al momento.
-      </div>
-      </div>
-      <div id="vac-diag-vobo" style="margin-top:20px"><p class="empty">Revisando el flujo de vistos buenos…</p>`;
+      </div>`;
     cargarDiagnosticoVoBo();
   } catch(e) {
     cont.innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`;

@@ -393,7 +393,18 @@ router.get('/auditoria', verPlantilla, async (req, res) => {
 
       for (const p of emp.periodos) {
         const tom = n2(p.dias_tomados), apl = n2(p.aplicado), corr = n2(p.dias_correspondientes);
-        if (Math.abs(tom - apl) > 0.01) emp.problemas.push({
+        // Dias tomados SIN ninguna solicitud detras es lo normal al cargar un
+        // expediente: RH captura la historia directo en el periodo. Marcarlo
+        // como falla grave llenaba la pantalla de rojo en toda la plantilla y
+        // tapaba los descuadres de verdad.
+        if (apl === 0 && tom > 0) emp.problemas.push({
+          tipo: 'historia_cargada', gravedad: 'info', num_periodo: p.num_periodo,
+          detalle: `${p.num_periodo}° periodo: ${tom} día(s) tomados sin solicitudes detrás. ` +
+                   `Normal si se capturaron al dar de alta el expediente.`
+        });
+        // Un descuadre de verdad: hay solicitudes, pero no suman lo que dice el
+        // periodo. Ahi si se perdio o se ajusto algo.
+        else if (Math.abs(tom - apl) > 0.01) emp.problemas.push({
           tipo: 'descuadre', gravedad: 'alta', num_periodo: p.num_periodo,
           detalle: `${p.num_periodo}° periodo: dice ${tom} día(s) tomados, pero las solicitudes ` +
                    `registradas suman ${apl}. Diferencia de ${n2(tom - apl)}.`
