@@ -804,8 +804,15 @@ router.get('/por-visto-bueno/conteo', async (req, res) => {
          FROM fac_vacaciones_solicitudes s
          JOIN fac_empleados e ON e.id = s.empleado_id
         WHERE s.estatus='pendiente' AND e.jefe_id=$1 AND s.empleado_id <> $1`, [mi]);
-    res.json({ n: r.rows[0].n });
-  } catch (e) { res.json({ n: 0 }); }
+    // es_jefe va aparte del conteo: quien tiene gente a su cargo necesita entrar
+    // a la pantalla aunque hoy no tenga nada pendiente. Sin esto el menu solo se
+    // lo muestra a quien su perfil traiga 'misVacaciones', y un jefe suele ser
+    // capturista o tesoreria, perfiles que no lo traen.
+    const eq = await query(
+      `SELECT COUNT(*)::int AS n FROM fac_empleados
+        WHERE jefe_id=$1 AND activo IS NOT FALSE`, [mi]);
+    res.json({ n: r.rows[0].n, es_jefe: eq.rows[0].n > 0, a_mi_cargo: eq.rows[0].n });
+  } catch (e) { res.json({ n: 0, es_jefe: false }); }
 });
 
 router.patch('/solicitudes/:id/visto-bueno', async (req, res) => {

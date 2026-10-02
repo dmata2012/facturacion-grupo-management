@@ -1197,6 +1197,7 @@ function aplicarMenuPorPermisos() {
   const preferidas = ['dashboard','facturas','gastos','cajaChica','bancos','checador','nomina','reportes'];
   const destino = preferidas.find(p => puede(p, NIVEL.VER))
     || Object.keys(ME.permisos.niveles).find(k => ME.permisos.niveles[k] >= NIVEL.VER);
+  revelarMisVacacionesSiEsJefe();
   if (destino) nav(destino);
   else $('content').innerHTML = `
     <div class="card" style="text-align:center;padding:50px 30px">
@@ -1206,6 +1207,24 @@ function aplicarMenuPorPermisos() {
         Pide al administrador que te dé acceso desde <strong>Usuarios y Permisos</strong>.
       </p>
     </div>`;
+}
+
+// Ser jefe de alguien no es un permiso que se configure: es un hecho del
+// expediente. Quien tiene gente a su cargo tiene que poder dar su visto bueno,
+// y esa bandeja vive dentro de Mis Vacaciones. Como el menu se dibuja desde la
+// matriz, y solo el perfil Colaborador trae 'misVacaciones', un jefe que sea
+// capturista o de tesoreria no veria la pantalla y se quedaria sin poder
+// aprobar. Se le muestra la entrada aunque su perfil no la traiga.
+async function revelarMisVacacionesSiEsJefe() {
+  const a = $('nav-misVacaciones');
+  if (!a || a.style.display !== 'none') return;
+  try {
+    const r = await api('/vacaciones/por-visto-bueno/conteo');
+    if (!r || !r.es_jefe) return;
+    a.style.display = 'flex';
+    const g = a.closest('.nav-group');
+    if (g) { g.style.display = 'block'; g.classList.add('open'); }
+  } catch (e) { /* si falla, el menu queda como estaba */ }
 }
 
 // Toggle sección colapsable + persistencia en localStorage
