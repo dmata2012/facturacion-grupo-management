@@ -427,6 +427,66 @@ router.get('/auditoria', verPlantilla, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ══ DIAGNOSTICO DEL VISTO BUENO ═════════════════════════════
+// "A fulano no le aparecen las solicitudes" tiene varias causas posibles y
+// desde afuera se ven iguales. Esto las separa: por cada jefe, su gente y en
+// que estado esta cada solicitud, para saber si falta configurar algo, si no
+// hay nada que aprobar, o si ya paso de largo.
+router.get('/diagnostico-vobo', verPlantilla, async (req, res) => {
+  try {
+    const jefes = await query(`
+      SELECT j.id, j.nombre, j.puesto,
+             (u.id IS NOT NULL) AS tiene_usuario,
+             COUNT(e.id)::int   AS a_su_cargo
+        FROM fac_empleados j
+        JOIN fac_empleados e ON e.jefe_id = j.id AND e.activo IS NOT FALSE
+        LEFT JOIN fac_usuarios u ON u.empleado_id = j.id AND u.activo IS NOT FALSE
+       WHERE j.activo IS NOT FALSE
+       GROUP BY j.id, j.nombre, j.puesto, u.id
+       ORDER BY j.nombre`);
+
+    const sols = await query(`
+      SELECT e.jefe_id, e.id AS empleado_id, e.nombre,
+             s.id AS solicitud_id, s.estatus, s.vobo_por, s.dias_solicitados,
+             TO_CHAR(s.fecha_inicio,'YYYY-MM-DD') AS fecha_inicio,
+             TO_CHAR(s.creado_en,'YYYY-MM-DD')    AS capturada,
+             COALESCE(s.tipo,'vacaciones') AS tipo
+        FROM fac_empleados e
+        LEFT JOIN fac_vacaciones_solicitudes s ON s.empleado_id = e.id
+       WHERE e.jefe_id IS NOT NULL AND e.activo IS NOT FALSE
+       ORDER BY e.nombre, s.fecha_inicio`);
+
+    // Donde esta parada cada solicitud, con las mismas reglas de las bandejas
+    const donde = r => {
+      if (!r.solicitud_id) return null;
+      if (r.tipo !== 'vacaciones') return 'no_aplica';
+      if (r.estatus === 'rechazada') return 'rechazada';
+      if (r.estatus === 'aprobada')  return 'ya_autorizada';
+      if (!r.vobo_por)               return 'espera_al_jefe';
+      return 'espera_a_rh';
+    };
+
+    const porJefe = new Map();
+    for (const j of jefes.rows) porJefe.set(j.id, { ...j, equipo: [], solicitudes: [] });
+    for (const r of sols.rows) {
+      const g = porJefe.get(r.jefe_id);
+      if (!g) continue;
+      if (!g.equipo.some(x => x.id === r.empleado_id))
+        g.equipo.push({ id: r.empleado_id, nombre: r.nombre });
+      const d = donde(r);
+      if (d) g.solicitudes.push({
+        id: r.solicitud_id, nombre: r.nombre, estatus: r.estatus, donde: d,
+        dias: r.dias_solicitados, fecha_inicio: r.fecha_inicio, capturada: r.capturada
+      });
+    }
+
+    res.json([...porJefe.values()].map(j => ({
+      ...j,
+      esperan_su_vobo: j.solicitudes.filter(x => x.donde === 'espera_al_jefe').length
+    })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Crea los periodos que le falten a un colaborador segun su antiguedad.
 // Es idempotente: ON CONFLICT DO NOTHING respeta los que ya existen, incluidos
 // los que RH haya ajustado a mano.

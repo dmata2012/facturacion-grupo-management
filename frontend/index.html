@@ -16071,7 +16071,74 @@ async function loadRevisionVac() {
       <div style="font-size:11.5px;color:var(--muted);line-height:1.6;margin-top:12px">
         Los periodos se crean solos cuando alguien cumple un año más, según su fecha de ingreso.
         Si aquí aparece que faltan, abre su expediente para que se generen al momento.
-      </div>`;
+      </div>
+      </div>
+      <div id="vac-diag-vobo" style="margin-top:20px"><p class="empty">Revisando el flujo de vistos buenos…</p>`;
+    cargarDiagnosticoVoBo();
+  } catch(e) {
+    cont.innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`;
+  }
+}
+
+// Por que a un jefe no le aparecen solicitudes. Desde fuera todas las causas se
+// ven igual —la tarjeta vacia— y hay que poder distinguirlas sin entrar a la base.
+async function cargarDiagnosticoVoBo() {
+  const cont = $('vac-diag-vobo');
+  if (!cont) return;
+  try {
+    const jefes = await api('/vacaciones/diagnostico-vobo');
+    if (!jefes.length) {
+      cont.innerHTML = `<div style="font-size:12.5px;color:var(--muted);line-height:1.6">
+        Nadie tiene jefe directo asignado todavía, así que ninguna solicitud pasa por un visto bueno.
+        Se asigna en la ficha de cada colaborador, campo <strong>Jefe directo</strong>.</div>`;
+      return;
+    }
+    const ETIQ = {
+      espera_al_jefe: ['⏳ Espera su visto bueno', '#92400e', '#fffbeb'],
+      espera_a_rh   : ['→ Ya firmó; espera a RH', '#1e40af', '#eff6ff'],
+      ya_autorizada : ['✓ Ya autorizada',            '#166534', '#f0fdf4'],
+      rechazada     : ['✕ Rechazada',                '#991b1b', '#fef2f2'],
+      no_aplica     : ['Permiso o incapacidad',          '#6b7280', '#f3f4f6']
+    };
+    cont.innerHTML = `
+      <div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;
+           color:var(--muted);margin-bottom:9px">Flujo de vistos buenos</div>
+      ${jefes.map(j => `
+        <div style="border:1.5px solid ${j.esperan_su_vobo ? '#fde68a' : 'var(--border)'};
+             background:${j.esperan_su_vobo ? '#fffbeb' : '#fff'};
+             border-radius:11px;padding:12px 14px;margin-bottom:9px">
+          <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline">
+            <div>
+              <span style="font-weight:900;font-size:13.5px">${j.nombre}</span>
+              <span style="font-size:11.5px;color:var(--muted);margin-left:6px">
+                ${j.puesto || ''} · ${j.a_su_cargo} a su cargo</span>
+            </div>
+            <div style="font-size:12px;font-weight:800;color:${j.esperan_su_vobo ? '#92400e' : 'var(--muted)'}">
+              ${j.esperan_su_vobo ? `${j.esperan_su_vobo} esperando su visto bueno` : 'nada esperando'}</div>
+          </div>
+          ${!j.tiene_usuario ? `<div style="margin-top:7px;font-size:11.5px;color:#991b1b;background:#fef2f2;
+            border:1px solid #fecaca;border-radius:8px;padding:5px 9px">
+            ⚠ No tiene un usuario activo enlazado a su expediente: aunque le lleguen solicitudes,
+            no puede entrar a aprobarlas. Se enlaza en Usuarios y Permisos.</div>` : ''}
+          <div style="font-size:11.5px;color:var(--muted);margin-top:7px">
+            Su equipo: ${j.equipo.map(x => x.nombre).join(' · ') || '—'}</div>
+          ${j.solicitudes.length ? `
+          <div class="tscroll" style="margin-top:8px"><table style="font-size:11.5px">
+            <thead><tr><th>Colaborador</th><th>Del</th><th style="text-align:center">Días</th><th>Dónde está</th></tr></thead>
+            <tbody>${j.solicitudes.map(x => {
+              const et = ETIQ[x.donde] || [x.donde, '#6b7280', '#f3f4f6'];
+              return `<tr>
+                <td>${x.nombre}</td>
+                <td style="white-space:nowrap">${fmtDate(x.fecha_inicio)}</td>
+                <td style="text-align:center;font-weight:700">${x.dias}</td>
+                <td><span style="background:${et[2]};color:${et[1]};border-radius:20px;padding:2px 9px;
+                     font-size:11px;font-weight:700;white-space:nowrap">${et[0]}</span></td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table></div>` : `
+          <div style="margin-top:7px;font-size:11.5px;color:var(--muted)">
+            Su equipo no tiene ninguna solicitud de vacaciones registrada. Por eso su tarjeta sale vacía.</div>`}
+        </div>`).join('')}`;
   } catch(e) {
     cont.innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`;
   }
