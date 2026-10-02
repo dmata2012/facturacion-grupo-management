@@ -714,7 +714,11 @@ router.get('/solicitudes-pendientes', autorizaVacaciones, async (req, res) => {
         FROM fac_vacaciones_solicitudes s
         JOIN fac_empleados e ON e.id = s.empleado_id
         LEFT JOIN fac_usuarios u ON u.id = s.creado_por
+       -- Lo que sigue esperando a un jefe no se muestra aqui, para no
+       -- autorizarlo por delante de el. Si nadie firmo Y ya tiene jefe, le toca
+       -- a el; si no tiene jefe, no hay a quien esperar y entra normal.
        WHERE s.estatus = 'vo_bo'
+         AND (s.vobo_por IS NOT NULL OR e.jefe_id IS NULL)
          AND ($1::int IS NULL OR s.empleado_id <> $1::int)
        ORDER BY s.fecha_inicio, s.id
     `, [mi]);
@@ -738,8 +742,12 @@ router.get('/solicitudes-pendientes/conteo', async (req, res) => {
       return res.json({ n: 0 });
     const mi = await miEmpleadoId(req.usuario.id);
     const r = await query(
-      `SELECT COUNT(*)::int AS n FROM fac_vacaciones_solicitudes
-        WHERE estatus='vo_bo' AND ($1::int IS NULL OR empleado_id <> $1::int)`, [mi]);
+      `SELECT COUNT(*)::int AS n
+         FROM fac_vacaciones_solicitudes s
+         JOIN fac_empleados e ON e.id = s.empleado_id
+        WHERE s.estatus='vo_bo'
+          AND (s.vobo_por IS NOT NULL OR e.jefe_id IS NULL)
+          AND ($1::int IS NULL OR s.empleado_id <> $1::int)`, [mi]);
     res.json({ n: r.rows[0].n });
   } catch (e) { res.json({ n: 0 }); }
 });
@@ -786,7 +794,14 @@ router.get('/por-visto-bueno', async (req, res) => {
                 FROM fac_vacaciones_periodos WHERE empleado_id = s.empleado_id) AS le_quedan
         FROM fac_vacaciones_solicitudes s
         JOIN fac_empleados e ON e.id = s.empleado_id
-       WHERE s.estatus = 'pendiente' AND e.jefe_id = $1 AND s.empleado_id <> $1
+       -- 'pendiente' es lo que nacio esperandolo. Pero el estatus se decide al
+       -- CREAR la solicitud: las que se capturaron antes de que existiera su
+       -- jefe nacieron en 'vo_bo' sin que nadie firmara, igual que las que la
+       -- migracion de rescate movio alla. Si ahora si tienen jefe, le tocan a
+       -- el: vobo_por nulo significa que el visto bueno sigue sin darse.
+       WHERE (s.estatus = 'pendiente'
+              OR (s.estatus = 'vo_bo' AND s.vobo_por IS NULL))
+         AND e.jefe_id = $1 AND s.empleado_id <> $1
        ORDER BY s.fecha_inicio, s.id`, [mi]);
     const equipo = await query(
       `SELECT COUNT(*)::int AS n FROM fac_empleados WHERE jefe_id=$1 AND activo IS NOT FALSE`, [mi]);
@@ -803,7 +818,8 @@ router.get('/por-visto-bueno/conteo', async (req, res) => {
       `SELECT COUNT(*)::int AS n
          FROM fac_vacaciones_solicitudes s
          JOIN fac_empleados e ON e.id = s.empleado_id
-        WHERE s.estatus='pendiente' AND e.jefe_id=$1 AND s.empleado_id <> $1`, [mi]);
+        WHERE (s.estatus='pendiente' OR (s.estatus='vo_bo' AND s.vobo_por IS NULL))
+          AND e.jefe_id=$1 AND s.empleado_id <> $1`, [mi]);
     // es_jefe va aparte del conteo: quien tiene gente a su cargo necesita entrar
     // a la pantalla aunque hoy no tenga nada pendiente. Sin esto el menu solo se
     // lo muestra a quien su perfil traiga 'misVacaciones', y un jefe suele ser
@@ -841,14 +857,26 @@ router.patch('/solicitudes/:id/autorizar', autorizaVacaciones, async (req, res) 
     const r = await query(
       `UPDATE fac_vacaciones_solicitudes
           SET estatus='aprobada', autorizado_por=$1, autorizado_en=NOW(), nota_autorizacion=$2
-        WHERE id=$3 AND estatus='vo_bo' RETURNING *`,
+        WHERE id=$3 AND estatus='vo_bo'
+          AND (vobo_por IS NOT NULL
+               OR (SELECT jefe_id FROM fac_empleados WHERE id=empleado_id) IS NULL)
+        RETURNING *`,
       [req.usuario.id, (req.body.nota || '').trim() || null, req.params.id]);
     if (!r.rows.length) {
       // Distinguir "ya resuelta" de "todavía le falta el jefe": son dos
       // situaciones distintas y la segunda tiene algo que hacer al respecto.
-      const q = await query(`SELECT estatus FROM fac_vacaciones_solicitudes WHERE id=$1`, [req.params.id]);
-      if (q.rows[0]?.estatus === 'pendiente')
-        return res.status(400).json({ error: 'Falta el visto bueno del jefe directo. Hasta entonces no se puede autorizar.' });
+      const q = await query(
+        `SELECT s.estatus, s.vobo_por, e.jefe_id, j.nombre AS jefe_nombre
+           FROM fac_vacaciones_solicitudes s
+           JOIN fac_empleados e ON e.id = s.empleado_id
+           LEFT JOIN fac_empleados j ON j.id = e.jefe_id
+          WHERE s.id=$1`, [req.params.id]);
+      const q0 = q.rows[0];
+      // Falta la firma del jefe en los dos casos: la que nacio esperandolo, y la
+      // que quedo en 'vo_bo' sin que nadie firmara y ahora ya tiene jefe.
+      if (q0 && q0.jefe_id && !q0.vobo_por && ['pendiente','vo_bo'].includes(q0.estatus))
+        return res.status(400).json({
+          error: `Falta el visto bueno de ${q0.jefe_nombre || 'su jefe directo'}. Hasta entonces no se puede autorizar.` });
       return res.status(400).json({ error: 'Esa solicitud ya fue resuelta o no existe.' });
     }
     res.json(r.rows[0]);
