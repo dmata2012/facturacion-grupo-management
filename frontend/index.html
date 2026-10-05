@@ -6485,9 +6485,11 @@ async function facturas(resetPage = true) {
       <button class="btn bo bsm" id="fac-excel-btn" onclick="exportarFacturas()"
               title="Exporta TODAS las facturas del periodo filtrado, no solo esta página">⬇ Excel</button>
     </div>
+    <div id="fac-canceladas-aviso"></div>
     <div id="fac-table"><p class="empty">Cargando...</p></div>
   </div>`;
   cargarCatalogosFiltroFac();
+  avisarCanceladasConPagos();
   await loadFacturas();
 }
 
@@ -7395,6 +7397,16 @@ async function saveFactura(id) {
 }
 
 async function cancelarFactura(id, cuadrada = false) {
+  // Cancelar borra los pagos: si el comprobante se cancela, ese dinero no entró
+  // al banco. Hay que decirlo ANTES, con el monto, porque es lo que de verdad
+  // cambia y no se puede deshacer.
+  const f = (window._facData?.data || []).find(x => x.id === id);
+  const cobrado = parseFloat(f?.cobrado || 0);
+  const avisoPagos = cobrado > 0
+    ? `\n\n⚠ Esta factura tiene ${fmt(cobrado)} en pagos registrados.\n` +
+      `Al cancelarla se BORRAN esos pagos: un comprobante cancelado no es dinero en banco.\n` +
+      `Esto no se puede deshacer.`
+    : '';
   // Las facturas con desglose cuadrado ya están conciliadas: se pide una
   // confirmación reforzada para evitar cancelarlas por accidente.
   const msg = cuadrada
@@ -7402,14 +7414,97 @@ async function cancelarFactura(id, cuadrada = false) {
       + 'Cancelarla afecta los reportes de desglose y cobranza donde ya está considerada.\n\n'
       + '¿Confirmas que deseas cancelarla?'
     : '¿Cancelar esta factura?';
-  if (!await confirm2(msg)) return;
+  if (!await confirm2(msg + avisoPagos)) return;
   // Segunda confirmación solo para las cuadradas
   if (cuadrada && !await confirm2('Confirma una vez más: la factura se marcará como CANCELADA.')) return;
   try {
-    await api(`/facturas/${id}/cancelar`, { method:'PATCH' });
-    toast('Factura cancelada.');
+    const r = await api(`/facturas/${id}/cancelar`, { method:'PATCH' });
+    toast(r.pagos_eliminados
+      ? `Cancelada. Se quit${r.pagos_eliminados!=1?'aron':'ó'} ${r.pagos_eliminados} pago${r.pagos_eliminados!=1?'s':''} por ${fmt(r.monto_eliminado)}.`
+      : 'Factura cancelada.');
     facturas();
   } catch(e) { toast(e.message, 'err'); }
+}
+
+// Facturas canceladas que todavia conservan pagos: se cancelaron antes de que
+// cancelar se llevara los pagos. Siguen diciendo que estan saldadas en cobranza.
+async function avisarCanceladasConPagos() {
+  const cont = $('fac-canceladas-aviso');
+  if (!cont) return;
+  try {
+    const r = await api('/facturas/canceladas-con-pagos');
+    if (!r.facturas.length) { cont.innerHTML = ''; return; }
+    cont.innerHTML = `
+      <div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:11px;
+           padding:11px 14px;margin-bottom:12px;display:flex;align-items:center;
+           gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:240px;font-size:12.5px;color:#78350f;line-height:1.5">
+          <strong>${r.facturas.length} factura${r.facturas.length!=1?'s':''} cancelada${r.facturas.length!=1?'s':''}
+          con pagos registrados</strong> por ${fmt(r.total)}.
+          Se cancelaron antes de que el sistema quitara los pagos, asi que siguen apareciendo
+          como saldadas.
+        </div>
+        <button class="btn bo bsm" onclick="verCanceladasConPagos()">Revisarlas</button>
+      </div>`;
+  } catch (e) { cont.innerHTML = ''; }
+}
+
+async function verCanceladasConPagos() {
+  $('modal-gt-cats-body').innerHTML = '<h4>Canceladas con pagos</h4><p class="empty">Cargando…</p>';
+  openModal('modal-gt-cats');
+  try {
+    const r = await api('/facturas/canceladas-con-pagos');
+    window._canceladasPagos = r;
+    $('modal-gt-cats-body').innerHTML = `
+      <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#92400e,#d97706);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Revisar</div>
+        <div style="font-size:19px;font-weight:900;margin-top:3px">
+          ${r.facturas.length} cancelada${r.facturas.length!=1?'s':''} con pagos · ${fmt(r.total)}</div>
+      </div>
+      <div style="font-size:12.5px;color:var(--muted);line-height:1.55;margin-bottom:11px">
+        Un comprobante cancelado no es dinero en banco. Mientras el pago siga registrado,
+        la factura aparece como saldada en cobranza. Quitar el pago no borra la factura:
+        solo deja de decir que se cobro.
+      </div>
+      ${!r.facturas.length ? '<p class="empty">Ya no queda ninguna.</p>' : `
+      <div class="tscroll" style="max-height:48vh;overflow:auto"><table style="font-size:12px">
+        <thead><tr><th>Folio</th><th>Cliente</th><th>Emitida</th>
+          <th style="text-align:right">Total</th><th style="text-align:right">Pagos</th><th></th></tr></thead>
+        <tbody>${r.facturas.map(x => `<tr id="cxp-${x.id}">
+          <td style="font-weight:700;white-space:nowrap">${x.folio || '#' + x.id}</td>
+          <td style="font-size:11.5px">${x.cliente}</td>
+          <td style="white-space:nowrap;font-size:11.5px;color:var(--muted)">${fmtDate(x.fecha_emision)}</td>
+          <td style="text-align:right;white-space:nowrap;color:var(--muted)">${fmt(x.total)}</td>
+          <td style="text-align:right;white-space:nowrap;font-weight:800;color:#b45309">
+            ${fmt(x.cobrado)}<span style="font-weight:400;font-size:10.5px;color:var(--muted)"> · ${x.n_pagos}</span></td>
+          <td style="text-align:right;white-space:nowrap">
+            <button class="btn bd bsm" style="padding:3px 8px;font-size:10.5px"
+                    onclick="quitarPagosDeCancelada(${x.id},'${(x.folio||('#'+x.id)).replace(/'/g,"\\'")}',${x.cobrado})">
+              Quitar pagos</button></td>
+        </tr>`).join('')}</tbody>
+      </table></div>`}
+      <div class="form-actions">
+        <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button>
+      </div>`;
+  } catch (e) {
+    $('modal-gt-cats-body').innerHTML =
+      `<p class="empty" style="color:var(--red)">${e.message}</p>
+       <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button></div>`;
+  }
+}
+
+async function quitarPagosDeCancelada(id, folio, monto) {
+  if (!await confirm2(
+      `¿Quitar los pagos de la factura ${folio}?\n\n` +
+      `${fmt(monto)} en pagos registrados sobre un comprobante cancelado.\n\n` +
+      `La factura NO se borra: solo deja de aparecer como cobrada.\nEsto no se puede deshacer.`)) return;
+  try {
+    const r = await api(`/facturas/${id}/pagos-de-cancelada`, { method:'DELETE' });
+    toast(`${folio}: se quit${r.pagos_eliminados!=1?'aron':'ó'} ${r.pagos_eliminados} pago${r.pagos_eliminados!=1?'s':''} por ${fmt(r.monto_eliminado)}.`);
+    verCanceladasConPagos();
+    avisarCanceladasConPagos();
+    if ($('fac-table')) loadFacturas();
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 async function eliminarFactura(id) {

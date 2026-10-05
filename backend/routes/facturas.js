@@ -328,6 +328,31 @@ router.post('/eliminar-varias', puedeBorrarFacturas, async (req, res) => {
   } finally { client.release(); }
 });
 
+// OJO: esta ruta va antes de GET /:id. Declarada despues, express toma
+// "canceladas-con-pagos" como si fuera un id y nunca se llega aqui.
+// Las canceladas que todavia conservan pagos: las que se cancelaron antes de que
+// cancelar se llevara los pagos. Siguen diciendo que estan saldadas.
+router.get('/canceladas-con-pagos', async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT f.id, f.folio, f.uuid_cfdi, f.total,
+             TO_CHAR(f.fecha_emision,'YYYY-MM-DD') AS fecha_emision,
+             COALESCE(NULLIF(TRIM(c.nombre_comercial),''), c.razon_social, 'Sin cliente') AS cliente,
+             COUNT(p.id)::int    AS n_pagos,
+             COALESCE(SUM(p.monto),0) AS cobrado
+        FROM fac_facturas f
+        JOIN fac_pagos p ON p.factura_id = f.id
+        LEFT JOIN fac_clientes c ON c.id = f.cliente_id
+       WHERE f.estatus = 'cancelada'
+       GROUP BY f.id, f.folio, f.uuid_cfdi, f.total, f.fecha_emision, c.nombre_comercial, c.razon_social
+       ORDER BY SUM(p.monto) DESC`);
+    res.json({
+      facturas: r.rows,
+      total: r.rows.reduce((a, x) => a + (parseFloat(x.cobrado) || 0), 0)
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/:id', async (req, res) => {
   try {
     const r = await query(`
@@ -536,10 +561,46 @@ router.post('/importar-masivo', requireRol('admin', 'capturista', 'gerente'), as
 // ── CANCELAR ──────────────────────────────────
 // Los mismos roles que muestran el botón en la interfaz (canFacturar), para que
 // nadie vea la opción y reciba un 403 al usarla.
+// Cancelar se lleva los pagos. Si el comprobante se cancela, ese dinero no entro
+// al banco: dejar el pago registrado hacia que la factura siguiera apareciendo
+// como saldada en cobranza, y su comision contaba como ingreso cobrado.
+// Se devuelve cuanto se quito para que quede a la vista y no desaparezca callado.
 router.patch('/:id/cancelar', requireRol('admin', 'capturista', 'gerente', 'tesoreria'), async (req, res) => {
+  const client = await getClient();
   try {
-    await query(`UPDATE fac_facturas SET estatus='cancelada',actualizado_en=NOW() WHERE id=$1`, [req.params.id]);
-    res.json({ ok: true });
+    await client.query('BEGIN');
+    const f = await client.query(
+      `SELECT estatus FROM fac_facturas WHERE id=$1 FOR UPDATE`, [req.params.id]);
+    if (!f.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Factura no encontrada.' });
+    }
+    const pagos = await client.query(
+      `DELETE FROM fac_pagos WHERE factura_id=$1 RETURNING monto`, [req.params.id]);
+    await client.query(
+      `UPDATE fac_facturas SET estatus='cancelada',actualizado_en=NOW() WHERE id=$1`, [req.params.id]);
+    await client.query('COMMIT');
+    res.json({
+      ok: true,
+      pagos_eliminados: pagos.rows.length,
+      monto_eliminado: pagos.rows.reduce((a, x) => a + (parseFloat(x.monto) || 0), 0)
+    });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+// Quitar los pagos de una cancelada concreta
+router.delete('/:id/pagos-de-cancelada', requireRol('admin', 'gerente', 'tesoreria'), async (req, res) => {
+  try {
+    const f = await query(`SELECT estatus FROM fac_facturas WHERE id=$1`, [req.params.id]);
+    if (!f.rows.length) return res.status(404).json({ error: 'Factura no encontrada.' });
+    if (f.rows[0].estatus !== 'cancelada')
+      return res.status(400).json({ error: 'Esa factura no esta cancelada. Sus pagos no se tocan desde aqui.' });
+    const r = await query(`DELETE FROM fac_pagos WHERE factura_id=$1 RETURNING monto`, [req.params.id]);
+    res.json({ ok: true, pagos_eliminados: r.rows.length,
+               monto_eliminado: r.rows.reduce((a, x) => a + (parseFloat(x.monto) || 0), 0) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
