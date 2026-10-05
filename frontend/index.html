@@ -14925,6 +14925,14 @@ function concToggleCat(llave) {
   concSincronizarVista();
 }
 
+// Alterna entre agrupar lo FACTURADO por cliente o por la empresa que emitio la
+// factura. Los totales de cada categoria no cambian: son las mismas cifras
+// repartidas de otra forma.
+function concPorEmisora() {
+  window._ccPorEmisora = !window._ccPorEmisora;
+  if (window._ccData) renderConcentrado(window._ccData);
+}
+
 function concTodo(abrir) {
   window._ccAbiertas = new Set();
   document.querySelectorAll('tr[data-cc-cat]').forEach(tr => {
@@ -14981,7 +14989,11 @@ function renderConcentrado(d) {
   };
 
   if (d.ingresos.facturado || d.ingresos.no_facturado) {
-    html += bloqueIng('FACTURADO', d.ingresos.facturado, `Sin cobros facturados en ${d.anio}`);
+    // Las mismas cifras agrupadas por cliente o por la empresa que emitio la
+    // factura. Si el servidor todavia no manda la segunda, se usa la de siempre.
+    const fact = (window._ccPorEmisora && d.ingresos.facturado_emisora)
+      ? d.ingresos.facturado_emisora : d.ingresos.facturado;
+    html += bloqueIng('FACTURADO', fact, `Sin cobros facturados en ${d.anio}`);
     html += bloqueIng('NO FACTURADO', d.ingresos.no_facturado,
       'Sin cobros sin factura. Se capturan en Ingresos (CxC) → Otros Ingresos S/F.');
   } else {
@@ -15073,13 +15085,23 @@ function renderConcentrado(d) {
       <div class="s">Sobre ingresos</div></div>`;
 
   const nCats = d.gastos.bloques.reduce((a, b) => a + ((b.categorias || []).length), 0);
+  // El agrupamiento por emisora es de ingresos: tiene que poder ofrecerse aunque
+  // no haya una sola categoria de gasto configurada.
+  const hayFacturado = !!(d.ingresos.facturado && (d.ingresos.facturado.grupos || []).length);
 
   $('cc-body').innerHTML = `
-    ${nCats ? `<div class="cc-vista">
+    ${(nCats || hayFacturado) ? `<div class="cc-vista">
       <span class="cc-vista-l">Vista</span>
+      ${nCats ? `
       <button id="cc-v-totales" class="cc-vb" onclick="concTodo(false)">Solo totales por categoría</button>
       <button id="cc-v-detalle" class="cc-vb" onclick="concTodo(true)">Todo el detalle</button>
-      <span class="cc-vista-h">o haz clic en una categoría para abrirla sola</span>
+      <span class="cc-vista-h">o haz clic en una categoría para abrirla sola</span>` : ''}
+      <button id="cc-v-emisora" class="cc-vb ${window._ccPorEmisora ? 'activa' : ''}" style="margin-left:auto"
+              onclick="concPorEmisora()"
+              title="${window._ccPorEmisora
+                ? 'Volver a ver lo facturado agrupado por cliente'
+                : 'Agrupa lo facturado por la empresa que emitió la factura, en vez de por cliente'}">
+        🏛 ${window._ccPorEmisora ? 'Ver por cliente' : 'Agrupar por empresa emisora'}</button>
     </div>` : ''}
     <div class="card" style="padding:0;overflow:hidden;margin-top:8px">
       <div class="tscroll" style="max-height:calc(100vh - 250px);overflow:auto">

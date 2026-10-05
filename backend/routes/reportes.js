@@ -516,14 +516,19 @@ router.get('/concentrado', async (req, res) => {
          GROUP BY 1
       )
       SELECT COALESCE(NULLIF(TRIM(c.nombre_comercial),''), c.razon_social, 'Sin cliente') AS cliente,
+             -- La empresa que EMITIO la factura. La tabla se llama
+             -- empresas_receptoras por como entra el CFDI (es el RFC emisor del
+             -- XML), pero es la emisora: una de las razones sociales propias.
+             COALESCE(NULLIF(TRIM(er.nombre_comercial),''), er.razon_social, 'Sin emisora') AS emisora,
              pm.mes,
              SUM(pm.pagado * d.comision / NULLIF(f.total,0)) AS comision,
              SUM(pm.pagado * d.otros    / NULLIF(f.total,0)) AS otros
         FROM pagos_mes pm
         JOIN fac_facturas f ON f.id = pm.factura_id
         LEFT JOIN fac_clientes c ON c.id = f.cliente_id
+        LEFT JOIN fac_empresas_receptoras er ON er.id = f.empresa_receptora_id
         JOIN desg d ON d.factura_id = pm.factura_id
-       GROUP BY 1, 2
+       GROUP BY 1, 2, 3
     `, [anio]);
 
     // ── INGRESOS SIN FACTURA ──
@@ -546,21 +551,29 @@ router.get('/concentrado', async (req, res) => {
       sinFactura = isf.rows;
     } catch (e) { sinFactura = []; }
 
-    const armaGrupo = (titulo, campo) => {
-      const porCliente = {};
+    // El mismo calculo cambiando solo por que se agrupa: cliente o empresa
+    // emisora. Los montos no cambian, nada mas se reparten de otra forma, asi
+    // que los totales de cada categoria son identicos en las dos vistas.
+    const armaGrupo = (titulo, campo, clave = 'cliente') => {
+      const acum = {};
       ing.rows.forEach(r => {
         const v = parseFloat(r[campo]) || 0;
         if (!v) return;
-        const f = porCliente[r.cliente] || (porCliente[r.cliente] = { nombre: r.cliente, meses: vacio(), total: 0 });
+        const k = r[clave] || (clave === 'emisora' ? 'Sin emisora' : 'Sin cliente');
+        const f = acum[k] || (acum[k] = { nombre: k, meses: vacio(), total: 0 });
         f.meses[r.mes - 1] += v;
         f.total += v;
       });
-      const filas = Object.values(porCliente).sort((a, b) => b.total - a.total);
+      const filas = Object.values(acum).sort((a, b) => b.total - a.total);
       const meses = vacio();
       filas.forEach(f => f.meses.forEach((v, i) => { meses[i] += v; }));
       return { titulo, filas, meses, total: meses.reduce((a, b) => a + b, 0) };
     };
     const facturados = [armaGrupo('COMISIONES', 'comision'), armaGrupo('OTROS INGRESOS', 'otros')];
+    // Las dos agrupaciones viajan juntas para que el boton de la pantalla
+    // cambie al instante, sin volver a pedir el reporte.
+    const facturadosEmisora = [armaGrupo('COMISIONES', 'comision', 'emisora'),
+                               armaGrupo('OTROS INGRESOS', 'otros', 'emisora')];
 
     // Un grupo por tipo del catalogo, con su desglose por cliente
     const porTipo = {};
@@ -683,6 +696,9 @@ router.get('/concentrado', async (req, res) => {
       ingresos: {
         grupos,
         facturado:    { grupos: facturados,    meses: mesesFac, total: mesesFac.reduce((a, b) => a + b, 0) },
+        // Lo mismo agrupado por la empresa que emitio la factura. Mismos meses y
+        // mismo total: solo cambia como se reparten las filas.
+        facturado_emisora: { grupos: facturadosEmisora, meses: mesesFac, total: mesesFac.reduce((a, b) => a + b, 0) },
         no_facturado: { grupos: noFacturados,  meses: mesesSF,  total: mesesSF.reduce((a, b) => a + b, 0) },
         meses: mesesIng, total: mesesIng.reduce((a, b) => a + b, 0)
       },
