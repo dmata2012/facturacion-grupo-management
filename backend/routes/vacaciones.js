@@ -31,6 +31,15 @@ async function distribuirDiasFIFO(client, empleadoId, diasTotales) {
 const { verificarToken, requireRol } = require('../middleware/auth');
 const { permiso, NIVEL, permisosDeUsuario } = require('../middleware/permiso');
 
+// Autorizar es decidir sobre el saldo de otro, no capturar: por eso pide nivel
+// Editar y no Capturar.
+//
+// Vive aqui arriba, antes de cualquier ruta, y no junto a las rutas que la
+// usan: es un const, no se adelanta, y una ruta declarada mas arriba que el
+// tumbaba el servidor al arrancar con "Cannot access before initialization".
+// Eso no lo detecta node --check, porque de sintaxis esta bien.
+const autorizaVacaciones = permiso('vacaciones', NIVEL.EDITAR);
+
 // Primer modulo migrado al motor de permisos. El nivel Ver deja al colaborador
 // solo con lo suyo; para ver a toda la plantilla hace falta Capturar o mas.
 const verPlantilla = permiso('vacaciones', NIVEL.CAPTURAR);
@@ -809,9 +818,6 @@ async function crearSolicitud(req, res) {
 }
 
 // ═══ AUTORIZACIÓN DE SOLICITUDES ════════════════════
-// Autorizar es decidir sobre el saldo de otro, no capturar: por eso pide nivel
-// Editar y no Capturar.
-const autorizaVacaciones = permiso('vacaciones', NIVEL.EDITAR);
 
 // Nadie autoriza lo suyo, ni el administrador. Si se permitiera, el paso de
 // autorización no controlaría nada para justamente quien más acceso tiene.
