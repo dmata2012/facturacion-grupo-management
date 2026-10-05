@@ -49,7 +49,10 @@ router.get('/clientes', async (req, res) => {
       SELECT c.id, c.rfc, c.razon_social, c.ciudad,
         COUNT(f.id) FILTER (WHERE f.estatus != 'cancelada')::int    AS facturas,
         COALESCE(SUM(f.total) FILTER (WHERE f.estatus != 'cancelada'),0) AS facturado,
-        COALESCE(SUM(p.monto),0)                                    AS cobrado,
+        -- Mismo FILTER que 'facturas' y 'facturado': un pago sobre un comprobante
+        -- cancelado no es dinero cobrado, y sin esto el % cobrado del cliente
+        -- podia pasar del 100%.
+        COALESCE(SUM(p.monto) FILTER (WHERE f.estatus != 'cancelada'),0) AS cobrado,
         COALESCE(SUM(f.total) FILTER (WHERE f.estatus NOT IN ('cancelada','pagada')),0)
           - COALESCE(SUM(p.monto) FILTER (WHERE f.estatus NOT IN ('cancelada','pagada')),0) AS saldo,
         MAX(f.fecha_emision)                                        AS ultima_factura

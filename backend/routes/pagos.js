@@ -49,7 +49,9 @@ router.get('/cobrado-mes', async (req, res) => {
       FROM fac_pagos p
       JOIN fac_facturas f ON f.id = p.factura_id
       JOIN fac_clientes c ON c.id = f.cliente_id
+      -- El detalle tiene que cuadrar con el KPI cobrado_mes, que ya las excluye.
       WHERE DATE_TRUNC('month', p.fecha_pago) = DATE_TRUNC('month', CURRENT_DATE)
+        AND f.estatus != 'cancelada'
       ORDER BY p.fecha_pago DESC
     `);
     res.json(r.rows);
@@ -61,11 +63,15 @@ router.get('/kpi', async (req, res) => {
   try {
     const [cobradoMes, porCobrar, porVencer, vencidas15, morosos, excluido] = await Promise.all([
 
-      // Cobrado en el mes actual
+      // Cobrado en el mes actual.
+      // Hay que unir con la factura: sumando fac_pagos a secas, un pago sobre un
+      // comprobante cancelado contaba como cobranza del mes.
       query(`
-        SELECT COALESCE(SUM(monto), 0) AS total
-        FROM fac_pagos
-        WHERE DATE_TRUNC('month', fecha_pago) = DATE_TRUNC('month', CURRENT_DATE)
+        SELECT COALESCE(SUM(p.monto), 0) AS total
+        FROM fac_pagos p
+        JOIN fac_facturas f ON f.id = p.factura_id
+        WHERE DATE_TRUNC('month', p.fecha_pago) = DATE_TRUNC('month', CURRENT_DATE)
+          AND f.estatus != 'cancelada'
       `),
 
       // Total saldo por cobrar + conteo de facturas
