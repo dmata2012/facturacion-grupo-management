@@ -14833,6 +14833,9 @@ async function concentrado() {
         border-radius:8px;padding:6px 12px;font-size:11.5px;font-weight:700;
         cursor:pointer;font-family:inherit}
       .cc-vb:hover{background:#f1f5f9}
+      .cc-num.cc-clic{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;
+        text-underline-offset:3px;text-decoration-color:#94a3b8}
+      .cc-num.cc-clic:hover{background:#ecfeff;color:#0e7490}
       .cc-vb.activa{background:#0f766e;border-color:#0f766e;color:#fff}
       .cc-vista-h{font-size:10.5px;color:var(--muted)}
       /* Arrancan cerradas: 13 categorías caben sin scroll, que es la gracia */
@@ -14895,10 +14898,16 @@ async function cargarConcentrado() {
 
 // Las celdas en cero se atenúan: con 12 columnas, un tablero lleno de "0.00"
 // esconde justamente los meses donde sí hubo movimiento.
-function ccNum(v, clase) {
+function ccNum(v, clase, clic) {
   const n = parseFloat(v) || 0;
   if (!n) return `<td class="cc-num cc-cero ${clase||''}">–</td>`;
-  return `<td class="cc-num ${clase||''}${n<0?' cc-neg':''}">${fmt(n)}</td>`;
+  // Con clic, la cifra abre el detalle de que la compone. El reporte muestra lo
+  // COBRADO por mes, asi que la factura detras pudo emitirse en otro mes y no
+  // hay forma de encontrarla filtrando Facturas por ese mes.
+  const extra = clic
+    ? ` cc-clic" onclick="${clic}" title="Ver que facturas componen esta cifra`
+    : '';
+  return `<td class="cc-num ${clase||''}${n<0?' cc-neg':''}${extra}">${fmt(n)}</td>`;
 }
 
 // Prefijo conc*, no cc*: Cortes de Caja ya tiene su propio ccToggleCat y, al
@@ -14928,6 +14937,77 @@ function concToggleCat(llave) {
 // Alterna entre agrupar lo FACTURADO por cliente o por la empresa que emitio la
 // factura. Los totales de cada categoria no cambian: son las mismas cifras
 // repartidas de otra forma.
+// Que facturas componen una cifra del concentrado. El reporte va por fecha de
+// COBRO, asi que la factura pudo emitirse en otro mes: hasta ahora no habia
+// forma de rastrearla, porque todas las pantallas filtran por fecha de emision.
+async function ccVerDetalle(grupo, mes, quien) {
+  const d = window._ccData;
+  if (!d) return;
+  const rotuloMes = mes ? MESES_CON[mes - 1] : 'todo ' + d.anio;
+  const titulo = (grupo === 'comision' ? 'Comisiones' : 'Otros ingresos')
+               + ' · ' + rotuloMes + (quien ? ' · ' + quien : '');
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#0f766e,#14b8a6);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Qué compone esta cifra</div>
+      <div style="font-size:18px;font-weight:900;margin-top:3px">${titulo}</div>
+    </div>
+    <p class="empty">Buscando los pagos…</p>`;
+  openModal('modal-gt-cats');
+  try {
+    const q = new URLSearchParams({ anio: d.anio, mes: mes || 0, grupo });
+    if (quien) q.set('quien', quien);
+    if (window._ccPorEmisora) q.set('por', 'emisora');
+    const r = await api('/reportes/concentrado/detalle?' + q.toString());
+    const cuerpo = !r.filas.length
+      ? '<p class="empty">Sin pagos en ese periodo.</p>'
+      : `<div class="tscroll" style="max-height:52vh;overflow:auto"><table style="font-size:12px">
+          <thead><tr>
+            <th>Folio</th><th>Cliente</th><th>Emisora</th>
+            <th>Emitida</th><th>Pagada</th>
+            <th style="text-align:right">Pago</th>
+            <th style="text-align:right">Aporta</th>
+          </tr></thead>
+          <tbody>${r.filas.map(x => `<tr>
+            <td style="font-weight:700;white-space:nowrap">
+              <a href="#" onclick="closeModal('modal-gt-cats');detalleFactura(${x.factura_id})"
+                 style="color:var(--red)">${x.folio || '#' + x.factura_id}</a></td>
+            <td style="font-size:11.5px">${x.cliente}</td>
+            <td style="font-size:11.5px">${x.emisora}</td>
+            <td style="white-space:nowrap;font-size:11.5px;color:var(--muted)">${fmtDate(x.fecha_emision)}</td>
+            <td style="white-space:nowrap;font-size:11.5px">${fmtDate(x.fecha_pago)}</td>
+            <td style="text-align:right;white-space:nowrap;color:var(--muted)">${fmt(x.pago_monto)}</td>
+            <td style="text-align:right;white-space:nowrap;font-weight:800">${fmt(x.aporta)}</td>
+          </tr>`).join('')}</tbody>
+          <tfoot><tr style="border-top:2px solid var(--dark);font-weight:900">
+            <td colspan="6" style="text-align:right;padding:8px">Total</td>
+            <td style="text-align:right;padding:8px">${fmt(r.total)}</td>
+          </tr></tfoot>
+        </table></div>
+        <div style="font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.55">
+          <strong>Aporta</strong> es la parte del pago que corresponde a
+          ${grupo === 'comision' ? 'comisión' : 'otros ingresos'}, en la misma proporción
+          que el desglose de su factura. Por eso casi nunca es el pago completo.
+          Fíjate en <strong>Emitida</strong>: suele ser de otro mes, y por eso no
+          aparece al filtrar Facturas por el mes del cobro.
+        </div>`;
+    $('modal-gt-cats-body').innerHTML = `
+      <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#0f766e,#14b8a6);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Qué compone esta cifra</div>
+        <div style="font-size:18px;font-weight:900;margin-top:3px">${titulo}</div>
+        <div style="font-size:11.5px;opacity:.9;margin-top:4px">
+          ${r.filas.length} pago${r.filas.length!=1?'s':''} cobrado${r.filas.length!=1?'s':''}</div>
+      </div>
+      ${cuerpo}
+      <div class="form-actions">
+        <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button>
+      </div>`;
+  } catch (e) {
+    $('modal-gt-cats-body').innerHTML =
+      `<p class="empty" style="color:var(--red)">${e.message}</p>
+       <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button></div>`;
+  }
+}
+
 function concPorEmisora() {
   window._ccPorEmisora = !window._ccPorEmisora;
   if (window._ccData) renderConcentrado(window._ccData);
@@ -14956,12 +15036,18 @@ function concSincronizarVista() {
 }
 
 function renderConcentrado(d) {
-  const fila = (nombre, meses, total, clase, sangria) => `
+  // detalle: { grupo, quien } cuando la fila admite ver que la compone
+  const fila = (nombre, meses, total, clase, sangria, detalle) => {
+    const clic = (mes) => detalle
+      ? `ccVerDetalle('${detalle.grupo}',${mes},${JSON.stringify(detalle.quien || '').replace(/"/g,'&quot;')})`
+      : null;
+    return `
     <tr class="${clase||''}">
       <td class="concepto"${sangria?' style="padding-left:26px"':''}>${nombre}</td>
-      ${meses.map(v => ccNum(v)).join('')}
-      ${ccNum(total, 'cc-tot-col')}
+      ${meses.map((v, i) => ccNum(v, '', clic(i + 1))).join('')}
+      ${ccNum(total, 'cc-tot-col', clic(0))}
     </tr>`;
+  };
 
   let html = '';
 
@@ -14976,9 +15062,17 @@ function renderConcentrado(d) {
     if (!bloque) return '';
     let h = `<tr class="cc-org"><td class="concepto">${rotulo}</td>
              ${MESES_CON.map(()=>'<td></td>').join('')}<td></td></tr>`;
+    // Solo lo facturado se puede desglosar: los ingresos sin factura no tienen
+    // comprobante que mostrar.
+    const esFac = rotulo === 'FACTURADO';
     (bloque.grupos || []).forEach(g => {
-      h += fila(g.titulo, g.meses, g.total, 'cc-sub');
-      g.filas.forEach(f => { h += fila(f.nombre, f.meses, f.total, '', true); });
+      const grupo = /COMISI/i.test(g.titulo) ? 'comision' : 'otros';
+      h += fila(g.titulo, g.meses, g.total, 'cc-sub', false,
+                esFac ? { grupo, quien: '' } : null);
+      g.filas.forEach(f => {
+        h += fila(f.nombre, f.meses, f.total, '', true,
+                  esFac ? { grupo, quien: f.nombre } : null);
+      });
       if (!g.filas.length)
         h += `<tr><td class="concepto" style="padding-left:26px;color:var(--muted);font-style:italic">Sin movimientos en ${d.anio}</td>${MESES_CON.map(()=>'<td></td>').join('')}<td></td></tr>`;
     });

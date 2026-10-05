@@ -489,6 +489,68 @@ router.get('/cliente/:id', async (req, res) => {
 //
 // base=cobrado (predeterminado): los ingresos se reconocen cuando entran, por
 // fecha de pago, que es lo que significa "efectivamente cobrado".
+// Que hay detras de una cifra del concentrado. El reporte muestra lo COBRADO
+// por mes, asi que la factura que aporto a febrero pudo emitirse en cualquier
+// otro mes: buscarla en Facturas filtrando febrero no la encuentra, y hasta
+// ahora nada en el sistema filtraba por fecha de pago.
+//
+// Se repite el mismo prorrateo del concentrado para que los renglones sumen
+// exactamente la cifra sobre la que se hizo clic.
+router.get('/concentrado/detalle', async (req, res) => {
+  try {
+    const anio = parseInt(req.query.anio) || new Date().getFullYear();
+    const mes  = parseInt(req.query.mes) || 0;          // 1..12; 0 = todo el ano
+    const campo = req.query.grupo === 'otros' ? 'otros' : 'comision';
+    const porEmisora = req.query.por === 'emisora';
+    const quien = (req.query.quien || '').trim();        // cliente o emisora de esa fila
+
+    const params = [anio];
+    let filtroMes = '';
+    if (mes >= 1 && mes <= 12) { params.push(mes); filtroMes = ` AND EXTRACT(MONTH FROM p.fecha_pago)::int = $${params.length}`; }
+
+    let filtroQuien = '';
+    if (quien) {
+      params.push(quien);
+      filtroQuien = porEmisora
+        ? ` AND COALESCE(NULLIF(TRIM(er.nombre_comercial),''), er.razon_social, 'Sin emisora') = $${params.length}`
+        : ` AND COALESCE(NULLIF(TRIM(c.nombre_comercial),''), c.razon_social, 'Sin cliente') = $${params.length}`;
+    }
+
+    const r = await query(`
+      WITH desg AS (
+        SELECT factura_id,
+               COALESCE(SUM(monto) FILTER (WHERE UPPER(concepto) LIKE '%COMISI%'),0) AS comision,
+               COALESCE(SUM(monto) FILTER (WHERE UPPER(concepto) LIKE '%OTRO%'),0)   AS otros
+          FROM fac_desglose_rh GROUP BY 1
+      )
+      SELECT p.id                                   AS pago_id,
+             TO_CHAR(p.fecha_pago,'YYYY-MM-DD')     AS fecha_pago,
+             p.monto                                AS pago_monto,
+             f.id                                   AS factura_id,
+             f.folio, f.uuid_cfdi, f.total          AS factura_total,
+             TO_CHAR(f.fecha_emision,'YYYY-MM-DD')  AS fecha_emision,
+             COALESCE(NULLIF(TRIM(c.nombre_comercial),''), c.razon_social, 'Sin cliente')  AS cliente,
+             COALESCE(NULLIF(TRIM(er.nombre_comercial),''), er.razon_social, 'Sin emisora') AS emisora,
+             ROUND((p.monto * d.${campo} / NULLIF(f.total,0))::numeric, 2) AS aporta
+        FROM fac_pagos p
+        JOIN fac_facturas f ON f.id = p.factura_id
+        JOIN desg d        ON d.factura_id = p.factura_id
+        LEFT JOIN fac_clientes c            ON c.id  = f.cliente_id
+        LEFT JOIN fac_empresas_receptoras er ON er.id = f.empresa_receptora_id
+       WHERE EXTRACT(YEAR FROM p.fecha_pago) = $1${filtroMes}${filtroQuien}
+         AND d.${campo} > 0
+       ORDER BY p.fecha_pago, f.folio
+    `, params);
+
+    const filas = r.rows.filter(x => Math.abs(parseFloat(x.aporta) || 0) > 0.005);
+    res.json({
+      anio, mes, grupo: campo, quien: quien || null, por: porEmisora ? 'emisora' : 'cliente',
+      filas,
+      total: filas.reduce((a, x) => a + (parseFloat(x.aporta) || 0), 0)
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/concentrado', async (req, res) => {
   try {
     const anio = parseInt(req.query.anio) || new Date().getFullYear();
