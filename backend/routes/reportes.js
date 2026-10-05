@@ -538,6 +538,9 @@ router.get('/concentrado/detalle', async (req, res) => {
         LEFT JOIN fac_clientes c            ON c.id  = f.cliente_id
         LEFT JOIN fac_empresas_receptoras er ON er.id = f.empresa_receptora_id
        WHERE EXTRACT(YEAR FROM p.fecha_pago) = $1${filtroMes}${filtroQuien}
+         -- Una factura cancelada no es ingreso, aunque tenga el pago registrado.
+         -- Es la misma regla que ya aplica el resto de los reportes.
+         AND f.estatus <> 'cancelada'
          AND d.${campo} > 0
        ORDER BY p.fecha_pago, f.folio
     `, params);
@@ -590,6 +593,10 @@ router.get('/concentrado', async (req, res) => {
         LEFT JOIN fac_clientes c ON c.id = f.cliente_id
         LEFT JOIN fac_empresas_receptoras er ON er.id = f.empresa_receptora_id
         JOIN desg d ON d.factura_id = pm.factura_id
+       -- Fuera las canceladas: el resto del archivo ya las excluye en todas sus
+       -- consultas, y estas dos —las unicas que leen pagos— se habian quedado
+       -- sin la regla, asi que un comprobante cancelado inflaba el ingreso.
+       WHERE f.estatus <> 'cancelada'
        GROUP BY 1, 2, 3
     `, [anio]);
 
