@@ -133,7 +133,10 @@ router.get('/', async (req, res) => {
         `, [año]),
         query(`
           SELECT
-            COUNT(DISTINCT f.id) FILTER (WHERE f.desglose_validado=TRUE)::int AS cuadradas,
+            -- Las dos excluyen canceladas: si solo lo hiciera 'pendientes', una
+            -- factura cancelada seguiria sumando a 'cuadradas' y el porcentaje
+            -- de avance del desglose salia inflado.
+            COUNT(DISTINCT f.id) FILTER (WHERE f.desglose_validado=TRUE AND f.estatus!='cancelada')::int AS cuadradas,
             COUNT(DISTINCT f.id) FILTER (WHERE f.desglose_validado=FALSE AND f.estatus!='cancelada')::int AS pendientes,
             COALESCE(SUM(d.monto),0) AS total_desglose,
             COUNT(d.id)::int AS total_partidas,
