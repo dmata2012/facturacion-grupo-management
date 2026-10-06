@@ -163,6 +163,16 @@ router.get('/', async (req, res) => {
           WHERE f.estatus != 'cancelada' AND c.aplica_desglose = FALSE)::int        AS facturas_sin_desglose,
         COUNT(DISTINCT f.cliente_id) FILTER (
           WHERE f.estatus != 'cancelada' AND c.aplica_desglose = FALSE)::int        AS clientes_sin_desglose,
+        -- OJO: lo de arriba va por la bandera del CLIENTE (aplica_desglose), o sea
+        -- quien esta EXENTO de desglosar. Lo de abajo es otra cosa: facturas que si
+        -- deben desglosarse y a las que todavia no se les captura nada. Son las que
+        -- hacen que la comision del mes salga baja sin que se note por que.
+        COUNT(f.id) FILTER (
+          WHERE f.estatus != 'cancelada' AND COALESCE(c.aplica_desglose,TRUE)
+            AND sub_d.factura_id IS NULL)::int                                      AS facturas_sin_capturar,
+        COALESCE(SUM(f.total) FILTER (
+          WHERE f.estatus != 'cancelada' AND COALESCE(c.aplica_desglose,TRUE)
+            AND sub_d.factura_id IS NULL),0)                                        AS facturado_sin_capturar,
         COALESCE(SUM(COALESCE(sub_p.cobrado,0)) FILTER (WHERE f.estatus != 'cancelada'),0) AS cobrado,
         COALESCE(SUM(f.total - COALESCE(sub_p.cobrado,0))
                  FILTER (WHERE f.estatus NOT IN ('cancelada','pagada')),0)  AS saldo
@@ -171,6 +181,9 @@ router.get('/', async (req, res) => {
       LEFT JOIN (
         SELECT factura_id, SUM(monto) AS cobrado FROM fac_pagos GROUP BY factura_id
       ) sub_p ON sub_p.factura_id = f.id
+      LEFT JOIN (
+        SELECT DISTINCT factura_id FROM fac_desglose_rh
+      ) sub_d ON sub_d.factura_id = f.id
       ${where}
     `, params.slice(0, -2));
 
