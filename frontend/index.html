@@ -6927,8 +6927,17 @@ async function loadFacturas() {
               text-transform:uppercase;letter-spacing:.6px;color:var(--dark)">
             Total del periodo
             <span style="font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted)">
-              · ${d.total} factura${d.total!=1?'s':''}${paginas > 1
-                ? ` de las ${paginas} páginas, no solo esta` : ''}</span>
+              ${(() => {
+                // El conteo tiene que ser el de las facturas que SI entraron a la
+                // suma. d.total cuenta todo lo listado, canceladas incluidas, y
+                // ponerlo junto a montos que las excluyen hacia que el renglon
+                // dijera "413 facturas" sobre la suma de menos de 413.
+                const n = t.facturas != null ? parseInt(t.facturas) : d.total;
+                const canc = parseInt(t.canceladas || 0);
+                return `· ${n} factura${n!=1?'s':''}${paginas > 1
+                  ? ` de las ${paginas} páginas, no solo esta` : ''}`
+                  + (canc ? ` · <span style="color:#b45309">${canc} cancelada${canc!=1?'s':''}, fuera de la suma</span>` : '');
+              })()}</span>
           </td>
           ${cel(t.subtotal, 'color:var(--muted)')}
           ${cel(t.iva, 'color:var(--muted)')}
