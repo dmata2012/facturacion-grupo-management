@@ -6447,7 +6447,9 @@ async function facturas(resetPage = true) {
               title="Busca facturas nuevas en el buzón y las da de alta">📬 Revisar correo</button>
       <button class="btn bo" onclick="openImportarXML()">📥 Importar XMLs</button>
       ${facPuedeBorrar() ? `<button class="btn bo" onclick="openLotesFac()"
-              title="Ver las cargas recientes y deshacer una completa">📦 Cargas</button>` : ''}
+              title="Ver las cargas recientes y deshacer una completa">📦 Cargas</button>
+      <button class="btn bo" onclick="verPagosBorrados()"
+              title="Qué pagos se han borrado, de qué factura, quién y cuándo">🧾 Pagos borrados</button>` : ''}
       <button class="btn bs" onclick="openFactura()">+ Nueva factura</button></div>` : ''}
   </div>
   <div class="card">
@@ -7503,6 +7505,56 @@ async function verCanceladasConPagos() {
         </tr>`).join('')}</tbody>
       </table></div>`}
       <div class="form-actions">
+        <button class="btn bo" onclick="verPagosBorrados()">Ver lo ya quitado</button>
+        <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button>
+      </div>`;
+  } catch (e) {
+    $('modal-gt-cats-body').innerHTML =
+      `<p class="empty" style="color:var(--red)">${e.message}</p>
+       <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button></div>`;
+  }
+}
+
+// Bitácora: qué pagos se han borrado, de qué factura, cuánto, quién y cuándo.
+// Antes no quedaba rastro: una cancelada sin pagos se veía igual si nunca los
+// tuvo o si alguien se los quitó.
+async function verPagosBorrados() {
+  $('modal-gt-cats-body').innerHTML = '<p class="empty">Cargando…</p>';
+  openModal('modal-gt-cats');
+  try {
+    const r = await api('/facturas/pagos-borrados');
+    const mov = r.movimientos || [];
+    const etiq = m => m === 'cancelacion'
+      ? '<span style="background:#fef2f2;color:#991b1b;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700">Al cancelar</span>'
+      : '<span style="background:#fffbeb;color:#92400e;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700">Limpieza</span>';
+    $('modal-gt-cats-body').innerHTML = `
+      <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#334155,#64748b);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Bitácora</div>
+        <div style="font-size:19px;font-weight:900;margin-top:3px">
+          ${mov.length} pago${mov.length!=1?'s':''} borrado${mov.length!=1?'s':''} · ${fmt(r.total)}</div>
+      </div>
+      <div style="font-size:12.5px;color:var(--muted);line-height:1.55;margin-bottom:11px">
+        Todo pago borrado queda anotado aquí, se haya ido al cancelar la factura o
+        al limpiar una que ya estaba cancelada. Se guarda desde que existe esta
+        bitácora: lo quitado antes no aparece.
+      </div>
+      ${!mov.length ? '<p class="empty">Todavía no se ha borrado ningún pago.</p>' : `
+      <div class="tscroll" style="max-height:52vh;overflow:auto"><table style="font-size:12px">
+        <thead><tr><th>Factura</th><th>Cliente</th><th>Pago</th>
+          <th style="text-align:right">Monto</th><th>Motivo</th><th>Quién</th><th>Cuándo</th></tr></thead>
+        <tbody>${mov.map(x => `<tr>
+          <td style="font-weight:700;white-space:nowrap">${x.folio || '#' + x.factura_id}</td>
+          <td style="font-size:11.5px">${x.cliente || '—'}</td>
+          <td style="white-space:nowrap;font-size:11.5px;color:var(--muted)">
+            ${x.fecha_pago ? fmtDate(x.fecha_pago) : '—'}${x.referencia ? ' · ' + x.referencia : ''}</td>
+          <td style="text-align:right;white-space:nowrap;font-weight:800">${fmt(x.monto)}</td>
+          <td>${etiq(x.motivo)}</td>
+          <td style="font-size:11.5px">${x.borrado_por_nombre || '—'}</td>
+          <td style="white-space:nowrap;font-size:11.5px;color:var(--muted)">${x.cuando || ''}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`}
+      <div class="form-actions">
+        <button class="btn bo" onclick="verCanceladasConPagos()">Volver</button>
         <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button>
       </div>`;
   } catch (e) {

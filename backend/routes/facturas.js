@@ -9,6 +9,57 @@ const { verificarToken, requireRol } = require('../middleware/auth');
 // volverla administradora de todo el sistema.
 const { permiso, NIVEL, permisosDeUsuario } = require('../middleware/permiso');
 
+// ── Bitacora de pagos borrados ────────────────────────────────
+// Borrar un pago quita dinero de los reportes y no se puede deshacer. Se guarda
+// una copia de lo borrado ANTES de borrarlo: con que factura era, cuanto, quien
+// y por que. Sin esto, una factura cancelada sin pagos se ve igual si nunca los
+// tuvo o si alguien se los quito, y no habia manera de saberlo despues.
+(async () => {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS fac_pagos_borrados (
+        id SERIAL PRIMARY KEY,
+        factura_id INT,
+        folio TEXT,
+        cliente TEXT,
+        pago_id INT,
+        monto NUMERIC(14,2),
+        fecha_pago DATE,
+        forma_pago TEXT,
+        referencia TEXT,
+        -- 'cancelacion' = se fueron al cancelar la factura
+        -- 'limpieza'    = se quitaron de una que ya estaba cancelada
+        motivo TEXT NOT NULL,
+        borrado_por INT,
+        borrado_por_nombre TEXT,
+        borrado_en TIMESTAMP DEFAULT NOW()
+      )`);
+    await query(`CREATE INDEX IF NOT EXISTS ix_pagos_borrados_factura
+                   ON fac_pagos_borrados(factura_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS ix_pagos_borrados_fecha
+                   ON fac_pagos_borrados(borrado_en DESC)`);
+  } catch (e) { console.warn('Bitácora de pagos borrados:', e.message); }
+})();
+
+// Guarda en la bitacora los pagos de una factura y los devuelve. Recibe el
+// cliente de la transaccion para que el registro y el borrado caigan juntos: o
+// se anota y se borra, o no pasa ninguna de las dos.
+async function anotarPagosBorrados(cli, facturaId, motivo, usuario) {
+  const r = await cli.query(`
+    INSERT INTO fac_pagos_borrados
+      (factura_id, folio, cliente, pago_id, monto, fecha_pago, forma_pago,
+       referencia, motivo, borrado_por, borrado_por_nombre)
+    SELECT f.id, f.folio, c.razon_social, p.id, p.monto, p.fecha_pago,
+           p.forma_pago, p.referencia, $2, $3, $4
+    FROM fac_pagos p
+    JOIN fac_facturas f ON f.id = p.factura_id
+    LEFT JOIN fac_clientes c ON c.id = f.cliente_id
+    WHERE p.factura_id = $1
+    RETURNING monto`,
+    [facturaId, motivo, usuario?.id || null, usuario?.nombre || null]);
+  return r.rows;
+}
+
 // permiso() deja pasar a CUALQUIERA cuando el motor de permisos todavia no esta
 // listo, para que un deploy a medias no deje el sistema inservible. Para la
 // mayoria de las pantallas es lo correcto; para borrar facturas no: es
@@ -366,6 +417,23 @@ router.get('/canceladas-con-pagos', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── CONSULTAR LA BITACORA ─────────────────────────────────────
+// Va ANTES de GET /:id, igual que canceladas-con-pagos: si no, express lee
+// "pagos-borrados" como un id y responde 404.
+router.get('/pagos-borrados', requireRol('admin', 'gerente', 'tesoreria'), async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT b.*, TO_CHAR(b.borrado_en, 'YYYY-MM-DD HH24:MI') AS cuando,
+             f.estatus AS estatus_actual
+      FROM fac_pagos_borrados b
+      LEFT JOIN fac_facturas f ON f.id = b.factura_id
+      ORDER BY b.borrado_en DESC, b.id DESC
+      LIMIT 500`);
+    res.json({
+      total: r.rows.reduce((a, x) => a + (parseFloat(x.monto) || 0), 0),
+      movimientos: r.rows
+    });
+
 router.get('/:id', async (req, res) => {
   try {
     const r = await query(`
@@ -588,8 +656,9 @@ router.patch('/:id/cancelar', requireRol('admin', 'capturista', 'gerente', 'teso
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Factura no encontrada.' });
     }
-    const pagos = await client.query(
-      `DELETE FROM fac_pagos WHERE factura_id=$1 RETURNING monto`, [req.params.id]);
+    // Anotar antes de borrar: despues ya no hay de donde sacar los datos.
+    const pagos = await anotarPagosBorrados(client, req.params.id, 'cancelacion', req.usuario);
+    await client.query(`DELETE FROM fac_pagos WHERE factura_id=$1`, [req.params.id]);
     await client.query(
       `UPDATE fac_facturas SET estatus='cancelada',actualizado_en=NOW() WHERE id=$1`, [req.params.id]);
     await client.query('COMMIT');
@@ -611,9 +680,21 @@ router.delete('/:id/pagos-de-cancelada', requireRol('admin', 'gerente', 'tesorer
     if (!f.rows.length) return res.status(404).json({ error: 'Factura no encontrada.' });
     if (f.rows[0].estatus !== 'cancelada')
       return res.status(400).json({ error: 'Esa factura no esta cancelada. Sus pagos no se tocan desde aqui.' });
-    const r = await query(`DELETE FROM fac_pagos WHERE factura_id=$1 RETURNING monto`, [req.params.id]);
-    res.json({ ok: true, pagos_eliminados: r.rows.length,
-               monto_eliminado: r.rows.reduce((a, x) => a + (parseFloat(x.monto) || 0), 0) });
+    // En transaccion: anotar en la bitacora y borrar tienen que pasar juntos. Si
+    // el borrado falla despues de anotar, la bitacora mentiria.
+    const cli = await getClient();
+    try {
+      await cli.query('BEGIN');
+      const r = await anotarPagosBorrados(cli, req.params.id, 'limpieza', req.usuario);
+      await cli.query(`DELETE FROM fac_pagos WHERE factura_id=$1`, [req.params.id]);
+      await cli.query('COMMIT');
+      res.json({ ok: true, pagos_eliminados: r.length,
+                 monto_eliminado: r.reduce((a, x) => a + (parseFloat(x.monto) || 0), 0) });
+    } catch (e) { await cli.query('ROLLBACK'); throw e; }
+    finally { cli.release(); }
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
