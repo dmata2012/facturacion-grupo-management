@@ -10,7 +10,11 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- xlsx-js-style es SheetJS 0.18.5 con escritura de estilos (negritas, bordes,
+     formatos de numero). La version de la comunidad de SheetJS no los escribe:
+     son de la version de paga. Misma API, asi que el resto de las exportaciones
+     sigue funcionando igual; solo las que ponen cell.s cambian de aspecto. -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <style>
 /* ══ ETIQUETAS DE ESTATUS ════════════════════════════ */
 /* Vivian dentro del <style> de la pantalla de Gastos, que solo se inyecta al
@@ -15493,58 +15497,137 @@ function exportarConcentradoExcel() {
   if (!d) return toast('No hay datos para exportar.', 'warn');
   if (typeof XLSX === 'undefined') return toast('Librería XLSX no disponible.', 'err');
 
-  const aoa = [
-    ['GRUPO MANAGEMENT'],
-    [`CONCENTRADO DE GASTOS E INGRESOS EFECTIVAMENTE PAGADOS DE ENERO A DICIEMBRE ${d.anio}`],
-    [`Generado: ${new Date().toLocaleString('es-MX')}`], [],
-    ['CONCEPTO', ...MESES_CON.map(m => m.toUpperCase()), 'TOTALES']
-  ];
-  const push = (nombre, meses, total) => aoa.push([nombre, ...meses.map(v => parseFloat(v)||0), parseFloat(total)||0]);
+  // Se arma la hoja junto con el papel que hace cada renglón, para no tener que
+  // adivinarlo después por el texto. 'nivel' decide el aspecto:
+  //   titulo  seccion  grupo  detalle  subtotal  total  encabezado
+  const filas = [];
+  const fila = (nivel, celdas) => filas.push({ nivel, celdas });
+  const cifras = (nombre, meses, total) =>
+    [nombre, ...meses.map(v => parseFloat(v) || 0), parseFloat(total) || 0];
 
-  aoa.push(['INGRESOS EFECTIVAMENTE COBRADOS']);
+  // El Excel se lleva LA MISMA agrupación que se está viendo en pantalla. Antes
+  // siempre exportaba por cliente, asi que al ver por emisora el archivo traia
+  // otros renglones que los de la pantalla, con los mismos totales: imposible
+  // de cuadrar a simple vista.
+  const porEmisora = !!(window._ccPorEmisora && d.ingresos.facturado_emisora);
+  const agrupadoPor = porEmisora ? 'empresa emisora' : 'cliente';
+
+  fila('titulo',  ['GRUPO MANAGEMENT']);
+  fila('titulo2', [`CONCENTRADO DE GASTOS E INGRESOS EFECTIVAMENTE PAGADOS DE ENERO A DICIEMBRE ${d.anio}`]);
+  fila('nota',    [`Ingresos facturados agrupados por ${agrupadoPor}  ·  Generado: ${new Date().toLocaleString('es-MX')}`]);
+  fila('vacia',   []);
+  fila('encabezado', ['CONCEPTO', ...MESES_CON.map(m => m.toUpperCase()), 'TOTALES']);
+
+  fila('seccion', ['INGRESOS EFECTIVAMENTE COBRADOS']);
   const bloqueXls = (rotulo, bloque) => {
     if (!bloque) return;
-    aoa.push([rotulo]);
+    fila('seccion', [rotulo]);
     (bloque.grupos || []).forEach(g => {
-      push('  ' + g.titulo, g.meses, g.total);
-      g.filas.forEach(f => push('     ' + f.nombre, f.meses, f.total));
+      fila('grupo', cifras('  ' + g.titulo, g.meses, g.total));
+      g.filas.forEach(f => fila('detalle', cifras('     ' + f.nombre, f.meses, f.total)));
     });
-    push('  Subtotal ' + rotulo.toLowerCase(), bloque.meses, bloque.total);
+    fila('subtotal', cifras('  Subtotal ' + rotulo.toLowerCase(), bloque.meses, bloque.total));
   };
   if (d.ingresos.facturado || d.ingresos.no_facturado) {
-    bloqueXls('FACTURADO', d.ingresos.facturado);
+    bloqueXls('FACTURADO', porEmisora ? d.ingresos.facturado_emisora : d.ingresos.facturado);
     bloqueXls('NO FACTURADO', d.ingresos.no_facturado);
   } else {
     d.ingresos.grupos.forEach(g => {
-      push(g.titulo, g.meses, g.total);
-      g.filas.forEach(f => push('   ' + f.nombre, f.meses, f.total));
+      fila('grupo', cifras(g.titulo, g.meses, g.total));
+      g.filas.forEach(f => fila('detalle', cifras('   ' + f.nombre, f.meses, f.total)));
     });
   }
-  push('TOTAL DE INGRESOS', d.ingresos.meses, d.ingresos.total);
-  aoa.push([]);
+  fila('total', cifras('TOTAL DE INGRESOS', d.ingresos.meses, d.ingresos.total));
+  fila('vacia', []);
   // El Excel se lleva siempre el detalle completo, esté abierto o no en pantalla:
   // ese archivo es para trabajar los datos, no para leerlos de un vistazo.
   d.gastos.bloques.forEach(b => {
-    aoa.push([b.titulo]);
+    fila('seccion', [b.titulo]);
     if (b.categorias && b.categorias.length) {
       b.categorias.forEach(c => {
-        push('  ' + c.nombre, c.meses, c.total);
-        c.conceptos.forEach(f => push(`     ${f.num}. ${f.nombre}`, f.meses, f.total));
+        fila('grupo', cifras('  ' + c.nombre, c.meses, c.total));
+        c.conceptos.forEach(f => fila('detalle', cifras(`     ${f.num}. ${f.nombre}`, f.meses, f.total)));
       });
     } else {
-      b.filas.forEach((f, i) => push(`${i+1}. ${f.nombre}`, f.meses, f.total));
+      b.filas.forEach((f, i) => fila('detalle', cifras(`${i+1}. ${f.nombre}`, f.meses, f.total)));
     }
-    push(`TOTAL ${b.titulo}`, b.meses, b.total);
-    aoa.push([]);
+    fila('subtotal', cifras(`TOTAL ${b.titulo}`, b.meses, b.total));
+    fila('vacia', []);
   });
-  push('TOTAL DE GASTOS', d.gastos.meses, d.gastos.total);
-  push('UTILIDAD', d.utilidad.meses, d.utilidad.total);
+  fila('total', cifras('TOTAL DE GASTOS', d.gastos.meses, d.gastos.total));
+  fila('total', cifras('UTILIDAD', d.utilidad.meses, d.utilidad.total));
 
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{wch:44}, ...MESES_CON.map(()=>({wch:14})), {wch:16}];
+  const ws = XLSX.utils.aoa_to_sheet(filas.map(f => f.celdas));
+  const nCols = MESES_CON.length + 2;              // CONCEPTO + 12 meses + TOTALES
+  const ultCol = nCols - 1;
+
+  // ── Aspecto ──────────────────────────────────────────────────
+  // Contabilidad: cero se ve como raya, no como 0.00. Es lo que hace legible
+  // una tabla con tantos meses en blanco.
+  const FMT = '#,##0.00;-#,##0.00;"-"';
+  const BORDE = { style: 'thin', color: { rgb: 'FF000000' } };
+  const fuente = (extra) => Object.assign({ name: 'Calibri', sz: 10 }, extra || {});
+
+  const estiloDe = (nivel, col) => {
+    const num = col > 0;
+    const base = { alignment: { horizontal: num ? 'right' : 'left', vertical: 'center' } };
+    switch (nivel) {
+      case 'titulo':
+        return { font: fuente({ sz: 14, bold: true }), alignment: { horizontal: 'center' } };
+      case 'titulo2':
+        return { font: fuente({ sz: 11, bold: true }), alignment: { horizontal: 'center' } };
+      case 'nota':
+        return { font: fuente({ sz: 9, italic: true, color: { rgb: 'FF555555' } }),
+                 alignment: { horizontal: 'center' } };
+      case 'encabezado':
+        return { font: fuente({ bold: true, color: { rgb: 'FF000000' } }),
+                 alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+                 border: { top: BORDE, bottom: BORDE } };
+      case 'seccion':
+        return Object.assign({}, base, { font: fuente({ bold: true }) });
+      case 'grupo':
+        return Object.assign({}, base, { font: fuente({ bold: true }) });
+      case 'detalle':
+        return Object.assign({}, base, { font: fuente({ italic: true }) });
+      case 'subtotal':
+        return Object.assign({}, base, { font: fuente({ bold: true }), border: { top: BORDE } });
+      case 'total':
+        return Object.assign({}, base, {
+          font: fuente({ bold: true, sz: 11 }),
+          border: { top: BORDE, bottom: { style: 'double', color: { rgb: 'FF000000' } } }
+        });
+      default:
+        return base;
+    }
+  };
+
+  filas.forEach((f, r) => {
+    for (let c = 0; c < nCols; c++) {
+      const ref = XLSX.utils.encode_cell({ r, c });
+      // Las celdas vacías no existen en la hoja; hay que crearlas para que el
+      // borde de un renglón de totales llegue hasta la última columna.
+      if (!ws[ref]) {
+        if (f.nivel === 'vacia') continue;
+        ws[ref] = { t: 's', v: '' };
+      }
+      ws[ref].s = estiloDe(f.nivel, c);
+      if (ws[ref].t === 'n') ws[ref].z = FMT;
+    }
+  });
+
+  // Los tres renglones del encabezado van centrados a lo ancho de la tabla.
+  ws['!merges'] = [0, 1, 2].map(r => ({ s: { r, c: 0 }, e: { r, c: ultCol } }));
+  ws['!cols'] = [{ wch: 46 }, ...MESES_CON.map(() => ({ wch: 13 })), { wch: 16 }];
+  ws['!rows'] = filas.map(f => f.nivel === 'encabezado' ? { hpt: 26 } : {});
+  // Congelar el encabezado seria util, pero esta libreria no escribe paneles:
+  // se probo con !freeze (objeto y cadena) y con !panes, y ninguno llega al
+  // archivo. Queda a mano desde Excel: Vista → Inmovilizar.
+
+  // El nombre dice la agrupación: dos exportaciones del mismo año con distinto
+  // desglose se veían idénticas por fuera y una pisaba a la otra en Descargas.
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, `Concentrado ${d.anio}`);
-  XLSX.writeFile(wb, `Concentrado_${d.anio}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, ws, `Concentrado ${d.anio}`.slice(0, 31));
+  XLSX.writeFile(wb, `Concentrado_${d.anio}_por_${porEmisora ? 'emisora' : 'cliente'}.xlsx`);
 }
 
 function imprimirConcentrado() {
