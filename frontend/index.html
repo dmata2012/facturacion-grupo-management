@@ -8457,8 +8457,13 @@ async function clientes() {
       <div class="page-title">Clientes</div>
       <div class="page-sub">Directorio de empresas y contribuyentes</div>
     </div>
-    ${puedeO('clientes', NIVEL.CAPTURAR, canWrite())?`<button class="btn bs" onclick="openCliente()">+ Nuevo cliente</button>`:''}
+    <div style="display:flex;gap:8px">
+      <button class="btn bo" onclick="verSat69b()"
+              title="Revisar el directorio contra la lista del artículo 69-B del SAT">⚖ Lista 69-B del SAT</button>
+      ${puedeO('clientes', NIVEL.CAPTURAR, canWrite())?`<button class="btn bs" onclick="openCliente()">+ Nuevo cliente</button>`:''}
+    </div>
   </div>
+  <div id="cl-sat-aviso"></div>
   <div class="card">
     <div class="filters">
       <input id="cl-buscar" placeholder="🔍 RFC, nombre..." style="width:240px" oninput="loadClientes()">
@@ -8469,7 +8474,118 @@ async function clientes() {
     </div>
     <div id="cl-table"><p class="empty">Cargando...</p></div>
   </div>`;
+  avisarSat69b();
   await loadClientes();
+}
+
+// ══ LISTA 69-B DEL SAT ═══════════════════════════════════════
+// El SAT publica los RFC con operaciones presuntamente inexistentes. Lo que
+// importa es la SITUACIÓN, no aparecer en la lista: "Desvirtuado" y "Sentencia
+// Favorable" quieren decir que el contribuyente YA SALIÓ. Pintar de rojo a uno
+// de esos sería acusar a alguien que se limpió.
+const SAT_RIESGO = ['Presunto', 'Definitivo'];
+const satChip = (s) => {
+  const malo = SAT_RIESGO.includes(s);
+  const col = s === 'Definitivo' ? ['#fef2f2', '#991b1b']
+            : s === 'Presunto'   ? ['#fff7ed', '#9a3412']
+            : ['#f0fdf4', '#166534'];
+  return `<span style="background:${col[0]};color:${col[1]};border-radius:10px;padding:1px 8px;
+    font-size:10.5px;font-weight:700;white-space:nowrap">${malo ? '⚠ ' : '✓ '}${s}</span>`;
+};
+
+async function avisarSat69b() {
+  const cont = $('cl-sat-aviso');
+  if (!cont) return;
+  try {
+    const r = await api('/sat/69b/coincidencias');
+    const n = r.de_riesgo + r.mixtas;
+    if (!n) { cont.innerHTML = ''; return; }
+    cont.innerHTML = `
+      <div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:11px;
+           padding:11px 14px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:240px;font-size:12.5px;color:#7f1d1d;line-height:1.5">
+          <strong>${n} ${n === 1 ? 'RFC de tu directorio aparece' : 'RFC de tu directorio aparecen'}
+          en la lista 69-B del SAT</strong>${r.mixtas ? ` · ${r.mixtas} con resolución a favor posterior` : ''}.
+          Los CFDI de un contribuyente en situación definitiva no producen efectos fiscales.
+        </div>
+        <button class="btn bo bsm" onclick="verSat69b()">Revisarlos</button>
+      </div>`;
+  } catch (e) { cont.innerHTML = ''; }
+}
+
+async function verSat69b() {
+  $('modal-gt-cats-body').innerHTML = '<p class="empty">Cargando…</p>';
+  openModal('modal-gt-cats');
+  try {
+    const [r, est] = await Promise.all([
+      api('/sat/69b/coincidencias'),
+      api('/sat/69b/estado').catch(() => ({}))
+    ]);
+    const alerta = r.de_riesgo + r.mixtas;
+    const sinLista = !est.total;
+    $('modal-gt-cats-body').innerHTML = `
+      <div style="margin:-28px -28px 18px;padding:20px 26px;color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0;
+           background:linear-gradient(135deg,${alerta ? '#7f1d1d,#b91c1c' : '#166534,#16a34a'})">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">
+          Artículo 69-B del CFF</div>
+        <div style="font-size:19px;font-weight:900;margin-top:3px">
+          ${sinLista ? 'La lista no se ha descargado'
+            : alerta ? `${alerta} RFC de tu directorio en la lista`
+            : 'Ningún RFC tuyo está señalado'}</div>
+        ${est.ultima ? `<div style="font-size:11.5px;opacity:.9;margin-top:4px">
+          Lista del SAT al ${est.ultima.actualizado_al || '—'} · ${(est.total||0).toLocaleString('es-MX')} RFC ·
+          descargada el ${est.ultima.importado_en}${est.ultima.importado_por_nombre ? ' por ' + est.ultima.importado_por_nombre : ''}</div>` : ''}
+      </div>
+      <div style="font-size:12.5px;color:var(--muted);line-height:1.55;margin-bottom:12px">
+        El SAT publica los RFC con operaciones presuntamente inexistentes.
+        <strong>Definitivo</strong> es el que pega: sus comprobantes no producen efectos fiscales.
+        <strong>Presunto</strong> todavía puede aclarar. <strong>Desvirtuado</strong> y
+        <strong>Sentencia Favorable</strong> quieren decir que ya salió, y aquí salen solo como dato.
+      </div>
+      ${sinLista ? `<div class="ibox warn">Todavía no has descargado la lista. Dale a
+         <strong>Actualizar desde el SAT</strong> para traerla.</div>`
+      : !r.coincidencias.length ? '<p class="empty">Ninguno de tus clientes ni emisoras aparece en la lista. 🎉</p>'
+      : `<div class="tscroll" style="max-height:48vh;overflow:auto"><table style="font-size:12px">
+          <thead><tr><th></th><th>RFC</th><th>En tu sistema</th>
+            <th>Situación ante el SAT</th><th style="text-align:right">Facturas</th></tr></thead>
+          <tbody>${r.coincidencias.map(x => `<tr style="${x.riesgo ? 'background:#fffafa' : ''}">
+            <td style="font-size:10.5px;color:var(--muted);white-space:nowrap">
+              ${x.tipo === 'emisora' ? '🏛 Emisora' : '👤 Cliente'}</td>
+            <td style="font-weight:700;white-space:nowrap">${x.rfc}</td>
+            <td style="font-size:11.5px">${x.nombre_propio || '—'}
+              ${x.nombre_sat && x.nombre_sat.toUpperCase() !== String(x.nombre_propio||'').toUpperCase()
+                ? `<div style="font-size:10.5px;color:var(--muted)">SAT: ${x.nombre_sat}</div>` : ''}</td>
+            <td>${(x.situaciones||[]).map(satChip).join(' ')}
+              ${x.mixto ? `<div style="font-size:10.5px;color:#b45309;margin-top:3px">
+                 Señalado y con resolución a favor: revísalo con tu contador.</div>` : ''}</td>
+            <td style="text-align:right;font-weight:700">${x.facturas}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`}
+      <div class="form-actions">
+        ${puedeO('clientes', NIVEL.ADMINISTRAR, ME.rol === 'admin')
+          ? `<button class="btn bo" id="sat-btn-act" onclick="actualizarSat69b()">Actualizar desde el SAT</button>` : ''}
+        <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button>
+      </div>`;
+  } catch (e) {
+    $('modal-gt-cats-body').innerHTML =
+      `<p class="empty" style="color:var(--red)">${e.message}</p>
+       <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button></div>`;
+  }
+}
+
+async function actualizarSat69b() {
+  const b = $('sat-btn-act');
+  if (b) { b.disabled = true; b.textContent = 'Descargando del SAT…'; }
+  try {
+    // Son 4.5 MB desde el portal del SAT: puede tardar.
+    const r = await api('/sat/69b/importar', { method: 'POST' });
+    toast(`Lista actualizada: ${r.registros.toLocaleString('es-MX')} registros al ${r.actualizado_al || '—'}.`);
+    verSat69b();
+    avisarSat69b();
+  } catch (e) {
+    toast(e.message, 'err');
+    if (b) { b.disabled = false; b.textContent = 'Actualizar desde el SAT'; }
+  }
 }
 
 async function loadClientes() {
