@@ -692,6 +692,7 @@ canvas{max-height:230px}
           <a href="#" onclick="nav('facturas')"    id="nav-facturas"><span class="ni"><svg><use href="#i-invoice"/></svg></span> Facturas</a>
           <a href="#" onclick="nav('cobranza')"    id="nav-cobranza"><span class="ni"><svg><use href="#i-cash"/></svg></span> Cobranza</a>
           <a href="#" onclick="nav('clientes')"    id="nav-clientes"><span class="ni"><svg><use href="#i-building"/></svg></span> Clientes</a>
+          <a href="#" data-page="clientes" onclick="verSat69b()"><span class="ni"><svg><use href="#i-building"/></svg></span> Lista 69-B del SAT</a>
           <a href="#" onclick="nav('otrosIngresos')" id="nav-otrosIngresos"><span class="ni"><svg><use href="#i-cash"/></svg></span> Otros Ingresos S/F</a>
         </div>
       </div>
@@ -8523,6 +8524,9 @@ async function verSat69b() {
     ]);
     const alerta = r.de_riesgo + r.mixtas;
     const sinLista = !est.total;
+    // Lo guarda la consulta por RFC: sin lista cargada, "no aparece" no
+    // significa nada y seria peligroso dejarlo pasar como un visto bueno.
+    window._sat69bCargada = !sinLista;
     $('modal-gt-cats-body').innerHTML = `
       <div style="margin:-28px -28px 18px;padding:20px 26px;color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0;
            background:linear-gradient(135deg,${alerta ? '#7f1d1d,#b91c1c' : '#166534,#16a34a'})">
@@ -8541,6 +8545,20 @@ async function verSat69b() {
         <strong>Definitivo</strong> es el que pega: sus comprobantes no producen efectos fiscales.
         <strong>Presunto</strong> todavía puede aclarar. <strong>Desvirtuado</strong> y
         <strong>Sentencia Favorable</strong> quieren decir que ya salió, y aquí salen solo como dato.
+      </div>
+
+      <div style="background:var(--gray-xs,#f8fafc);border:1.5px solid var(--border);border-radius:11px;
+           padding:12px 14px;margin-bottom:14px">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;
+             color:var(--muted);margin-bottom:7px">Consultar cualquier RFC</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="sat-rfc" maxlength="13" autocomplete="off" spellcheck="false"
+                 placeholder="XAXX010101000" style="flex:1;min-width:190px;text-transform:uppercase;
+                 font-family:ui-monospace,monospace;letter-spacing:1px"
+                 onkeydown="if(event.key==='Enter')consultarRfc69b()">
+          <button class="btn bs" onclick="consultarRfc69b()">Consultar</button>
+        </div>
+        <div id="sat-rfc-res"></div>
       </div>
       ${sinLista ? `<div class="ibox warn">Todavía no has descargado la lista. Dale a
          <strong>Actualizar desde el SAT</strong> para traerla.</div>`
@@ -8571,6 +8589,59 @@ async function verSat69b() {
       `<p class="empty" style="color:var(--red)">${e.message}</p>
        <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button></div>`;
   }
+}
+
+// Consultar un RFC suelto: un proveedor nuevo, alguien que te va a facturar, o
+// un cliente antes de darlo de alta.
+async function consultarRfc69b() {
+  const caja = $('sat-rfc-res');
+  const rfc = ($('sat-rfc').value || '').toUpperCase().replace(/[\s-]/g, '').trim();
+  const aviso = (txt, color, fondo, borde) => caja.innerHTML =
+    `<div style="margin-top:10px;padding:10px 12px;border-radius:9px;font-size:12.5px;
+      line-height:1.5;background:${fondo};border:1.5px solid ${borde};color:${color}">${txt}</div>`;
+
+  if (!rfc) return aviso('Escribe un RFC.', '#78350f', '#fffbeb', '#fde68a');
+  if (!/^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}$/.test(rfc))
+    return aviso(`<strong>${rfc}</strong> no tiene forma de RFC. Son 12 caracteres para empresa y 13 para persona física.`,
+                 '#78350f', '#fffbeb', '#fde68a');
+  // Sin lista descargada, un "no aparece" no vale nada y se leeria como visto bueno.
+  if (window._sat69bCargada === false)
+    return aviso('No se puede consultar: la lista del SAT todavía no se ha descargado. ' +
+                 'Dale a <strong>Actualizar desde el SAT</strong> primero.',
+                 '#7f1d1d', '#fef2f2', '#fecaca');
+
+  caja.innerHTML = '<div style="margin-top:10px;font-size:12.5px;color:var(--muted)">Consultando…</div>';
+  try {
+    const d = await api('/sat/69b/rfc/' + encodeURIComponent(rfc));
+    if (!d.en_lista) {
+      return aviso(`<strong>${rfc}</strong> no aparece en la lista 69-B.` +
+        `<div style="font-size:11.5px;margin-top:4px;opacity:.85">Según la lista que tienes descargada. ` +
+        `El SAT publica cada cierto tiempo; si es una operación importante, actualízala antes.</div>`,
+        '#166534', '#f0fdf4', '#bbf7d0');
+    }
+    const chips = (d.procedimientos || []).map(p => satChip(p.situacion)).join(' ');
+    const detalle = (d.procedimientos || []).map(p => {
+      const f = [p.fecha_presunto && 'presunto ' + p.fecha_presunto,
+                 p.fecha_desvirtuado && 'desvirtuado ' + p.fecha_desvirtuado,
+                 p.fecha_definitivo && 'definitivo ' + p.fecha_definitivo,
+                 p.fecha_sentencia && 'sentencia ' + p.fecha_sentencia].filter(Boolean).join(' · ');
+      return `<div style="font-size:11.5px;margin-top:3px">${satChip(p.situacion)}
+        <span style="color:var(--muted)"> ${f || 'sin fechas'}</span></div>`;
+    }).join('');
+    const col = d.riesgo ? ['#7f1d1d', '#fef2f2', '#fecaca'] : ['#166534', '#f0fdf4', '#bbf7d0'];
+    aviso(`<div style="font-weight:800;font-size:13.5px">${rfc} · ${chips}</div>
+      <div style="margin-top:3px">${d.nombre || ''}</div>
+      ${d.mixto ? `<div style="margin-top:7px;font-weight:700">Señalado y con resolución a favor.</div>
+         <div style="font-size:11.5px">Tiene más de un procedimiento y no apuntan a lo mismo. Revísalo con tu contador.</div>` : ''}
+      ${d.riesgo && !d.mixto ? `<div style="margin-top:7px;font-size:11.5px">
+         ${(d.procedimientos||[]).some(p => p.situacion === 'Definitivo')
+           ? 'En situación definitiva: sus comprobantes no producen efectos fiscales.'
+           : 'Señalado como presunto. Todavía puede aclarar, pero conviene tenerlo presente.'}</div>` : ''}
+      ${!d.riesgo ? `<div style="margin-top:7px;font-size:11.5px">
+         Aparece en la lista, pero ya salió: no hay problema con sus comprobantes.</div>` : ''}
+      <div style="margin-top:8px;padding-top:7px;border-top:1px solid ${col[2]}">${detalle}</div>`,
+      col[0], col[1], col[2]);
+  } catch (e) { aviso(e.message, '#7f1d1d', '#fef2f2', '#fecaca'); }
 }
 
 async function actualizarSat69b() {
