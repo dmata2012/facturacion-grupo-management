@@ -14958,34 +14958,162 @@ function exportarMensualDirExcel() {
   if (typeof XLSX === 'undefined') return toast('Librería XLSX no disponible.', 'err');
   const emp = d.empresas || [];
 
-  const enc1 = ['Mes','Comisiones','Facturación','Otros Ingresos','Total Ingresos','Gastos Operativos'];
-  emp.forEach(e => { enc1.push(e.nombre + ' IVA', e.nombre + ' ISR'); });
-  enc1.push('Total Egresos', 'Total Ingreso - Gastos');
+  // Los impuestos que no cayeron en ninguna empresa o tipo llevan columna propia
+  // SOLO si existen. Sin ella, las columnas de empresa no sumarían Total Egresos
+  // y el reporte no cuadraría sin que nada lo dijera. La pantalla ya lo avisa.
+  const sinAsig = parseFloat(d.totales.impuestos_sin_asignar || 0) > 0;
+
+  // ── Columnas ──
+  const COL_MES = 0, COL_IMP1 = 6;                 // primera columna de impuestos
+  const nImp = emp.length * 2 + (sinAsig ? 1 : 0);
+  const COL_EGR = COL_IMP1 + nImp;                 // Total Egresos
+  const nCols = COL_EGR + 2;
+  const ultCol = nCols - 1;
+
+  // ── Los tres renglones del encabezado ──
+  const fijas = ['Mes', 'Comisiones', 'Facturación', 'Otros Ingresos',
+                 'Total Ingresos', 'Gastos Operativos'];
+  const n1 = new Array(nCols).fill('');
+  fijas.forEach((t, i) => n1[i] = t);
+  n1[COL_IMP1] = 'Impuestos';
+  n1[COL_EGR] = 'Total Egresos';
+  n1[COL_EGR + 1] = 'Total Ingreso - Gastos';
+
+  const n2 = new Array(nCols).fill('');
+  const n3 = new Array(nCols).fill('');
+  emp.forEach((e, i) => {
+    n2[COL_IMP1 + i * 2] = e.nombre;
+    n3[COL_IMP1 + i * 2] = 'IVA';
+    n3[COL_IMP1 + i * 2 + 1] = 'ISR';
+  });
+  if (sinAsig) {
+    n2[COL_IMP1 + emp.length * 2] = 'Sin asignar';
+    n3[COL_IMP1 + emp.length * 2] = 'Sin asignar';
+  }
+
+  const filaMes = (etiqueta, m) => {
+    const f = new Array(nCols).fill(null);
+    f[COL_MES] = etiqueta;
+    f[1] = +m.comisiones || 0; f[2] = +m.facturacion || 0;
+    f[3] = +m.otros_ingresos || 0; f[4] = +m.total_ingresos || 0;
+    f[5] = +m.gastos_operativos || 0;
+    (m.impuestos || []).forEach((i, k) => {
+      f[COL_IMP1 + k * 2] = +i.iva || 0;
+      f[COL_IMP1 + k * 2 + 1] = +i.isr || 0;
+    });
+    if (sinAsig) f[COL_IMP1 + emp.length * 2] = +m.impuestos_sin_asignar || 0;
+    f[COL_EGR] = +m.total_egresos || 0;
+    f[COL_EGR + 1] = +m.diferencia || 0;
+    return f;
+  };
 
   const aoa = [
-    ['GRUPO MANAGEMENT'],
-    [`REPORTE MENSUAL DE INGRESOS Y EGRESOS — EJERCICIO ${d.anio}`],
-    [`Generado: ${new Date().toLocaleString('es-MX')}`], [],
-    enc1
+    [`Estado de Resultados Ingresos - Egresos ${d.anio}`],
+    [],
+    n1, n2, n3,
+    ...d.meses.map(m => filaMes(MESES_MD[m.mes - 1], m)),
+    filaMes('', d.totales)
   ];
-  d.meses.forEach(m => {
-    const f = [MESES_MD[m.mes-1], m.comisiones, m.facturacion, m.otros_ingresos,
-               m.total_ingresos, m.gastos_operativos];
-    (m.impuestos||[]).forEach(i => f.push(i.iva, i.isr));
-    f.push(m.total_egresos, m.diferencia);
-    aoa.push(f);
-  });
-  const t = [`TOTAL ${d.anio}`, d.totales.comisiones, d.totales.facturacion,
-             d.totales.otros_ingresos, d.totales.total_ingresos, d.totales.gastos_operativos];
-  (d.totales.impuestos||[]).forEach(i => t.push(i.iva, i.isr));
-  t.push(d.totales.total_egresos, d.totales.diferencia);
-  aoa.push(t);
+  const R_N1 = 2, R_N3 = 4, R_MES1 = 5, R_TOT = aoa.length - 1;
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{wch:14}, ...enc1.slice(1).map(()=>({wch:17}))];
+
+  // ── Aspecto ───────────────────────────────────────────────
+  const FMT = '#,##0.00;-#,##0.00;"-"';
+  const linea = { style: 'thin', color: { rgb: 'FF000000' } };
+  const caja = { top: linea, bottom: linea, left: linea, right: linea };
+  const relleno = (rgb) => ({ patternType: 'solid', fgColor: { rgb } });
+  // Los colores de tu hoja, en el mismo orden; si hay más empresas, se repiten.
+  const COLORES = [
+    { bg: 'FFFFFF00', fg: 'FF000000' },   // amarillo
+    { bg: 'FFED7D31', fg: 'FF000000' },   // naranja
+    { bg: 'FFBF8F00', fg: 'FF000000' },   // mostaza
+    { bg: 'FF1F4E79', fg: 'FFFFFFFF' },   // azul marino
+    { bg: 'FF70AD47', fg: 'FF000000' },   // verde
+    { bg: 'FF7030A0', fg: 'FFFFFFFF' },   // morado
+  ];
+  const pon = (r, c, estilo, fmt) => {
+    const ref = XLSX.utils.encode_cell({ r, c });
+    if (!ws[ref]) ws[ref] = { t: 's', v: '' };
+    ws[ref].s = estilo;
+    if (fmt && ws[ref].t === 'n') ws[ref].z = fmt;
+  };
+
+  // Título
+  pon(0, 0, { font: { name: 'Calibri', sz: 26, bold: true, color: { rgb: 'FF8EA9DB' } },
+              alignment: { horizontal: 'center', vertical: 'center' } });
+  for (let c = 1; c <= ultCol; c++) pon(0, c, {});
+
+  // Encabezados fijos: una sola caja de tres renglones de alto
+  const encFijo = { font: { name: 'Calibri', sz: 10, bold: true, italic: true },
+                    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+                    border: caja };
+  for (let c = 0; c <= 5; c++) for (let r = R_N1; r <= R_N3; r++) pon(r, c, encFijo);
+
+  // Impuestos: el rótulo, cada empresa con su color y el IVA/ISR debajo
+  for (let c = COL_IMP1; c < COL_EGR; c++)
+    pon(R_N1, c, { font: { name: 'Calibri', sz: 10, bold: true, italic: true },
+                   fill: relleno('FF9DC3E6'),
+                   alignment: { horizontal: 'center', vertical: 'center' }, border: caja });
+  emp.forEach((_, i) => {
+    const col = COLORES[i % COLORES.length];
+    for (const c of [COL_IMP1 + i * 2, COL_IMP1 + i * 2 + 1]) {
+      pon(R_N1 + 1, c, { font: { name: 'Calibri', sz: 10, bold: true, color: { rgb: col.fg } },
+                         fill: relleno(col.bg),
+                         alignment: { horizontal: 'center', vertical: 'center' }, border: caja });
+      pon(R_N3, c, { font: { name: 'Calibri', sz: 9, bold: true, italic: true },
+                     alignment: { horizontal: 'center', vertical: 'center' }, border: caja });
+    }
+  });
+  if (sinAsig) {
+    const c = COL_IMP1 + emp.length * 2;
+    for (let r = R_N1 + 1; r <= R_N3; r++)
+      pon(r, c, { font: { name: 'Calibri', sz: 9, bold: true, color: { rgb: 'FF7F1D1D' } },
+                  fill: relleno('FFFCE4E4'),
+                  alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: caja });
+  }
+
+  // Los dos totales de la derecha, en café como tu hoja
+  for (const c of [COL_EGR, COL_EGR + 1])
+    for (let r = R_N1; r <= R_N3; r++)
+      pon(r, c, { font: { name: 'Calibri', sz: 10, bold: true, color: { rgb: 'FFFFFFFF' } },
+                  fill: relleno('FF843C0C'),
+                  alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: caja });
+
+  // Los doce meses y el renglón de totales
+  for (let r = R_MES1; r <= R_TOT; r++) {
+    const esTotal = r === R_TOT;
+    for (let c = 0; c <= ultCol; c++) {
+      const base = {
+        font: { name: 'Calibri', sz: 10, bold: esTotal, italic: true },
+        alignment: { horizontal: c === COL_MES ? 'right' : 'right', vertical: 'center' },
+        border: esTotal ? { top: linea, bottom: { style: 'double', color: { rgb: 'FF000000' } } }
+                        : { left: linea, right: linea }
+      };
+      pon(r, c, base, FMT);
+    }
+  }
+
+  // ── Acomodo ──
+  const M = [];
+  M.push({ s: { r: 0, c: 0 }, e: { r: 0, c: ultCol } });                 // título
+  for (let c = 0; c <= 5; c++) M.push({ s: { r: R_N1, c }, e: { r: R_N3, c } });
+  M.push({ s: { r: R_N1, c: COL_IMP1 }, e: { r: R_N1, c: COL_EGR - 1 } });  // "Impuestos"
+  emp.forEach((_, i) => M.push({ s: { r: R_N1 + 1, c: COL_IMP1 + i * 2 },
+                                 e: { r: R_N1 + 1, c: COL_IMP1 + i * 2 + 1 } }));
+  if (sinAsig) M.push({ s: { r: R_N1 + 1, c: COL_IMP1 + emp.length * 2 },
+                        e: { r: R_N3,     c: COL_IMP1 + emp.length * 2 } });
+  M.push({ s: { r: R_N1, c: COL_EGR },     e: { r: R_N3, c: COL_EGR } });
+  M.push({ s: { r: R_N1, c: COL_EGR + 1 }, e: { r: R_N3, c: COL_EGR + 1 } });
+  ws['!merges'] = M;
+
+  ws['!cols'] = [{ wch: 12 }, ...new Array(ultCol).fill({ wch: 15 })];
+  ws['!rows'] = aoa.map((_, r) => r === 0 ? { hpt: 46 } : r === R_N1 + 1 ? { hpt: 18 } : {});
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: R_TOT, c: ultCol } });
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, `Mensual ${d.anio}`);
-  XLSX.writeFile(wb, `Reporte_mensual_${d.anio}.xlsx`);
+  XLSX.writeFile(wb, `Estado_de_Resultados_${d.anio}.xlsx`);
 }
 
 function imprimirMensualDir() {
