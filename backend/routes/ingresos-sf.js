@@ -205,6 +205,30 @@ router.get('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── UN COBRO SUELTO ───────────────────────────────────────────
+// Para editar hay que leerlo de la base, no de la lista que tiene la pantalla:
+// esa trae maximo 500 renglones y respeta los filtros, asi que al corregir un
+// cobro viejo o filtrado el formulario se abria vacio.
+// Va despues de GET /tipos, que es literal y tiene que declararse antes.
+router.get('/:id', async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT i.*, TO_CHAR(i.fecha_cobro,'YYYY-MM-DD') AS fecha_cobro,
+             COALESCE(NULLIF(TRIM(c.nombre_comercial),''), c.razon_social) AS cliente,
+             c.rfc, t.nombre AS tipo,
+             u.nombre AS capturado_por,
+             TO_CHAR(i.creado_en,'YYYY-MM-DD HH24:MI')      AS creado,
+             TO_CHAR(i.actualizado_en,'YYYY-MM-DD HH24:MI') AS actualizado
+        FROM fac_ingresos_sf i
+        JOIN fac_clientes c ON c.id = i.cliente_id
+        LEFT JOIN fac_ingresos_sf_tipos t ON t.id = i.tipo_id
+        LEFT JOIN fac_usuarios u ON u.id = i.creado_por
+       WHERE i.id = $1`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Ese cobro ya no existe.' });
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.post('/', requireRol('admin', 'capturista', 'tesoreria', 'gerente'), async (req, res) => {
   try {
     const { cliente_id, tipo_id, fecha_cobro, monto, forma_pago, referencia, notas } = req.body;

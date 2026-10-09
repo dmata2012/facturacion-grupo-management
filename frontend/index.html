@@ -14364,8 +14364,14 @@ async function openIngresoSF(id) {
   let g = { cliente_id:'', tipo_id:'', fecha_cobro:new Date().toISOString().slice(0,10),
             monto:'', forma_pago:'transferencia', referencia:'', notas:'' };
   if (id) {
-    const enLista = (window._sfData?.ingresos || []).find(x => x.id === id);
-    if (enLista) g = { ...g, ...enLista };
+    // De la base, no de la lista de la pantalla: esa trae máximo 500 renglones y
+    // respeta los filtros, así que al corregir un cobro viejo el formulario se
+    // abría en blanco. La lista solo sirve de respaldo si el servidor no responde.
+    let datos = null;
+    try { datos = await api(`/ingresos-sf/${id}`); }
+    catch (e) { datos = (window._sfData?.ingresos || []).find(x => x.id === id) || null; }
+    if (!datos) return toast('No encontré ese cobro. Puede que ya se haya borrado.', 'err');
+    g = { ...g, ...datos };
   }
   const sv = v => (v == null ? '' : String(v)).replace(/"/g,'&quot;');
   const nom = c => (c.nombre_comercial && c.nombre_comercial.trim()) || c.razon_social || '';
@@ -14386,8 +14392,15 @@ async function openIngresoSF(id) {
       <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">${id?'Editar':'Nuevo'} cobro sin factura</div>
       <div style="font-size:20px;font-weight:900;margin-top:3px">💵 Otros Ingresos S/F</div>
       <div style="font-size:11.5px;opacity:.85;margin-top:4px">
-        Se registra cuando el dinero ya entró. No genera factura ni saldo por cobrar.
+        ${id ? `Corrigiendo el cobro #${id}${g.cliente ? ' de ' + g.cliente : ''}${
+                 g.monto ? ' por ' + fmt(g.monto) : ''}${
+                 g.fecha_cobro ? ', del ' + fmtDate(g.fecha_cobro) : ''}.`
+             : 'Se registra cuando el dinero ya entró. No genera factura ni saldo por cobrar.'}
       </div>
+      ${id && (g.capturado_por || g.creado) ? `<div style="font-size:10.5px;opacity:.75;margin-top:3px">
+        Capturado${g.capturado_por ? ' por ' + g.capturado_por : ''}${g.creado ? ' el ' + g.creado : ''}${
+          g.actualizado && g.actualizado !== g.creado ? ' · corregido el ' + g.actualizado : ''}
+      </div>` : ''}
     </div>
     <div class="fg" style="gap:11px">
       <div class="fi full">
