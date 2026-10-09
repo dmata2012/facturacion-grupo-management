@@ -434,6 +434,27 @@ router.get('/pagos-borrados', requireRol('admin', 'gerente', 'tesoreria'), async
       movimientos: r.rows
     });
 
+// ── FACTURAS MARCADAS COMO CUADRADAS PERO SIN DESGLOSE ────────
+// Quedaron asi por el error de arriba: el guardado fallo a medias y se llevo
+// las partidas dejando la bandera puesta. Aparecen como CUADRADA y ademas
+// bloqueadas, sin poderse editar. Va antes de GET /:id.
+router.get('/cuadradas-sin-desglose', async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT f.id, f.folio, f.uuid_cfdi, f.total,
+             TO_CHAR(f.fecha_emision,'YYYY-MM-DD') AS fecha_emision,
+             COALESCE(NULLIF(TRIM(c.nombre_comercial),''), c.razon_social) AS cliente
+        FROM fac_facturas f
+        LEFT JOIN fac_clientes c ON c.id = f.cliente_id
+       WHERE f.desglose_validado = TRUE
+         AND f.estatus <> 'cancelada'
+         AND NOT EXISTS (SELECT 1 FROM fac_desglose_rh d WHERE d.factura_id = f.id)
+       ORDER BY f.fecha_emision DESC, f.id DESC`);
+    res.json({ facturas: r.rows,
+               total: r.rows.reduce((a, x) => a + (parseFloat(x.total) || 0), 0) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/:id', async (req, res) => {
   try {
     const r = await query(`
@@ -520,24 +541,64 @@ router.put('/:id/desglose', requireRol('admin', 'capturista', 'gerente'), async 
     if (partidas && partidas.length > 5)
       return res.status(400).json({ error: 'El desglose acepta un máximo de 5 conceptos por factura.' });
 
-    await query(`DELETE FROM fac_desglose_rh WHERE factura_id=$1`, [facId]);
-    for (const p of (partidas || [])) {
-      await query(
-        `INSERT INTO fac_desglose_rh(factura_id,concepto_id,concepto,monto,notas) VALUES($1,$2,$3,$4,$5)`,
-        [facId, p.concepto_id || null, p.concepto, parseFloat(p.monto) || 0, p.notas || null]
-      );
-    }
+    // Todo en una transaccion. Antes el borrado, los insertados y la bandera
+    // iban sueltos: si un INSERT fallaba despues del DELETE, la factura se
+    // quedaba SIN partidas pero con desglose_validado todavia en TRUE, o sea
+    // marcada como CUADRADA y bloqueada sin tener desglose.
+    const cli = await getClient();
+    let resultado;
+    try {
+      await cli.query('BEGIN');
+      await cli.query(`DELETE FROM fac_desglose_rh WHERE factura_id=$1`, [facId]);
+      for (const p of (partidas || [])) {
+        await cli.query(
+          `INSERT INTO fac_desglose_rh(factura_id,concepto_id,concepto,monto,notas) VALUES($1,$2,$3,$4,$5)`,
+          [facId, p.concepto_id || null, p.concepto, parseFloat(p.monto) || 0, p.notas || null]
+        );
+      }
 
-    // Validar si (subtotal + IVA 16%) coincide con el total de la factura
-    const tot      = await query(`SELECT total FROM fac_facturas WHERE id=$1`, [facId]);
-    const subtotal = (partidas || []).reduce((a, p) => a + (parseFloat(p.monto) || 0), 0);
-    const iva      = Math.round(subtotal * 0.16 * 100) / 100;
-    const total    = Math.round((subtotal + iva) * 100) / 100;
-    const facTotal = parseFloat(tot.rows[0]?.total || 0);
-    const validado = Math.abs(total - facTotal) < 0.01;
-    await query(`UPDATE fac_facturas SET desglose_validado=$1,actualizado_en=NOW() WHERE id=$2`, [validado, facId]);
+      // La bandera se calcula con lo que QUEDO EN LA TABLA, no con lo que vino
+      // en la peticion: así no puede decir "cuadrada" sobre partidas que no se
+      // guardaron.
+      const g = await cli.query(
+        `SELECT COUNT(*)::int AS n, COALESCE(SUM(monto),0) AS suma
+           FROM fac_desglose_rh WHERE factura_id=$1`, [facId]);
+      const tot = await cli.query(`SELECT total FROM fac_facturas WHERE id=$1 FOR UPDATE`, [facId]);
 
-    res.json({ ok: true, validado, subtotal, iva, total, factura_total: facTotal });
+      const n        = g.rows[0].n;
+      const subtotal = parseFloat(g.rows[0].suma) || 0;
+      const iva      = Math.round(subtotal * 0.16 * 100) / 100;
+      const total    = Math.round((subtotal + iva) * 100) / 100;
+      const facTotal = parseFloat(tot.rows[0]?.total || 0);
+      // Sin una sola partida no hay nada que cuadrar. Sin esto, una factura en
+      // ceros daba |0 - 0| < 0.01 y se marcaba cuadrada con el desglose vacio.
+      const validado = n > 0 && Math.abs(total - facTotal) < 0.01;
+
+      await cli.query(`UPDATE fac_facturas SET desglose_validado=$1,actualizado_en=NOW() WHERE id=$2`,
+                      [validado, facId]);
+      await cli.query('COMMIT');
+      resultado = { ok: true, validado, partidas: n, subtotal, iva, total, factura_total: facTotal };
+    } catch (e) { await cli.query('ROLLBACK'); throw e; }
+    finally { cli.release(); }
+
+    res.json(resultado);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+
+// Quitarle la marca a una de esas: vuelve a quedar pendiente de desglose y se
+// puede editar. No borra nada, solo deja de mentir.
+router.patch('/:id/desmarcar-cuadrada', requireRol('admin', 'gerente'), async (req, res) => {
+  try {
+    const d = await query(`SELECT COUNT(*)::int AS n FROM fac_desglose_rh WHERE factura_id=$1`,
+                          [req.params.id]);
+    if (d.rows[0].n > 0)
+      return res.status(400).json({ error: 'Esa factura sí tiene desglose capturado. No se toca desde aquí.' });
+    const r = await query(
+      `UPDATE fac_facturas SET desglose_validado=FALSE, actualizado_en=NOW()
+        WHERE id=$1 AND desglose_validado=TRUE RETURNING folio`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'No estaba marcada como cuadrada.' });
+    res.json({ ok: true, folio: r.rows[0].folio });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

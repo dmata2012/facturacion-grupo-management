@@ -1092,6 +1092,13 @@ const PAGES_TESORERIA          = ['cajaChica', 'bancos', 'vacaciones'];
 const PAGES_TESORERIA_CONSULTA = ['cajaChica', 'bancos', 'vacaciones'];
 const PAGES_CHECADOR           = ['checador'];
 
+// Una factura se traba (no se edita ni se borra) cuando su desglose esta
+// cuadrado DE VERDAD. Solo la marca no basta: hubo facturas marcadas sin una
+// sola partida, y quedaban bloqueadas sin manera de corregirlas.
+function facTrabada(f) {
+  return !!f.desglose_validado && parseInt(f.rh_partidas || 0) > 0;
+}
+
 function badgeEstatus(e) {
   const map = {pendiente:'b-pendiente',parcial:'b-parcial',pagada:'b-pagada',vencida:'b-vencida',cancelada:'b-cancelada',borrador:'b-borrador',cerrada:'b-cerrada'};
   return `<span class="badge ${map[e]||'b-pendiente'}">${e}</span>`;
@@ -6553,10 +6560,12 @@ async function facturas(resetPage = true) {
               title="Exporta TODAS las facturas del periodo filtrado, no solo esta página">⬇ Excel</button>
     </div>
     <div id="fac-canceladas-aviso"></div>
+    <div id="fac-cuadradas-aviso"></div>
     <div id="fac-table"><p class="empty">Cargando...</p></div>
   </div>`;
   cargarCatalogosFiltroFac();
   avisarCanceladasConPagos();
+  avisarCuadradasSinDesglose();
   await loadFacturas();
 }
 
@@ -6959,7 +6968,13 @@ async function loadFacturas() {
             : (f.cliente_aplica_desglose === false)
           ? badgeEstatus(f.estatus) + ' <span style="display:inline-flex;align-items:center;gap:3px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:20px;padding:2px 8px;color:#6b7280;font-size:10.5px;font-weight:700;margin-left:4px" title="Cliente no requiere desglose">✕ Sin desglose</span>'
           : (f.desglose_validado
-              ? '<span title="Desglose cuadrado — factura bloqueada" style="display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:20px;padding:3px 10px;color:#166534;font-size:12px;font-weight:800">✔ CUADRADA</span>'
+              // Marcada como cuadrada pero sin una sola partida: es una
+              // contradicción de los datos y la pantalla no debe taparla
+              // poniendo el sello verde. Pasó con guardados que fallaron a
+              // medias y se llevaron las partidas dejando la marca puesta.
+              ? (parseInt(f.rh_partidas || 0) === 0
+                  ? '<span title="Dice cuadrada pero no tiene ninguna partida de desglose. Hay que revisarla." style="display:inline-flex;align-items:center;gap:4px;background:#fffbeb;border:1.5px solid #fcd34d;border-radius:20px;padding:3px 10px;color:#92400e;font-size:11.5px;font-weight:800">⚠ SIN DESGLOSE</span>'
+                  : '<span title="Desglose cuadrado — factura bloqueada" style="display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:20px;padding:3px 10px;color:#166534;font-size:12px;font-weight:800">✔ CUADRADA</span>')
               : badgeEstatus(f.estatus))}</td>
         <td id="sat-cell-${f.id}" style="white-space:nowrap;font-size:11.5px;color:var(--muted)"
             title="${f.sat_validado_en ? 'Consultado el ' + new Date(f.sat_validado_en).toLocaleString('es-MX') : ''}">${
@@ -6970,16 +6985,16 @@ async function loadFacturas() {
             ? `<button class="btn bo bsm" id="sat-btn-${f.id}" title="Consultar estatus en el SAT"
                  data-fid="${f.id}" onclick="validarSAT(this)">🔍 Validar</button>`
             : `<span title="La factura no tiene UUID capturado" style="color:var(--muted);font-size:10.5px;font-style:italic">sin UUID</span>`}
-          ${canFacturar() && !f.desglose_validado ? `<button class="btn bo bsm" onclick="editFactura(${f.id})" title="Editar factura">✏️</button>` : ''}
+          ${canFacturar() && !facTrabada(f) ? `<button class="btn bo bsm" onclick="editFactura(${f.id})" title="Editar factura">✏️</button>` : ''}
           ${(f.cliente_aplica_desglose !== false) ? `<button class="btn bg bsm" onclick="openRH(${f.id})" title="Ver/editar desglose">Desg</button>` : ''}
           <button class="btn bsuc bsm" onclick="openPago(${f.id})" title="Registrar pago">💲</button>
           ${f.estatus === 'cancelada'
             ? '<span style="color:var(--muted);font-size:10.5px;font-style:italic" title="Esta factura ya está cancelada">ya cancelada</span>'
             : canFacturar()
-              ? `<button class="btn bd bsm" onclick="cancelarFactura(${f.id},${!!f.desglose_validado})" title="${f.desglose_validado?'Cancelar factura (está cuadrada — pedirá confirmación)':'Cancelar factura'}">✕</button>`
+              ? `<button class="btn bd bsm" onclick="cancelarFactura(${f.id},${facTrabada(f)})" title="${facTrabada(f)?'Cancelar factura (está cuadrada — pedirá confirmación)':'Cancelar factura'}">✕</button>`
               : `<span style="color:#b45309;font-size:10.5px;font-style:italic" title="Tu perfil (${(ME&&ME.rol)||'—'}) no tiene permiso de cancelar facturas. Lo pueden hacer admin, gerente, capturista y tesorería.">sin permiso de cancelar</span>`}
-          ${facPuedeBorrar()&&!f.desglose_validado?`<button class="btn bd bsm" onclick="eliminarFactura(${f.id})" title="Eliminar factura" style="background:#fff0f0;border-color:#ffd7d7">🗑️</button>`:''}
-          ${f.desglose_validado?`<span title="Desglose cuadrado: no se puede editar ni eliminar. Cancelar sí está permitido, con confirmación." style="color:var(--muted);font-size:11px;font-style:italic">🔒 sin edición</span>`:''}
+          ${facPuedeBorrar()&&!facTrabada(f)?`<button class="btn bd bsm" onclick="eliminarFactura(${f.id})" title="Eliminar factura" style="background:#fff0f0;border-color:#ffd7d7">🗑️</button>`:''}
+          ${facTrabada(f)?`<span title="Desglose cuadrado: no se puede editar ni eliminar. Cancelar sí está permitido, con confirmación." style="color:var(--muted);font-size:11px;font-style:italic">🔒 sin edición</span>`:''}
         </td>
       </tr>`).join('')}</tbody>
       ${(() => {
@@ -7529,6 +7544,84 @@ async function avisarCanceladasConPagos() {
         <button class="btn bo bsm" onclick="verCanceladasConPagos()">Revisarlas</button>
       </div>`;
   } catch (e) { cont.innerHTML = ''; }
+}
+
+// Facturas que dicen CUADRADA sin tener una sola partida de desglose. Quedaron
+// asi cuando el guardado del desglose fallaba a medias: se llevaba las partidas
+// y dejaba la marca puesta. Ademas quedaban trabadas, sin poder editarse.
+async function avisarCuadradasSinDesglose() {
+  const cont = $('fac-cuadradas-aviso');
+  if (!cont) return;
+  try {
+    const r = await api('/facturas/cuadradas-sin-desglose');
+    if (!r.facturas.length) { cont.innerHTML = ''; return; }
+    cont.innerHTML = `
+      <div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:11px;
+           padding:11px 14px;margin-bottom:12px;display:flex;align-items:center;
+           gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:240px;font-size:12.5px;color:#78350f;line-height:1.5">
+          <strong>${r.facturas.length} factura${r.facturas.length!=1?'s':''} marcada${r.facturas.length!=1?'s':''}
+          como cuadrada${r.facturas.length!=1?'s':''} sin tener desglose</strong> por ${fmt(r.total)}.
+          Un guardado que falló a medias se llevó las partidas y dejó la marca puesta.
+        </div>
+        <button class="btn bo bsm" onclick="verCuadradasSinDesglose()">Revisarlas</button>
+      </div>`;
+  } catch (e) { cont.innerHTML = ''; }
+}
+
+async function verCuadradasSinDesglose() {
+  $('modal-gt-cats-body').innerHTML = '<p class="empty">Cargando…</p>';
+  openModal('modal-gt-cats');
+  try {
+    const r = await api('/facturas/cuadradas-sin-desglose');
+    $('modal-gt-cats-body').innerHTML = `
+      <div style="margin:-28px -28px 18px;padding:20px 26px;background:linear-gradient(135deg,#92400e,#d97706);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Revisar</div>
+        <div style="font-size:19px;font-weight:900;margin-top:3px">
+          ${r.facturas.length} cuadrada${r.facturas.length!=1?'s':''} sin desglose · ${fmt(r.total)}</div>
+      </div>
+      <div style="font-size:12.5px;color:var(--muted);line-height:1.55;margin-bottom:11px">
+        Dicen estar cuadradas pero no tienen ni una partida capturada. Quitarles la
+        marca las deja otra vez como pendientes de desglose y vuelve a permitir
+        editarlas. No borra nada de la factura.
+      </div>
+      ${!r.facturas.length ? '<p class="empty">Ya no queda ninguna.</p>' : `
+      <div class="tscroll" style="max-height:48vh;overflow:auto"><table style="font-size:12px">
+        <thead><tr><th>Folio</th><th>Cliente</th><th>Emitida</th>
+          <th style="text-align:right">Total</th><th></th></tr></thead>
+        <tbody>${r.facturas.map(x => `<tr>
+          <td style="font-weight:700;white-space:nowrap">${x.folio || '#' + x.id}</td>
+          <td style="font-size:11.5px">${x.cliente || '—'}</td>
+          <td style="white-space:nowrap;font-size:11.5px;color:var(--muted)">${fmtDate(x.fecha_emision)}</td>
+          <td style="text-align:right;white-space:nowrap;font-weight:700">${fmt(x.total)}</td>
+          <td style="text-align:right;white-space:nowrap">
+            <button class="btn bo bsm" style="padding:3px 8px;font-size:10.5px"
+                    onclick="desmarcarCuadrada(${x.id},'${(x.folio||('#'+x.id)).replace(/'/g,"\\'")}')">
+              Quitar la marca</button></td>
+        </tr>`).join('')}</tbody>
+      </table></div>`}
+      <div class="form-actions">
+        <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button>
+      </div>`;
+  } catch (e) {
+    $('modal-gt-cats-body').innerHTML =
+      `<p class="empty" style="color:var(--red)">${e.message}</p>
+       <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button></div>`;
+  }
+}
+
+async function desmarcarCuadrada(id, folio) {
+  if (!await confirm2(
+      `¿Quitar la marca de cuadrada a ${folio}?\n\n` +
+      `Volverá a quedar pendiente de desglose y se podrá editar.\n` +
+      `No se borra nada de la factura.`)) return;
+  try {
+    await api(`/facturas/${id}/desmarcar-cuadrada`, { method:'PATCH' });
+    toast(`${folio}: ya quedó pendiente de desglose.`);
+    verCuadradasSinDesglose();
+    avisarCuadradasSinDesglose();
+    if ($('fac-table')) loadFacturas();
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 async function verCanceladasConPagos() {
