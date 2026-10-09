@@ -409,6 +409,66 @@ tbody tr:hover td{background:#FAFBFF}
   width:min(720px,95vw);max-height:92vh;overflow-y:auto;
   box-shadow:var(--sh-lg)
 }
+
+/* ══ ALTA DE CLIENTE ══════════════════════════════════════════
+   Formulario a la izquierda y ficha en vivo a la derecha: se ve cómo va
+   quedando el cliente mientras se captura, que es lo que evita los errores
+   de dedo en RFC y razón social. En celular la ficha pasa arriba. */
+/* Sin padding para que el encabezado llegue a las orillas. El overflow se deja
+   en auto (el de .modal): con hidden el formulario no se puede desplazar con la
+   rueda, y auto recorta igual contra las esquinas redondeadas. */
+.modal.cli-ancho{width:min(1060px,96vw);padding:0}
+.cli-hero{background:var(--grad-red);color:#fff;padding:20px 28px}
+.cli-hero .t{font-size:19px;font-weight:900;line-height:1.2}
+.cli-hero .s{font-size:12px;opacity:.9;margin-top:3px}
+.cli-wrap{display:grid;grid-template-columns:1fr 330px;gap:0;align-items:start}
+.cli-form{padding:22px 26px}
+/* El fondo oscuro cubre toda la altura y lo que se queda fijo al desplazarse es
+   el contenido. Poner el sticky en el <aside> no sirve: mide lo mismo que el
+   contenedor, asi que no tiene recorrido donde pegarse. */
+.cli-prev{align-self:stretch;background:var(--grad-dark);
+  color:#e8eaf2;padding:22px 20px;min-height:100%}
+.cli-prev-in{position:sticky;top:0}
+.cli-sec{display:flex;align-items:center;gap:9px;margin:20px 0 12px;
+  padding-bottom:8px;border-bottom:1.5px solid var(--border)}
+.cli-sec:first-child{margin-top:0}
+.cli-sec .n{width:23px;height:23px;border-radius:50%;background:var(--grad-red);
+  color:#fff;font-size:11.5px;font-weight:800;display:grid;place-items:center;flex:none}
+.cli-sec .t{font-size:12px;font-weight:800;text-transform:uppercase;
+  letter-spacing:.8px;color:var(--dark)}
+.cli-ayuda{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.45;min-height:14px}
+.cli-ayuda.ok{color:var(--success);font-weight:600}
+.cli-ayuda.mal{color:var(--danger);font-weight:600}
+/* Tarjetas en vez de casilla: se entiende sin leer la letra chica */
+.cli-ops{display:grid;grid-template-columns:1fr 1fr;gap:10px;grid-column:1/-1}
+.cli-op{border:2px solid var(--border);border-radius:12px;padding:12px 14px;
+  cursor:pointer;transition:.15s;background:#fff}
+.cli-op:hover{border-color:var(--red-l);background:var(--red-xs)}
+.cli-op.sel{border-color:var(--red);background:var(--red-xs);
+  box-shadow:0 0 0 3px rgba(155,21,40,.10)}
+.cli-op .ic{font-size:19px}
+.cli-op .tt{font-weight:800;font-size:13px;color:var(--dark);margin-top:3px}
+.cli-op .dd{font-size:11px;color:var(--muted);line-height:1.45;margin-top:3px}
+/* La ficha de la derecha */
+.cli-ava{width:54px;height:54px;border-radius:14px;background:rgba(255,255,255,.12);
+  display:grid;place-items:center;font-size:20px;font-weight:900;color:#fff;
+  border:1.5px solid rgba(255,255,255,.18)}
+.cli-chip{display:inline-block;background:rgba(255,255,255,.10);
+  border:1px solid rgba(255,255,255,.16);border-radius:20px;
+  padding:3px 10px;font-size:11px;font-weight:700;margin:3px 4px 0 0}
+.cli-dato{display:flex;gap:8px;font-size:11.5px;padding:5px 0;
+  border-bottom:1px solid rgba(255,255,255,.07);line-height:1.4}
+.cli-dato .k{color:#9aa3bd;min-width:76px;flex:none}
+.cli-dato .v{color:#f1f3f9;font-weight:600;word-break:break-word}
+.cli-barra{height:6px;border-radius:4px;background:rgba(255,255,255,.14);overflow:hidden}
+.cli-barra i{display:block;height:100%;background:linear-gradient(90deg,#C41E3A,#f87171);
+  transition:width .25s}
+@media(max-width:860px){
+  .cli-wrap{grid-template-columns:1fr}
+  .cli-prev{position:static;order:-1}
+  .cli-form{padding:18px}
+  .cli-ops{grid-template-columns:1fr}
+}
 .modal-sm{width:min(440px,95vw)}
 .modal h4{
   font-size:17px;font-weight:800;color:var(--dark);
@@ -8693,56 +8753,239 @@ async function loadClientes() {
 }
 
 function openCliente(id=null, rfcPre='') {
-  const sec = (titulo) =>
-    `<div style="grid-column:1/-1;margin:10px 0 4px;padding-bottom:6px;border-bottom:1.5px solid var(--border);
-                 font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:var(--muted)">${titulo}</div>`;
+  const sec = (n, titulo, sub) => `
+    <div class="cli-sec">
+      <span class="n">${n}</span>
+      <div><div class="t">${titulo}</div></div>
+      ${sub ? `<div style="margin-left:auto;font-size:11px;color:var(--muted)">${sub}</div>` : ''}
+    </div>`;
 
-  $('modal-cliente-body').innerHTML = `
-  <h4 style="margin-bottom:14px">${id?'Editar':'Nuevo'} Cliente</h4>
-  <div class="fg">
+  const m = $('modal-cliente-body');
+  m.classList.add('cli-ancho');
+  m.innerHTML = `
+  <div class="cli-hero">
+    <div class="t">${id ? 'Editar cliente' : 'Nuevo cliente'}</div>
+    <div class="s">${id ? 'Los cambios aplican a las facturas que emitas de aquí en adelante.'
+                        : 'Solo el RFC y la razón social son obligatorios; lo demás se puede completar después.'}</div>
+  </div>
+  <div class="cli-wrap">
+   <div class="cli-form">
+    <div class="fg">
 
-    ${sec('📋 Datos Fiscales')}
-    <div class="fi"><label>RFC *</label><input id="cc-rfc" placeholder="XAXX010101000" value="${rfcPre}" style="text-transform:uppercase"></div>
-    <div class="fi"><label>Razón social *</label><input id="cc-rs" placeholder="Nombre fiscal completo"></div>
-    <div class="fi"><label>Nombre comercial</label><input id="cc-nc" placeholder="Nombre de uso común"></div>
-    <div class="fi"><label>Ciudad</label><input id="cc-ciudad"></div>
-    <div class="fi full"><label>Dirección</label><input id="cc-dir"></div>
+      ${sec(1, 'Datos fiscales', 'Como aparecen en la constancia')}
+      <div class="fi">
+        <label>RFC *</label>
+        <input id="cc-rfc" placeholder="XAXX010101000" value="${rfcPre}" maxlength="13"
+               autocomplete="off" spellcheck="false"
+               style="text-transform:uppercase;font-family:ui-monospace,monospace;letter-spacing:1px"
+               oninput="cliPreview()" onblur="cliRevisaRFC()">
+        <div class="cli-ayuda" id="cc-rfc-ayuda"></div>
+      </div>
+      <div class="fi">
+        <label>Razón social *</label>
+        <input id="cc-rs" placeholder="Nombre fiscal completo" oninput="cliPreview()">
+        <div class="cli-ayuda">Con el régimen: S.A. de C.V., S.C., etc.</div>
+      </div>
+      <div class="fi"><label>Nombre comercial</label>
+        <input id="cc-nc" placeholder="Con el que lo conocen" oninput="cliPreview()">
+        <div class="cli-ayuda">Es el que se usa en las pantallas del sistema.</div></div>
+      <div class="fi"><label>Ciudad</label><input id="cc-ciudad" oninput="cliPreview()"><div class="cli-ayuda"></div></div>
+      <div class="fi full"><label>Dirección</label><input id="cc-dir" oninput="cliPreview()"></div>
 
-    ${sec('👤 Contactos')}
-    <div class="fi"><label>Contacto principal</label><input id="cc-contacto" placeholder="Nombre del representante"></div>
-    <div class="fi"><label>Email</label><input type="email" id="cc-email" placeholder="correo@empresa.com"></div>
-    <div class="fi"><label>Contacto administrativo</label><input id="cc-cadmin" placeholder="Nombre contacto administrativo"></div>
-    <div class="fi"><label>Contacto de pagos</label><input id="cc-cpagos" placeholder="Nombre contacto de pagos"></div>
-    <div class="fi"><label>Teléfono</label><input id="cc-tel" placeholder="(55) 1234-5678"></div>
-    <div class="fi"><label>WhatsApp</label><input id="cc-whatsapp" placeholder="Número con lada"></div>
+      ${sec(2, 'Contactos', 'A quién buscar')}
+      <div class="fi"><label>Contacto principal</label>
+        <input id="cc-contacto" placeholder="Nombre del representante" oninput="cliPreview()"></div>
+      <div class="fi"><label>Email</label>
+        <input type="email" id="cc-email" placeholder="correo@empresa.com" oninput="cliPreview()">
+        <div class="cli-ayuda" id="cc-email-ayuda">Aquí llegan las facturas que envíes.</div></div>
+      <div class="fi"><label>Contacto administrativo</label>
+        <input id="cc-cadmin" placeholder="Quien recibe la factura" oninput="cliPreview()"></div>
+      <div class="fi"><label>Contacto de pagos</label>
+        <input id="cc-cpagos" placeholder="Quien autoriza el pago" oninput="cliPreview()"></div>
+      <div class="fi"><label>Teléfono</label><input id="cc-tel" placeholder="(55) 1234-5678" oninput="cliPreview()"></div>
+      <div class="fi"><label>WhatsApp</label><input id="cc-whatsapp" placeholder="Número con lada" oninput="cliPreview()"></div>
 
-    ${sec('💼 Condiciones Comerciales')}
-    <div class="fi"><label>Días de crédito</label><input type="number" id="cc-dias" min="0" step="1" placeholder="0" value="0"></div>
-    <div class="fi"><label>Comisión (%)</label><input type="number" id="cc-comision" min="0" max="100" step="0.01" placeholder="0.00"></div>
-    <div class="fi"><label>Acuerdos (%)</label><input type="number" id="cc-acuerdos" min="0" max="100" step="0.01" placeholder="16.00" value="16"></div>
-    <div class="fi"><label>Condiciones de pago</label><input id="cc-condpago" placeholder="Ej: 30 días neto, anticipo 50%"></div>
-    <div class="fi"><label>Ejecutivo de cuenta</label><input id="cc-ejecutivo" placeholder="Nombre del ejecutivo asignado"></div>
+      ${sec(3, 'Condiciones comerciales', 'Lo pactado')}
+      <div class="fi"><label>Días de crédito</label>
+        <input type="number" id="cc-dias" min="0" step="1" placeholder="0" value="0" oninput="cliPreview()">
+        <div class="cli-ayuda" id="cc-dias-ayuda"></div></div>
+      <div class="fi"><label>Comisión (%)</label>
+        <input type="number" id="cc-comision" min="0" max="100" step="0.01" placeholder="0.00" oninput="cliPreview()">
+        <div class="cli-ayuda" id="cc-com-ayuda"></div></div>
+      <div class="fi"><label>Acuerdos (%)</label>
+        <input type="number" id="cc-acuerdos" min="0" max="100" step="0.01" placeholder="16.00" value="16" oninput="cliPreview()">
+        <div class="cli-ayuda" id="cc-acu-ayuda"></div></div>
+      <div class="fi"><label>Condiciones de pago</label>
+        <input id="cc-condpago" placeholder="Ej: 30 días neto, anticipo 50%" oninput="cliPreview()"></div>
+      <div class="fi full"><label>Ejecutivo de cuenta</label>
+        <input id="cc-ejecutivo" placeholder="Quién lo atiende de nuestro lado" oninput="cliPreview()"></div>
 
-    ${sec('📝 Notas')}
-    <div class="fi full"><label>Notas internas</label><textarea id="cc-notas" rows="2" placeholder="Observaciones, acuerdos especiales..."></textarea></div>
+      ${sec(4, '¿Sus facturas llevan desglose?')}
+      <input type="checkbox" id="cc-desglose" checked style="display:none">
+      <div class="cli-ops">
+        <div class="cli-op sel" id="cc-desg-si" onclick="cliDesglose(true)">
+          <div class="ic">🗂</div><div class="tt">Sí, lleva desglose</div>
+          <div class="dd">Sus facturas se capturan por concepto y aparecen como
+            <strong>cuadradas</strong> o <strong>no cuadradas</strong>. Es lo normal.</div>
+        </div>
+        <div class="cli-op" id="cc-desg-no" onclick="cliDesglose(false)">
+          <div class="ic">📄</div><div class="tt">No lleva desglose</div>
+          <div class="dd">Se omite por completo. Sus saldos quedan fuera de los
+            indicadores de cobranza.</div>
+        </div>
+      </div>
 
-    <div class="fi full" style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-top:10px">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;color:#1e40af;margin-bottom:0">
-        <input type="checkbox" id="cc-desglose" checked style="width:18px;height:18px;cursor:pointer">
-        <span>🗂 Requiere desglose de factura</span>
-      </label>
-      <div style="font-size:11px;color:#1e3a8a;margin-top:4px;margin-left:26px">
-        Si está <strong>marcada</strong>, las facturas de este cliente requieren desglose de conceptos y aparecen como "cuadradas / no cuadradas". Si está <strong>desmarcada</strong>, se omite el desglose completamente.
+      ${sec(5, 'Notas internas')}
+      <div class="fi full">
+        <textarea id="cc-notas" rows="2" placeholder="Acuerdos especiales, a qué hora contestan, lo que convenga recordar…"></textarea>
       </div>
     </div>
 
-  </div>
-  <div class="form-actions">
-    <button class="btn bo" onclick="closeModal('modal-cliente')">Cancelar</button>
-    <button class="btn bs" onclick="saveCliente(${id||null})">Guardar cliente</button>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-cliente')">Cancelar</button>
+      <button class="btn bs" onclick="saveCliente(${id||null})">${id ? 'Guardar cambios' : 'Registrar cliente'}</button>
+    </div>
+   </div>
+
+   <aside class="cli-prev"><div class="cli-prev-in" id="cc-prev"></div></aside>
   </div>`;
+  cliPreview();
   if (id) loadClienteEdit(id);
   openModal('modal-cliente');
+}
+
+// ── La ficha en vivo de la derecha ───────────────────────────
+// Se actualiza con cada tecla. Ver la razón social y el RFC ya formados, con
+// el nombre que de verdad va a salir en el sistema, es lo que atrapa el error
+// de dedo antes de guardar.
+function cliPreview() {
+  const caja = $('cc-prev');
+  if (!caja) return;
+  const v = (id) => ($(id)?.value || '').trim();
+  const rfc = v('cc-rfc').toUpperCase();
+  const rs = v('cc-rs'), nc = v('cc-nc');
+  const titulo = nc || rs;
+  const iniciales = (titulo || '?').split(/\s+/).filter(Boolean).slice(0, 2)
+    .map(p => p[0]).join('').toUpperCase() || '?';
+
+  const dias = parseInt(v('cc-dias')) || 0;
+  const com = parseFloat(v('cc-comision')) || 0;
+  const acu = parseFloat(v('cc-acuerdos')) || 0;
+  const desg = $('cc-desglose')?.checked !== false;
+
+  // Ayudas bajo los campos: que el número diga qué significa
+  const ayuda = (id, txt, clase) => {
+    const e = $(id); if (!e) return;
+    e.textContent = txt; e.className = 'cli-ayuda' + (clase ? ' ' + clase : '');
+  };
+  ayuda('cc-dias-ayuda', dias > 0
+    ? `Una factura de hoy se vence el ${fmtDate(new Date(Date.now() + dias * 86400000))}.`
+    : 'De contado: la factura se vence el mismo día.');
+  ayuda('cc-com-ayuda', com > 0
+    ? `De cada ${fmt(100000)} facturados, ${fmt(100000 * com / 100)} son comisión.`
+    : 'Sin comisión pactada.');
+  ayuda('cc-acu-ayuda', acu > 0 ? `${acu}% sobre lo facturado.` : 'Sin acuerdos.');
+  const em = v('cc-email');
+  ayuda('cc-email-ayuda',
+    !em ? 'Aquí llegan las facturas que envíes.'
+        : /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(em) ? 'Correo válido.' : 'Revisa el correo: le falta algo.',
+    !em ? '' : /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(em) ? 'ok' : 'mal');
+
+  // Qué tan completa va la ficha
+  const campos = ['cc-rfc','cc-rs','cc-nc','cc-ciudad','cc-dir','cc-contacto','cc-email',
+                  'cc-cadmin','cc-cpagos','cc-tel','cc-whatsapp','cc-comision','cc-condpago','cc-ejecutivo'];
+  const llenos = campos.filter(x => v(x)).length;
+  const pct = Math.round(llenos / campos.length * 100);
+
+  const dato = (k, val) => val
+    ? `<div class="cli-dato"><span class="k">${k}</span><span class="v">${val}</span></div>` : '';
+
+  caja.innerHTML = `
+    <div style="display:flex;gap:12px;align-items:center">
+      <div class="cli-ava">${iniciales}</div>
+      <div style="min-width:0">
+        <div style="font-size:14.5px;font-weight:800;color:#fff;line-height:1.25;word-break:break-word">
+          ${titulo || 'Cliente sin nombre'}</div>
+        <div style="font-size:11px;color:#9aa3bd;font-family:ui-monospace,monospace;letter-spacing:.5px;margin-top:2px">
+          ${rfc || 'Sin RFC'}</div>
+      </div>
+    </div>
+    ${nc && rs && nc !== rs ? `<div style="font-size:10.5px;color:#9aa3bd;margin-top:8px;line-height:1.4">
+       Razón social: ${rs}</div>` : ''}
+
+    <div style="margin-top:12px">
+      ${dias ? `<span class="cli-chip">💳 ${dias} días</span>` : '<span class="cli-chip">💵 Contado</span>'}
+      ${com ? `<span class="cli-chip">📊 ${com}% comisión</span>` : ''}
+      ${acu ? `<span class="cli-chip">🤝 ${acu}% acuerdos</span>` : ''}
+      <span class="cli-chip">${desg ? '🗂 Con desglose' : '📄 Sin desglose'}</span>
+    </div>
+
+    <div style="margin-top:16px">
+      ${dato('Ciudad', v('cc-ciudad'))}
+      ${dato('Contacto', v('cc-contacto'))}
+      ${dato('Email', em)}
+      ${dato('Teléfono', v('cc-tel'))}
+      ${dato('WhatsApp', v('cc-whatsapp'))}
+      ${dato('Administra', v('cc-cadmin'))}
+      ${dato('Paga', v('cc-cpagos'))}
+      ${dato('Ejecutivo', v('cc-ejecutivo'))}
+      ${dato('Pago', v('cc-condpago'))}
+    </div>
+
+    <div id="cc-sat" style="margin-top:14px"></div>
+
+    <div style="margin-top:18px">
+      <div style="display:flex;justify-content:space-between;font-size:10.5px;color:#9aa3bd;margin-bottom:5px">
+        <span>Ficha completa</span><span>${pct}%</span>
+      </div>
+      <div class="cli-barra"><i style="width:${pct}%"></i></div>
+      <div style="font-size:10.5px;color:#7c849e;margin-top:7px;line-height:1.45">
+        ${!rfc || !rs ? 'Falta el RFC o la razón social para poder guardar.'
+                      : 'Ya se puede guardar. Lo demás se completa cuando lo tengas.'}
+      </div>
+    </div>`;
+}
+
+function cliDesglose(si) {
+  const c = $('cc-desglose'); if (c) c.checked = si;
+  $('cc-desg-si')?.classList.toggle('sel', si);
+  $('cc-desg-no')?.classList.toggle('sel', !si);
+  cliPreview();
+}
+
+// Al salir del campo del RFC: forma correcta y, si la lista del 69-B está
+// descargada, si ese RFC está señalado por el SAT. Falla en silencio: es una
+// ayuda, no un requisito para dar de alta al cliente.
+async function cliRevisaRFC() {
+  const e = $('cc-rfc'); if (!e) return;
+  const rfc = (e.value || '').toUpperCase().replace(/[\s-]/g, '').trim();
+  e.value = rfc;
+  const ay = $('cc-rfc-ayuda');
+  if (!rfc) { if (ay) { ay.textContent = ''; ay.className = 'cli-ayuda'; } return; }
+  const bien = /^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}$/.test(rfc);
+  if (ay) {
+    ay.textContent = bien ? 'RFC con forma válida.' : 'No tiene forma de RFC (12 para empresa, 13 para persona).';
+    ay.className = 'cli-ayuda ' + (bien ? 'ok' : 'mal');
+  }
+  const caja = $('cc-sat');
+  if (!caja || !bien) { if (caja) caja.innerHTML = ''; return; }
+  try {
+    const d = await api('/sat/69b/rfc/' + encodeURIComponent(rfc));
+    if (!d.en_lista) {
+      caja.innerHTML = `<div style="background:rgba(22,163,74,.14);border:1px solid rgba(34,197,94,.3);
+        border-radius:9px;padding:8px 10px;font-size:11px;color:#bbf7d0;line-height:1.45">
+        ✓ No aparece en la lista 69-B del SAT.</div>`;
+      return;
+    }
+    const sit = (d.procedimientos || []).map(p => p.situacion).join(' · ');
+    caja.innerHTML = `<div style="background:${d.riesgo ? 'rgba(220,38,38,.18)' : 'rgba(22,163,74,.14)'};
+      border:1px solid ${d.riesgo ? 'rgba(248,113,113,.35)' : 'rgba(34,197,94,.3)'};
+      border-radius:9px;padding:8px 10px;font-size:11px;
+      color:${d.riesgo ? '#fecaca' : '#bbf7d0'};line-height:1.45">
+      ${d.riesgo ? '⚠' : '✓'} Lista 69-B del SAT: <strong>${sit}</strong>
+      ${d.mixto ? '<div style="margin-top:3px">Señalado y con resolución a favor. Revísalo con tu contador.</div>'
+        : d.riesgo ? '<div style="margin-top:3px">Revisa antes de facturarle.</div>' : ''}</div>`;
+  } catch (err) { caja.innerHTML = ''; }
 }
 
 async function loadClienteEdit(id) {
@@ -8765,7 +9008,11 @@ async function loadClienteEdit(id) {
     $('cc-dias').value      = c.dias_credito      ?? 0;
     $('cc-condpago').value  = c.condiciones_pago  || '';
     $('cc-ejecutivo').value = c.ejecutivo_cuenta  || '';
-    if ($('cc-desglose')) $('cc-desglose').checked = c.aplica_desglose !== false;
+    // Las tarjetas y la ficha de la derecha tienen que reflejar lo que se cargó,
+    // no quedarse con los valores de un formulario en blanco.
+    cliDesglose(c.aplica_desglose !== false);
+    cliPreview();
+    cliRevisaRFC();
   } catch {}
 }
 
@@ -20844,7 +21091,9 @@ async function loadReceptoras() {
 }
 
 function openReceptora(id = null) {
-  // Reutilizamos modal-cliente
+  // Reutilizamos modal-cliente. Hay que quitarle el ancho del alta de cliente:
+  // si no, este formulario hereda el modal ancho y sin orillas.
+  $('modal-cliente-body').classList.remove('cli-ancho');
   $('modal-cliente-body').innerHTML = `
   <h4>${id ? 'Editar' : 'Nueva'} Empresa Emisora</h4>
   <div class="fg">
