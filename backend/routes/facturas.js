@@ -433,6 +433,8 @@ router.get('/pagos-borrados', requireRol('admin', 'gerente', 'tesoreria'), async
       total: r.rows.reduce((a, x) => a + (parseFloat(x.monto) || 0), 0),
       movimientos: r.rows
     });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // ── FACTURAS MARCADAS COMO CUADRADAS PERO SIN DESGLOSE ────────
 // Quedaron asi por el error de arriba: el guardado fallo a medias y se llevo
@@ -753,9 +755,6 @@ router.delete('/:id/pagos-de-cancelada', requireRol('admin', 'gerente', 'tesorer
                  monto_eliminado: r.reduce((a, x) => a + (parseFloat(x.monto) || 0), 0) });
     } catch (e) { await cli.query('ROLLBACK'); throw e; }
     finally { cli.release(); }
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
