@@ -4,6 +4,23 @@ const { verificarToken, requireRol } = require('../middleware/auth');
 
 router.use(verificarToken);
 
+// Comisiones desglosadas por su origen. Van despues de COMISIONES (orden 8) y
+// antes de los bonos, para que en el selector queden juntas.
+//
+// OJO: el concentrado y el reporte de comisiones agrupan por
+// `concepto ILIKE '%comisi%'`, asi que las tres suman dentro de COMISIONES.
+// Es lo que se busca: separan el origen sin partir el total.
+(async () => {
+  try {
+    await query(`
+      INSERT INTO fac_conceptos_rh (clave, nombre, orden) VALUES
+        ('COM_EFECTIVO', 'Comision Efectivo', 8),
+        ('COM_MAQUILA',  'Comision Maquila',  8),
+        ('COM_NOMINA',   'Comision Nomina',   8)
+      ON CONFLICT (clave) DO NOTHING`);
+  } catch (e) { console.warn('Conceptos de comisión:', e.message); }
+})();
+
 // GET /api/conceptos  — lista activos para el desglose
 router.get('/', async (req, res) => {
   try {

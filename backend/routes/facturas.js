@@ -540,8 +540,12 @@ router.put('/:id/desglose', requireRol('admin', 'capturista', 'gerente'), async 
     const { partidas } = req.body; // [{ concepto_id, concepto, monto, notas }]
     const facId = req.params.id;
 
-    if (partidas && partidas.length > 5)
-      return res.status(400).json({ error: 'El desglose acepta un máximo de 5 conceptos por factura.' });
+    // El tope existe solo para atajar un envio disparatado; 5 se quedaba corto
+    // en facturas con varias comisiones separadas. Tiene que coincidir con
+    // RH_MAX del frontend.
+    const MAX_PARTIDAS = 15;
+    if (partidas && partidas.length > MAX_PARTIDAS)
+      return res.status(400).json({ error: `El desglose acepta un máximo de ${MAX_PARTIDAS} conceptos por factura.` });
 
     // Todo en una transaccion. Antes el borrado, los insertados y la bandera
     // iban sueltos: si un INSERT fallaba despues del DELETE, la factura se

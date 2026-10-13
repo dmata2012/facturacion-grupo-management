@@ -7814,7 +7814,8 @@ function showTab(el, panelId) {
 
 
 // ── DESGLOSE DE FACTURA — hasta 5 conceptos ──
-const RH_MAX = 5;
+// Tiene que coincidir con MAX_PARTIDAS del backend (PUT /facturas/:id/desglose).
+const RH_MAX = 15;
 let _rhCatalogo  = [];
 let _rhFacturaId = null;
 let _rhTotal     = 0;
