@@ -8692,7 +8692,19 @@ async function verSat69b() {
             : 'Ningún RFC tuyo está señalado'}</div>
         ${est.ultima ? `<div style="font-size:11.5px;opacity:.9;margin-top:4px">
           Lista del SAT al ${est.ultima.actualizado_al || '—'} · ${(est.total||0).toLocaleString('es-MX')} RFC ·
-          descargada el ${est.ultima.importado_en}${est.ultima.importado_por_nombre ? ' por ' + est.ultima.importado_por_nombre : ''}</div>` : ''}
+          descargada el ${est.ultima.importado_en}${est.ultima.importado_por_nombre ? ' por ' + est.ultima.importado_por_nombre : ''}</div>
+        ${(() => {
+          // El sistema la revisa solo y la baja cuando cumple 7 días. Decirlo
+          // aquí evita que alguien la ande actualizando a mano sin necesidad.
+          const d = new Date((est.ultima.importado_en || '').replace(' ', 'T'));
+          if (isNaN(d)) return '';
+          const dias = Math.floor((Date.now() - d.getTime()) / 86400000);
+          const faltan = 7 - dias;
+          return `<div style="font-size:10.5px;opacity:.78;margin-top:3px">
+            🔄 Se actualiza sola cada semana · ${faltan > 0
+              ? `la próxima en ${faltan} día${faltan !== 1 ? 's' : ''}`
+              : 'ya toca: se baja en la siguiente revisión'}</div>`;
+        })()}` : ''}
       </div>
       <div style="font-size:12.5px;color:var(--muted);line-height:1.55;margin-bottom:12px">
         El SAT publica los RFC con operaciones presuntamente inexistentes.

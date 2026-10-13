@@ -77,11 +77,18 @@ function filasCSV(texto) {
 const RFC_VALIDO = /^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}$/;
 const normRFC = (v) => String(v || '').toUpperCase().replace(/[\s-]/g, '').trim();
 
-// ── ACTUALIZAR EL LISTADO DESDE EL SAT ────────────────────────
-router.post('/69b/importar', requireRol('admin', 'gerente'), async (req, res) => {
+// ── BAJAR EL LISTADO Y REEMPLAZARLO ───────────────────────────
+// Lo usan la actualizacion manual (el boton) y la automatica semanal, para que
+// las dos hagan exactamente lo mismo.
+// Lanza un Error con .http cuando el problema es del SAT y no nuestro.
+let importando = false;   // dos importaciones a la vez se pisarian
+
+async function importar69B(usuario) {
+  if (importando) { const e = new Error('Ya hay una actualización en curso.'); e.http = 409; throw e; }
+  importando = true;
   try {
     const r = await fetch(URL_69B, { signal: AbortSignal.timeout(120000) });
-    if (!r.ok) return res.status(502).json({ error: `El SAT respondió ${r.status}. Intenta más tarde.` });
+    if (!r.ok) { const e = new Error(`El SAT respondió ${r.status}. Intenta más tarde.`); e.http = 502; throw e; }
 
     // El archivo viene en latin1, no en UTF-8: leerlo como UTF-8 deja los
     // acentos rotos en los nombres ("AVALÚOS" -> "AVALUOS" con basura).
@@ -89,7 +96,10 @@ router.post('/69b/importar', requireRol('admin', 'gerente'), async (req, res) =>
     const filas = filasCSV(texto);
 
     const iEnc = filas.findIndex(x => (x[0] || '').trim() === 'No' && (x[1] || '').trim() === 'RFC');
-    if (iEnc < 0) return res.status(502).json({ error: 'El archivo del SAT no trae el encabezado esperado. Pudo cambiar de formato.' });
+    if (iEnc < 0) {
+      const e = new Error('El archivo del SAT no trae el encabezado esperado. Pudo cambiar de formato.');
+      e.http = 502; throw e;
+    }
 
     const actualizadoAl = ((filas[0] || [''])[0].match(/actualizada al ([^;,]+)/i) || [])[1] || null;
 
@@ -101,7 +111,7 @@ router.post('/69b/importar', requireRol('admin', 'gerente'), async (req, res) =>
                       (x[5] || '').trim() || null, (x[13] || '').trim() || null,
                       (x[9] || '').trim() || null, (x[17] || '').trim() || null]);
     }
-    if (!registros.length) return res.status(502).json({ error: 'El archivo del SAT llegó vacío.' });
+    if (!registros.length) { const e = new Error('El archivo del SAT llegó vacío.'); e.http = 502; throw e; }
 
     // Se reemplaza entero dentro de una transaccion: si algo falla a medias, la
     // lista anterior sigue intacta en vez de quedar a la mitad.
@@ -123,19 +133,58 @@ router.post('/69b/importar', requireRol('admin', 'gerente'), async (req, res) =>
         `INSERT INTO fac_sat_importaciones
            (listado, actualizado_al, registros, importado_por, importado_por_nombre)
          VALUES ('69b',$1,$2,$3,$4)`,
-        [actualizadoAl, registros.length, req.usuario?.id || null, req.usuario?.nombre || null]);
+        [actualizadoAl, registros.length, usuario?.id || null,
+         usuario?.nombre || 'Actualización automática']);
       await cli.query('COMMIT');
     } catch (e) { await cli.query('ROLLBACK'); throw e; }
     finally { cli.release(); }
 
-    res.json({ ok: true, registros: registros.length, actualizado_al: actualizadoAl });
+    return { ok: true, registros: registros.length, actualizado_al: actualizadoAl };
+  } finally { importando = false; }
+}
+
+// ── ACTUALIZAR A MANO (el botón de la pantalla) ───────────────
+router.post('/69b/importar', requireRol('admin', 'gerente'), async (req, res) => {
+  try {
+    res.json(await importar69B(req.usuario));
   } catch (e) {
     const msg = /timeout|abort/i.test(e.message)
       ? 'El SAT tardó demasiado en responder. Intenta de nuevo en un rato.'
       : e.message;
-    res.status(500).json({ error: msg });
+    res.status(e.http || 500).json({ error: msg });
   }
 });
+
+// ── ACTUALIZACION AUTOMATICA SEMANAL ──────────────────────────
+// No se usa un intervalo de 7 días a secas: Render reinicia el servicio cada
+// cierto tiempo y cada reinicio reiniciaría la cuenta, así que podrían pasar
+// semanas sin bajar nada. En vez de eso se revisa cada 6 horas CUANDO fue la
+// última importación —que ya queda guardada en fac_sat_importaciones— y solo
+// se baja si tiene 7 días o más. Así un reinicio no se salta la semana y
+// varios reinicios seguidos tampoco la repiten.
+const DIAS = 7;
+const CADA  = 6 * 60 * 60 * 1000;
+
+async function revisar69B() {
+  try {
+    const r = await query(
+      `SELECT MAX(importado_en) AS ultima FROM fac_sat_importaciones WHERE listado='69b'`);
+    const ultima = r.rows[0]?.ultima ? new Date(r.rows[0].ultima) : null;
+    const dias = ultima ? (Date.now() - ultima.getTime()) / 86400000 : Infinity;
+    if (dias < DIAS) return;
+
+    const res = await importar69B(null);
+    console.log(`[69-B] Lista actualizada sola: ${res.registros} registros, al ${res.actualizado_al}.`);
+  } catch (e) {
+    // El SAT caído o lento no debe tumbar el servidor ni llenar el log de
+    // ruido: la lista anterior sigue sirviendo y se reintenta en 6 horas.
+    console.warn('[69-B] No se pudo actualizar sola:', e.message);
+  }
+}
+
+// Al arrancar se espera un poco para no competir con el resto del arranque.
+setTimeout(revisar69B, 90 * 1000);
+setInterval(revisar69B, CADA);
 
 // ── ESTADO DEL LISTADO ────────────────────────────────────────
 router.get('/69b/estado', async (req, res) => {
