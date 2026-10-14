@@ -41,6 +41,17 @@ const { permiso, NIVEL, permisosDeUsuario } = require('../middleware/permiso');
   } catch (e) { console.warn('Bitácora de pagos borrados:', e.message); }
 })();
 
+// ── Facturas de "solo comision" ───────────────────────────────
+// Hay facturas que no llevan desglose completo: de ellas solo interesa cuanto
+// es comision. No tienen que cuadrar contra el total, y su IVA NO es ingreso,
+// asi que no suma en la columna Facturacion del reporte mensual.
+(async () => {
+  try {
+    await query(`ALTER TABLE fac_facturas
+                 ADD COLUMN IF NOT EXISTS solo_comision BOOLEAN NOT NULL DEFAULT FALSE`);
+  } catch (e) { console.warn('Columna solo_comision:', e.message); }
+})();
+
 // Guarda en la bitacora los pagos de una factura y los devuelve. Recibe el
 // cliente de la transaccion para que el registro y el borrado caigan juntos: o
 // se anota y se borra, o no pasa ninguna de las dos.
@@ -220,9 +231,11 @@ router.get('/', async (req, res) => {
         -- hacen que la comision del mes salga baja sin que se note por que.
         COUNT(f.id) FILTER (
           WHERE f.estatus != 'cancelada' AND COALESCE(c.aplica_desglose,TRUE)
+            AND NOT COALESCE(f.solo_comision,FALSE)
             AND sub_d.factura_id IS NULL)::int                                      AS facturas_sin_capturar,
         COALESCE(SUM(f.total) FILTER (
           WHERE f.estatus != 'cancelada' AND COALESCE(c.aplica_desglose,TRUE)
+            AND NOT COALESCE(f.solo_comision,FALSE)
             AND sub_d.factura_id IS NULL),0)                                        AS facturado_sin_capturar,
         COALESCE(SUM(COALESCE(sub_p.cobrado,0)) FILTER (WHERE f.estatus != 'cancelada'),0) AS cobrado,
         COALESCE(SUM(f.total - COALESCE(sub_p.cobrado,0))
@@ -450,6 +463,7 @@ router.get('/cuadradas-sin-desglose', async (req, res) => {
         LEFT JOIN fac_clientes c ON c.id = f.cliente_id
        WHERE f.desglose_validado = TRUE
          AND f.estatus <> 'cancelada'
+         AND NOT COALESCE(f.solo_comision,FALSE)
          AND NOT EXISTS (SELECT 1 FROM fac_desglose_rh d WHERE d.factura_id = f.id)
        ORDER BY f.fecha_emision DESC, f.id DESC`);
     res.json({ facturas: r.rows,
@@ -539,6 +553,10 @@ router.put('/:id/desglose', requireRol('admin', 'capturista', 'gerente'), async 
   try {
     const { partidas } = req.body; // [{ concepto_id, concepto, monto, notas }]
     const facId = req.params.id;
+    // "Solo comisión": la factura no lleva desglose completo, nada mas se
+    // captura cuanto de ella es comision. No tiene que cuadrar contra el total
+    // y su IVA no cuenta como ingreso en el reporte mensual.
+    const soloComision = req.body.solo_comision === true;
 
     // El tope existe solo para atajar un envio disparatado; 5 se quedaba corto
     // en facturas con varias comisiones separadas. Tiene que coincidir con
@@ -578,12 +596,17 @@ router.put('/:id/desglose', requireRol('admin', 'capturista', 'gerente'), async 
       const facTotal = parseFloat(tot.rows[0]?.total || 0);
       // Sin una sola partida no hay nada que cuadrar. Sin esto, una factura en
       // ceros daba |0 - 0| < 0.01 y se marcaba cuadrada con el desglose vacio.
-      const validado = n > 0 && Math.abs(total - facTotal) < 0.01;
+      //
+      // Una de "solo comision" NO se marca cuadrada: justamente no cuadra, y ese
+      // es el caso. Su estado propio es solo_comision.
+      const validado = !soloComision && n > 0 && Math.abs(total - facTotal) < 0.01;
 
-      await cli.query(`UPDATE fac_facturas SET desglose_validado=$1,actualizado_en=NOW() WHERE id=$2`,
-                      [validado, facId]);
+      await cli.query(
+        `UPDATE fac_facturas SET desglose_validado=$1, solo_comision=$2, actualizado_en=NOW()
+          WHERE id=$3`, [validado, soloComision, facId]);
       await cli.query('COMMIT');
-      resultado = { ok: true, validado, partidas: n, subtotal, iva, total, factura_total: facTotal };
+      resultado = { ok: true, validado, solo_comision: soloComision,
+                    partidas: n, subtotal, iva, total, factura_total: facTotal };
     } catch (e) { await cli.query('ROLLBACK'); throw e; }
     finally { cli.release(); }
 

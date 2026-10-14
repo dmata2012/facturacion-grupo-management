@@ -801,7 +801,11 @@ router.get('/mensual-direccion', async (req, res) => {
     const fact = await query(`
       SELECT EXTRACT(MONTH FROM f.fecha_emision)::int AS mes,
              COALESCE(SUM(d.comision),0) AS comisiones,
-             COALESCE(SUM(f.iva),0)      AS iva
+             -- El IVA de una factura de "solo comisión" NO es ingreso: de esa
+             -- factura solo nos toca la comisión. Su comisión sí suma arriba.
+             COALESCE(SUM(f.iva) FILTER (WHERE NOT COALESCE(f.solo_comision,FALSE)),0) AS iva,
+             COUNT(*) FILTER (WHERE COALESCE(f.solo_comision,FALSE))::int AS solo_comision,
+             COALESCE(SUM(f.iva) FILTER (WHERE COALESCE(f.solo_comision,FALSE)),0) AS iva_excluido
         FROM fac_facturas f
         JOIN (
           SELECT factura_id,
@@ -872,9 +876,14 @@ router.get('/mensual-direccion', async (req, res) => {
     } catch (e) { impRows = []; }
 
     const comisiones = vacio(), iva = vacio(), otrosIng = vacio(), gastosOp = vacio();
+    // Informativo: cuantas facturas de "solo comision" hubo y cuanto IVA se
+    // dejo fuera por eso. Sirve para explicar la columna, no entra a ninguna suma.
+    const soloComN = vacio(), ivaFuera = vacio();
     fact.rows.forEach(r => {
       comisiones[r.mes - 1] = parseFloat(r.comisiones) || 0;
       iva[r.mes - 1]        = parseFloat(r.iva) || 0;
+      soloComN[r.mes - 1]   = parseInt(r.solo_comision) || 0;
+      ivaFuera[r.mes - 1]   = parseFloat(r.iva_excluido) || 0;
     });
     otros.forEach(r  => { otrosIng[r.mes - 1] = parseFloat(r.total) || 0; });
     gastos.forEach(r => { gastosOp[r.mes - 1] = parseFloat(r.total) || 0; });
@@ -909,6 +918,10 @@ router.get('/mensual-direccion', async (req, res) => {
         mes: i + 1,
         comisiones: comisiones[i],
         facturacion: iva[i],
+        // Cuantas facturas de "solo comision" hubo en el mes y cuanto IVA suyo
+        // quedo fuera de la columna de arriba. Es para explicarlo en pantalla.
+        solo_comision: soloComN[i],
+        iva_excluido: ivaFuera[i],
         otros_ingresos: otrosIng[i],
         total_ingresos: totalIng[i],
         gastos_operativos: gastosOp[i],
@@ -922,6 +935,8 @@ router.get('/mensual-direccion', async (req, res) => {
       totales: {
         comisiones: suma(comisiones),
         facturacion: suma(iva),
+        solo_comision: soloComN.reduce((a, b) => a + b, 0),
+        iva_excluido: suma(ivaFuera),
         otros_ingresos: suma(otrosIng),
         total_ingresos: suma(totalIng),
         gastos_operativos: suma(gastosOp),

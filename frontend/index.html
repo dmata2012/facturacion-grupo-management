@@ -6967,6 +6967,8 @@ async function loadFacturas() {
             ? badgeEstatus(f.estatus)
             : (f.cliente_aplica_desglose === false)
           ? badgeEstatus(f.estatus) + ' <span style="display:inline-flex;align-items:center;gap:3px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:20px;padding:2px 8px;color:#6b7280;font-size:10.5px;font-weight:700;margin-left:4px" title="Cliente no requiere desglose">✕ Sin desglose</span>'
+          : (f.solo_comision
+              ? '<span title="Solo se captura la comisión. Su IVA no cuenta como ingreso en el reporte mensual." style="display:inline-flex;align-items:center;gap:4px;background:#fffbeb;border:1.5px solid #fcd34d;border-radius:20px;padding:3px 10px;color:#92400e;font-size:11.5px;font-weight:800">💰 SOLO COMISIÓN</span>'
           : (f.desglose_validado
               // Marcada como cuadrada pero sin una sola partida: es una
               // contradicción de los datos y la pantalla no debe taparla
@@ -6975,7 +6977,7 @@ async function loadFacturas() {
               ? (parseInt(f.rh_partidas || 0) === 0
                   ? '<span title="Dice cuadrada pero no tiene ninguna partida de desglose. Hay que revisarla." style="display:inline-flex;align-items:center;gap:4px;background:#fffbeb;border:1.5px solid #fcd34d;border-radius:20px;padding:3px 10px;color:#92400e;font-size:11.5px;font-weight:800">⚠ SIN DESGLOSE</span>'
                   : '<span title="Desglose cuadrado — factura bloqueada" style="display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:20px;padding:3px 10px;color:#166534;font-size:12px;font-weight:800">✔ CUADRADA</span>')
-              : badgeEstatus(f.estatus))}</td>
+              : badgeEstatus(f.estatus)))}</td>
         <td id="sat-cell-${f.id}" style="white-space:nowrap;font-size:11.5px;color:var(--muted)"
             title="${f.sat_validado_en ? 'Consultado el ' + new Date(f.sat_validado_en).toLocaleString('es-MX') : ''}">${
           f.estatus_sat ? _chipEstatusSAT(f.estatus_sat) : '—'
@@ -7825,6 +7827,9 @@ let _rhFolio     = '';
 let _rhRFC       = '';
 let _rhCliente   = '';
 let _rhFilas     = []; // [{concepto_id, concepto, monto, notas}]
+// Factura que no lleva desglose completo: solo se captura cuanto es comision.
+// No tiene que cuadrar, y su IVA no cuenta como ingreso en el reporte mensual.
+let _rhSoloComision = false;
 
 async function openRH(facturaId) {
   $('modal-rh-body').innerHTML = '<h4>Desglose de Factura</h4><p class="empty">Cargando...</p>';
@@ -7843,6 +7848,7 @@ async function openRH(facturaId) {
     _rhFolio     = f.folio || ('#' + facturaId);
     _rhRFC       = f.rfc        || '';
     _rhCliente   = f.razon_social || '';
+    _rhSoloComision = f.solo_comision === true;
 
     // Cargar filas guardadas o iniciar con 1 vacía
     _rhFilas = det.length
@@ -7938,6 +7944,23 @@ function renderRH() {
     <div></div>
   </div>
 
+  <!-- Modo "solo comision" -->
+  <label id="rh-solo" onclick="rhToggleSolo(event)" style="display:flex;align-items:flex-start;gap:9px;
+         cursor:pointer;border:2px solid ${_rhSoloComision?'#b45309':'var(--border)'};
+         background:${_rhSoloComision?'#fffbeb':'#fff'};border-radius:11px;padding:10px 13px;margin-bottom:12px">
+    <input type="checkbox" id="rh-solo-chk" ${_rhSoloComision?'checked':''}
+           style="width:17px;height:17px;margin-top:1px;cursor:pointer;pointer-events:none">
+    <div>
+      <div style="font-weight:800;font-size:12.5px;color:${_rhSoloComision?'#92400e':'var(--dark)'}">
+        💰 Esta factura solo lleva comisión</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.45;margin-top:2px">
+        No se desglosa completa: únicamente se captura cuánto de ella es comisión.
+        No tiene que cuadrar contra el total, y <strong>su IVA no cuenta como ingreso</strong>
+        en el reporte mensual. La comisión sí entra en todos los reportes.
+      </div>
+    </div>
+  </label>
+
   <!-- FILAS -->
   <div id="rh-tbody">${filas}</div>
 
@@ -8011,6 +8034,29 @@ function rhOnMonto(i, el) {
   rhRecalcTotal();
 }
 
+// Cambiar a "solo comision" borra lo que no sea comision: en ese modo no
+// tiene sentido conservarlo, y dejarlo a medias confundiria mas. Se avisa antes.
+async function rhToggleSolo(ev) {
+  if (ev) ev.preventDefault();
+  const activar = !_rhSoloComision;
+  if (activar) {
+    const otros = _rhFilas.filter(f => f.concepto_id && parseFloat(f.monto) > 0
+                                    && !/comisi/i.test(f.concepto || ''));
+    // Los saltos de línea van como texto real dentro de las comillas inclinadas:
+    // escribirlos escapados en este archivo se pierde al generar la página.
+    const SALTO = String.fromCharCode(10);
+    if (otros.length && !await confirm2(
+        `Esta factura tiene ${otros.length} concepto${otros.length!=1?'s':''} que no son comisión:` + SALTO
+        + otros.map(f => '  · ' + f.concepto).join(SALTO) + SALTO + SALTO
+        + `En "solo comisión" se quitan y queda únicamente la comisión.` + SALTO
+        + `¿Continuar?`)) return;
+    _rhFilas = _rhFilas.filter(f => /comisi/i.test(f.concepto || ''));
+    if (!_rhFilas.length) _rhFilas = [{ concepto_id:'', concepto:'', monto:'', notas:'' }];
+  }
+  _rhSoloComision = activar;
+  renderRH();
+}
+
 function rhAgregarFila() {
   if (_rhFilas.length >= RH_MAX) return;
   _rhFilas.push({ concepto_id: '', concepto: '', monto: '', notas: '' });
@@ -8028,7 +8074,9 @@ function rhRecalcTotal() {
   const iva      = Math.round(subtotal * 0.16 * 100) / 100;
   const total    = Math.round((subtotal + iva) * 100) / 100;
   const diff     = parseFloat(_rhTotal) - total;
-  const valid    = Math.abs(diff) < 0.01;
+  // En "solo comisión" no hay nada que cuadrar: la factura no se desglosa
+  // completa a propósito. Marcarla en rojo y decir "falta" contradice el modo.
+  const valid    = _rhSoloComision || Math.abs(diff) < 0.01;
 
   const subEl   = $('rh-sub-val');
   const ivaEl   = $('rh-iva-val');
@@ -8048,11 +8096,16 @@ function rhRecalcTotal() {
   }
   if (badgeEl) {
     badgeEl.innerHTML = valid
-      ? '<span style="color:#16a34a;font-weight:700">✔ Cuadrado</span>'
+      ? (_rhSoloComision
+          ? '<span style="color:#b45309;font-weight:700">💰 Solo comisión</span>'
+          : '<span style="color:#16a34a;font-weight:700">✔ Cuadrado</span>')
       : '<span style="color:#dc2626;font-weight:600">⚠ Pendiente</span>';
   }
   if (diffMsg) {
-    if (!valid && total > 0) {
+    if (_rhSoloComision) {
+      diffMsg.style.color = 'var(--muted)';
+      diffMsg.innerHTML = 'No cuadra contra el total, y así debe ser.';
+    } else if (!valid && total > 0) {
       diffMsg.style.color = diff > 0 ? '#d97706' : '#dc2626';
       diffMsg.innerHTML = diff > 0
         ? `Falta: <strong>${fmt(diff)}</strong>`
@@ -8081,12 +8134,21 @@ async function saveRH() {
   const partidas = _rhFilas.filter(f => f.concepto_id && parseFloat(f.monto) > 0);
   if (!partidas.length) return toast('Agrega al menos un concepto con monto.', 'warn');
 
+  // Una factura de "solo comisión" no tiene que cuadrar contra el total: ese es
+  // justamente el caso. Solo se exige que lo capturado sea comisión.
+  if (_rhSoloComision) {
+    const noComision = partidas.filter(f => !/comisi/i.test(f.concepto || ''));
+    if (noComision.length)
+      return toast('En "solo comisión" únicamente se capturan conceptos de comisión. '
+        + 'Quita: ' + noComision.map(f => f.concepto).join(', '), 'err');
+  }
+
   // Validar que (subtotal + IVA 16%) sea igual al total de la factura
   const subtotal = partidas.reduce((a, f) => a + parseFloat(f.monto), 0);
   const iva      = Math.round(subtotal * 0.16 * 100) / 100;
   const total    = Math.round((subtotal + iva) * 100) / 100;
   const diff     = Math.abs(total - _rhTotal);
-  if (diff >= 0.01) {
+  if (!_rhSoloComision && diff >= 0.01) {
     const falta = _rhTotal - total;
     return toast(
       falta > 0
@@ -8099,9 +8161,11 @@ async function saveRH() {
   try {
     const r = await api(`/facturas/${_rhFacturaId}/desglose`, {
       method: 'PUT',
-      body: JSON.stringify({ partidas })
+      body: JSON.stringify({ partidas, solo_comision: _rhSoloComision })
     });
-    toast('Desglose guardado y validado ✅');
+    toast(_rhSoloComision
+      ? `Comisión guardada: ${fmt(partidas.reduce((a,f)=>a+parseFloat(f.monto),0))}. El IVA de esta factura no cuenta como ingreso.`
+      : 'Desglose guardado y validado ✅');
     closeModal('modal-rh');
     facturas();
   } catch(e) { toast(e.message, 'err'); }
