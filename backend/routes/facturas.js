@@ -449,6 +449,87 @@ router.get('/pagos-borrados', requireRol('admin', 'gerente', 'tesoreria'), async
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── REACTIVAR UNA FACTURA CANCELADA POR ERROR ─────────────────
+// Deshace una cancelacion hecha en el sistema. Dos cosas importantes:
+//
+// 1. Solo deshace lo del SISTEMA. Si el CFDI tambien se cancelo ante el SAT,
+//    esto no lo revive: la factura seguiria cancelada fiscalmente y el sistema
+//    estaria diciendo otra cosa. Por eso avisa si el SAT la da por cancelada.
+// 2. Cancelar borra los pagos (un comprobante cancelado no es dinero en banco).
+//    Si quedaron anotados en la bitacora, se devuelven aqui mismo: reactivar
+//    sin sus pagos dejaria la factura viva pero sin cobrar, que es otro error.
+//
+// Va antes de GET /:id.
+router.get('/:id/reactivable', async (req, res) => {
+  try {
+    const f = await query(
+      `SELECT id, folio, estatus, estatus_sat, total FROM fac_facturas WHERE id=$1`, [req.params.id]);
+    if (!f.rows.length) return res.status(404).json({ error: 'Factura no encontrada.' });
+    const p = await query(
+      `SELECT COUNT(*)::int AS n, COALESCE(SUM(monto),0) AS monto
+         FROM fac_pagos_borrados WHERE factura_id=$1 AND motivo='cancelacion'`, [req.params.id]);
+    res.json({
+      ...f.rows[0],
+      es_cancelada: f.rows[0].estatus === 'cancelada',
+      // El SAT manda sobre esto: si alla esta cancelada, reactivarla aqui seria
+      // poner al sistema a decir algo que no es.
+      cancelada_en_sat: /cancelad/i.test(f.rows[0].estatus_sat || ''),
+      pagos_recuperables: p.rows[0].n,
+      monto_recuperable: parseFloat(p.rows[0].monto) || 0
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch('/:id/reactivar', requireRol('admin', 'gerente'), async (req, res) => {
+  const cli = await getClient();
+  try {
+    await cli.query('BEGIN');
+    const f = await cli.query(
+      `SELECT folio, estatus FROM fac_facturas WHERE id=$1 FOR UPDATE`, [req.params.id]);
+    if (!f.rows.length) { await cli.query('ROLLBACK'); return res.status(404).json({ error: 'Factura no encontrada.' }); }
+    if (f.rows[0].estatus !== 'cancelada') {
+      await cli.query('ROLLBACK');
+      return res.status(400).json({ error: 'Esa factura no está cancelada.' });
+    }
+
+    // Devolver los pagos que se fueron al cancelarla, si se pidio.
+    let devueltos = 0, montoDevuelto = 0;
+    if (req.body?.devolver_pagos !== false) {
+      const b = await cli.query(
+        `SELECT id, monto, fecha_pago, forma_pago, referencia
+           FROM fac_pagos_borrados
+          WHERE factura_id=$1 AND motivo='cancelacion' ORDER BY id`, [req.params.id]);
+      for (const x of b.rows) {
+        await cli.query(
+          `INSERT INTO fac_pagos(factura_id, fecha_pago, monto, forma_pago, referencia, notas, creado_por)
+           VALUES($1,$2,$3,$4,$5,$6,$7)`,
+          [req.params.id, x.fecha_pago, x.monto, x.forma_pago || 'transferencia',
+           x.referencia, 'Devuelto al reactivar la factura.', req.usuario?.id || null]);
+        devueltos++; montoDevuelto += parseFloat(x.monto) || 0;
+      }
+      // Se sacan de la bitacora: ya no estan borrados, y dejarlos ahi haria que
+      // una segunda reactivacion los duplicara.
+      if (b.rows.length)
+        await cli.query(`DELETE FROM fac_pagos_borrados WHERE id = ANY($1)`,
+                        [b.rows.map(x => x.id)]);
+    }
+
+    // Se pone en pendiente para que recalcularEstatus pueda hacer su trabajo:
+    // esa funcion no toca las canceladas, a proposito.
+    await cli.query(
+      `UPDATE fac_facturas SET estatus='pendiente', actualizado_en=NOW() WHERE id=$1`, [req.params.id]);
+    await cli.query('COMMIT');
+
+    await recalcularEstatus(req.params.id);
+    const fin = await query(`SELECT estatus FROM fac_facturas WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true, folio: f.rows[0].folio, estatus: fin.rows[0]?.estatus,
+               pagos_devueltos: devueltos, monto_devuelto: montoDevuelto });
+  } catch (e) {
+    await cli.query('ROLLBACK');
+    res.status(500).json({ error: e.message });
+  } finally { cli.release(); }
+});
+
 // ── FACTURAS MARCADAS COMO CUADRADAS PERO SIN DESGLOSE ────────
 // Quedaron asi por el error de arriba: el guardado fallo a medias y se llevo
 // las partidas dejando la bandera puesta. Aparecen como CUADRADA y ademas

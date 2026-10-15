@@ -7793,11 +7793,54 @@ async function detalleFactura(id) {
       </div>` : '<p class="empty">Sin desglose capturado.</p>'}
     </div>
     <div class="form-actions">
+      ${f.estatus === 'cancelada' && (ME.rol === 'admin' || ME.rol === 'gerente')
+        ? `<button class="btn bo bsm" onclick="reactivarFactura(${id})"
+                   title="Deshacer una cancelación hecha por error">↩ Reactivar factura</button>` : ''}
       ${canFacturar()?`<button class="btn bg bsm" onclick="closeModal('modal-detalle-factura');openRH(${id})">Editar desglose</button>
       <button class="btn bsuc bsm" onclick="closeModal('modal-detalle-factura');openPago(${id})">Registrar pago</button>`:''}
       <button class="btn bo" onclick="closeModal('modal-detalle-factura')">Cerrar</button>
     </div>`;
   } catch(e) { $('modal-detalle-factura-body').innerHTML = `<h4>Error</h4><p>${e.message}</p>`; }
+}
+
+// Deshacer una cancelacion hecha por error. Antes de tocar nada se le pregunta
+// al servidor que implica: si el SAT la da por cancelada, y cuantos pagos se
+// pueden devolver.
+async function reactivarFactura(id) {
+  const SALTO = String.fromCharCode(10);
+  let d;
+  try { d = await api(`/facturas/${id}/reactivable`); }
+  catch (e) { return toast(e.message, 'err'); }
+  if (!d.es_cancelada) return toast('Esa factura no esta cancelada.', 'warn');
+
+  const folio = d.folio || ('#' + id);
+  // El SAT manda: si alla esta cancelada, reactivarla aqui pondria al sistema a
+  // decir algo que fiscalmente no es cierto. No se bloquea, pero se advierte.
+  const avisoSAT = d.cancelada_en_sat
+    ? SALTO + SALTO + '*** OJO: el SAT la reporta CANCELADA. ***' + SALTO
+      + 'Reactivarla aqui no la revive ante el SAT: el sistema diria una cosa y' + SALTO
+      + 'el SAT otra. Hazlo solo si la cancelacion ante el SAT no se completo.'
+    : '';
+  const avisoPagos = d.pagos_recuperables
+    ? SALTO + SALTO + `Se le devolveran ${d.pagos_recuperables} pago`
+      + (d.pagos_recuperables != 1 ? 's' : '') + ` por ${fmt(d.monto_recuperable)},`
+      + SALTO + 'que se habian quitado al cancelarla.'
+    : SALTO + SALTO + 'No tiene pagos que devolver: quedara sin cobrar.';
+
+  if (!await confirm2(`Reactivar la factura ${folio} por ${fmt(d.total)}?`
+      + SALTO + SALTO + 'Volvera a contar como vigente en todos los reportes.'
+      + avisoPagos + avisoSAT)) return;
+
+  try {
+    const r = await api(`/facturas/${id}/reactivar`, {
+      method: 'PATCH', body: JSON.stringify({ devolver_pagos: true })
+    });
+    toast(`${r.folio || folio} reactivada, queda como ${r.estatus}.`
+      + (r.pagos_devueltos ? ` Se devolvieron ${r.pagos_devueltos} pago`
+          + (r.pagos_devueltos != 1 ? 's' : '') + ` por ${fmt(r.monto_devuelto)}.` : ''));
+    closeModal('modal-detalle-factura');
+    if ($('fac-table')) { loadFacturas(); avisarCanceladasConPagos(); }
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 function showTab(el, panelId) {
