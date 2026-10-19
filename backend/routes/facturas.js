@@ -55,6 +55,24 @@ const { permiso, NIVEL, permisosDeUsuario } = require('../middleware/permiso');
 // Guarda en la bitacora los pagos de una factura y los devuelve. Recibe el
 // cliente de la transaccion para que el registro y el borrado caigan juntos: o
 // se anota y se borra, o no pasa ninguna de las dos.
+// ── Bitacora de la factura ────────────────────────────────────
+// fac_bitacora existia en el esquema desde el principio pero NADA escribia en
+// ella: cancelar una factura no dejaba rastro de quien ni cuando, y despues no
+// habia manera de saber por que estaba cancelada. Esto la pone a funcionar.
+//
+// Recibe el cliente de la transaccion cuando hay una, para que la anotacion y
+// el cambio caigan juntos. Nunca revienta la operacion: una bitacora que falla
+// no debe impedir cancelar una factura.
+async function anotarEnFactura(cli, usuario, accion, facturaId, detalle) {
+  try {
+    await (cli || { query }).query(
+      `INSERT INTO fac_bitacora (usuario_id, accion, tabla, registro_id, detalle)
+       VALUES ($1,$2,'fac_facturas',$3,$4)`,
+      [usuario?.id || null, accion, facturaId,
+       [usuario?.nombre || 'desconocido', detalle].filter(Boolean).join(' · ')]);
+  } catch (e) { console.warn('Bitácora de factura:', e.message); }
+}
+
 async function anotarPagosBorrados(cli, facturaId, motivo, usuario) {
   const r = await cli.query(`
     INSERT INTO fac_pagos_borrados
@@ -449,6 +467,26 @@ router.get('/pagos-borrados', requireRol('admin', 'gerente', 'tesoreria'), async
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── HISTORIAL DE UNA FACTURA ──────────────────────────────────
+// Quien la cancelo, cuando y por que. Solo trae lo ocurrido desde que esta
+// bitacora existe: lo anterior no se registro y no hay de donde sacarlo.
+router.get('/:id/bitacora', async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT b.accion, b.detalle, u.nombre AS usuario,
+             TO_CHAR(b.creado_en,'YYYY-MM-DD HH24:MI') AS cuando
+        FROM fac_bitacora b
+        LEFT JOIN fac_usuarios u ON u.id = b.usuario_id
+       WHERE b.tabla = 'fac_facturas' AND b.registro_id = $1
+       ORDER BY b.creado_en DESC, b.id DESC`, [req.params.id]);
+    // Si no hay nada anotado, al menos se dice cuando se toco por ultima vez.
+    const f = await query(
+      `SELECT TO_CHAR(actualizado_en,'YYYY-MM-DD HH24:MI') AS ultimo_cambio, estatus
+         FROM fac_facturas WHERE id=$1`, [req.params.id]);
+    res.json({ movimientos: r.rows, ...(f.rows[0] || {}) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── REACTIVAR UNA FACTURA CANCELADA POR ERROR ─────────────────
 // Deshace una cancelacion hecha en el sistema. Dos cosas importantes:
 //
@@ -518,6 +556,9 @@ router.patch('/:id/reactivar', requireRol('admin', 'gerente'), async (req, res) 
     // esa funcion no toca las canceladas, a proposito.
     await cli.query(
       `UPDATE fac_facturas SET estatus='pendiente', actualizado_en=NOW() WHERE id=$1`, [req.params.id]);
+    await anotarEnFactura(cli, req.usuario, 'reactivar', req.params.id,
+      (String(req.body?.motivo || '').trim() || 'Sin motivo anotado')
+      + (devueltos ? ` · se devolvieron ${devueltos} pago(s) por ${montoDevuelto.toFixed(2)}` : ''));
     await cli.query('COMMIT');
 
     await recalcularEstatus(req.params.id);
@@ -832,6 +873,11 @@ router.patch('/:id/cancelar', requireRol('admin', 'capturista', 'gerente', 'teso
     await client.query(`DELETE FROM fac_pagos WHERE factura_id=$1`, [req.params.id]);
     await client.query(
       `UPDATE fac_facturas SET estatus='cancelada',actualizado_en=NOW() WHERE id=$1`, [req.params.id]);
+    // Queda anotado quien la cancelo, cuando, por que y que pagos se llevo.
+    const montoPagos = pagos.reduce((a, x) => a + (parseFloat(x.monto) || 0), 0);
+    await anotarEnFactura(client, req.usuario, 'cancelar', req.params.id,
+      (String(req.body?.motivo || '').trim() || 'Sin motivo anotado')
+      + (pagos.length ? ` · se quitaron ${pagos.length} pago(s) por ${montoPagos.toFixed(2)}` : ''));
     await client.query('COMMIT');
     res.json({
       ok: true,
