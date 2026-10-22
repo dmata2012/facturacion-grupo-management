@@ -1134,18 +1134,19 @@ async function felicitacionPendiente(empleadoId, hoyISO) {
     const sem = pts.semanas.find(s => s.desde === lunesPasada);
     if (!sem || !sem.ganador || sem.ganador.empleado_id !== empleadoId) return null;
 
-    const cfg = await query(`SELECT valor FROM fac_config WHERE clave='bono_semanal_puntualidad'`);
     // Se marca como visto en cuanto se devuelve: si el kiosco se cierra antes de
     // que lo lean, se pierde, pero es preferible a que reaparezca en cada marca.
     await query(
       `INSERT INTO fac_puntualidad_avisos(empleado_id, semana) VALUES($1,$2::date)
        ON CONFLICT DO NOTHING`, [empleadoId, lunesPasada]);
 
+    // El importe NO viaja: el kiosco esta a la vista de todos y el sueldo de
+    // cada quien no se anuncia en una pantalla por la que pasa la oficina.
+    // El monto se ve en Bono de Puntualidad, que tiene su propio permiso.
     return {
       semana_desde: lunesPasada, semana_hasta: viernesPasada,
       puntos: sem.ganador.puntos,
-      dias: sem.dias.length,
-      monto: Math.max(0, parseFloat(cfg.rows[0]?.valor || 0) || 0)
+      dias: sem.dias.length
     };
   } catch (e) { console.warn('Felicitación de puntualidad:', e.message); return null; }
 }
