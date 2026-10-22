@@ -684,6 +684,7 @@ canvas{max-height:230px}
   <symbol id="i-inbox-out" viewBox="0 0 24 24"><path d="M12 12V3m0 0L8.5 6.5M12 3l3.5 3.5"/><path d="M3 14h4l1.5 3h7L17 14h4v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
   <symbol id="i-receipt" viewBox="0 0 24 24"><path d="M5 3h14v18l-2.3-1.5L14.4 21 12 19.5 9.6 21l-2.3-1.5L5 21z"/><path d="M8.5 8h7M8.5 12h7M8.5 15.5h4"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 1.9"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.2"/><path d="M3.5 10h17M8 3.5v3M16 3.5v3"/><path d="M8 14h3"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></symbol>
   <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/><path d="M14.5 5.5l3 3"/></symbol>
   <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16.5 5.5a3.2 3.2 0 0 1 0 6.4"/><path d="M17.5 14.5a6 6 0 0 1 3.5 5.5"/></symbol>
@@ -794,6 +795,7 @@ canvas{max-height:230px}
         </button>
         <div class="nav-group-items">
           <a href="#" onclick="nav('cajaChica')" id="nav-cajaChica"><span class="ni"><svg><use href="#i-wallet"/></svg></span> Caja Chica</a>
+          <a href="#" onclick="nav('programacionPagos')" id="nav-programacionPagos"><span class="ni"><svg><use href="#i-calendar"/></svg></span> Programación de Pagos</a>
         </div>
       </div>
 
@@ -866,6 +868,8 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-cc-devuelto"><div class="modal modal-sm" id="modal-cc-devuelto-body"></div></div>
 <div class="overlay" id="modal-cc-informe"><div class="modal" style="width:min(1000px,96vw)" id="modal-cc-informe-body"></div></div>
 <div class="overlay" id="modal-cc-cats"><div class="modal" style="width:min(1000px,96vw);position:relative" id="modal-cc-cats-body"></div></div>
+<div class="overlay" id="modal-pprog"><div class="modal modal-sm" id="modal-pprog-body"></div></div>
+<div class="overlay" id="modal-pprog-pagar"><div class="modal modal-sm" id="modal-pprog-pagar-body"></div></div>
 <div class="overlay" id="modal-cambiar-clave"><div class="modal modal-sm" id="modal-cambiar-clave-body"></div></div>
 <div class="overlay" id="modal-vac-editar-tomados"><div class="modal modal-sm" id="modal-vac-editar-tomados-body"></div></div>
 <div class="overlay" id="modal-cc-permisos"><div class="modal" id="modal-cc-permisos-body"></div></div>
@@ -1088,8 +1092,8 @@ async function cargarMisPermisos() {
 
 // Páginas permitidas por rol restringido
 const PAGES_CAPTURISTA         = ['facturas', 'empleados', 'vacaciones'];
-const PAGES_TESORERIA          = ['cajaChica', 'bancos', 'vacaciones'];
-const PAGES_TESORERIA_CONSULTA = ['cajaChica', 'bancos', 'vacaciones'];
+const PAGES_TESORERIA          = ['cajaChica', 'programacionPagos', 'bancos', 'vacaciones'];
+const PAGES_TESORERIA_CONSULTA = ['cajaChica', 'programacionPagos', 'bancos', 'vacaciones'];
 const PAGES_CHECADOR           = ['checador'];
 
 // Una factura se traba (no se edita ni se borra) cuando su desglose esta
@@ -1369,13 +1373,15 @@ function nav(page) {
     concentrado:'Concentrado Anual', otrosIngresos:'Otros Ingresos S/F',
     expedienteAsistencia:'Expediente de Asistencia',
     bonoPuntualidad:'Bono de Puntualidad',
-    mensualDireccion:'Reporte Mensual'
+    mensualDireccion:'Reporte Mensual',
+    programacionPagos:'Programación de Pagos'
   };
   const mt = $('mt-title');
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
     dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones, asistencia, concentrado, otrosIngresos,
-    mensualDireccion, expedienteAsistencia, bonoPuntualidad, miAsistencia
+    mensualDireccion, expedienteAsistencia, bonoPuntualidad, miAsistencia,
+    programacionPagos
   };
   if (pages[page]) pages[page]();
 }
@@ -18509,6 +18515,419 @@ async function imprimirSolicitudVac(id) {
       </div>`;
     openModal('modal-vac-print');
   } catch(e) { toast(e.message, 'err'); }
+}
+
+// ══ PROGRAMACIÓN DE PAGOS (TESORERÍA) ═══════
+// Agenda de lo que hay que pagar y cuándo. Es independiente de Gastos (CxP):
+// aquí se capturan los compromisos a mano y marcar pagado solo mueve el estatus
+// de la agenda, no genera movimiento bancario.
+//
+// Los permisos salen de la matriz; se conserva la regla vieja por rol como
+// respaldo, para no dejar la pantalla sin botones si el motor está apagado.
+function ppPuedeCapturar() { return puedeO('programacionPagos', NIVEL.CAPTURAR, canWrite()); }
+function ppPuedeEditar()   { return puedeO('programacionPagos', NIVEL.EDITAR,   canWrite()); }
+function ppPuedeTodo()     { return puedeO('programacionPagos', NIVEL.TODO,     canAdmin()); }
+
+const PP_PRIORIDAD = {
+  alta:   { etiqueta:'Alta',   color:'#be123c', fondo:'#fff1f2', borde:'#fecdd3' },
+  normal: { etiqueta:'Normal', color:'#475569', fondo:'#f8fafc', borde:'#e2e8f0' },
+  baja:   { etiqueta:'Baja',   color:'#0891b2', fondo:'#ecfeff', borde:'#cffafe' }
+};
+
+async function programacionPagos() {
+  $('content').innerHTML = `
+    <style>
+      .pp-hero{background:linear-gradient(135deg,#064e3b 0%,#047857 55%,#059669 100%);
+        border-radius:16px;padding:16px 20px;color:#fff;margin-bottom:14px;position:relative;overflow:hidden}
+      .pp-hero::after{content:'📅';position:absolute;right:18px;bottom:-18px;font-size:88px;opacity:.09;line-height:1}
+      .pp-hero-t{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;position:relative;z-index:1}
+      .pp-hero h2{margin:0;font-size:18px;font-weight:900;letter-spacing:-.3px}
+      .pp-hero .sub{font-size:11px;opacity:.8;margin-top:1px}
+      .pp-kpis{display:flex;flex-wrap:wrap;margin-top:14px;position:relative;z-index:1;
+        background:rgba(0,0,0,.16);border-radius:11px;overflow:hidden}
+      .pp-kpi{flex:1;min-width:130px;padding:9px 14px;border-right:1px solid rgba(255,255,255,.12)}
+      .pp-kpi:last-child{border-right:none}
+      .pp-kpi .l{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.9px;opacity:.72}
+      .pp-kpi .v{font-size:17px;font-weight:900;line-height:1.15;margin-top:1px;letter-spacing:-.4px}
+      .pp-kpi .s{font-size:9.5px;opacity:.7;margin-top:1px}
+      .pp-tool{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+      .pp-f{border:1.5px solid var(--border);border-radius:10px;padding:8px 11px;
+        font-size:12.5px;font-weight:700;background:#fff;color:#475569}
+      .pp-f:focus{outline:none;border-color:#059669;box-shadow:0 0 0 3px rgba(5,150,105,.13)}
+      .pp-buscar{flex:1;min-width:190px;display:flex;align-items:center;gap:8px;background:#fff;
+        border:1.5px solid var(--border);border-radius:10px;padding:8px 12px}
+      .pp-buscar input{flex:1;border:none;outline:none;font-size:13px;background:none;color:var(--dark)}
+      .pp-pill{display:inline-flex;align-items:center;gap:4px;font-size:9.5px;font-weight:900;
+        padding:2px 9px;border-radius:99px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;
+        border:1px solid transparent}
+      .pp-dias{font-size:10px;font-weight:800;color:var(--muted);margin-top:1px}
+      tr.pp-vencido td{background:#fff7f7}
+      tr.pp-cerrado td{opacity:.62}
+    </style>
+
+    <div class="pp-hero">
+      <div class="pp-hero-t">
+        <div>
+          <h2>Programación de Pagos</h2>
+          <div class="sub">Agenda de compromisos por pagar · Captura independiente de Gastos (CxP)</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn bo bsm" onclick="exportarPprogExcel()" style="background:rgba(255,255,255,.14);
+                  border-color:rgba(255,255,255,.22);color:#fff">⬇ Excel</button>
+          ${ppPuedeCapturar()?`<button class="btn bsm" onclick="openPprog()"
+                  style="background:#fff;color:#047857;font-weight:900;border:none">＋ Programar pago</button>`:''}
+        </div>
+      </div>
+      <div class="pp-kpis" id="pp-kpis"></div>
+    </div>
+
+    <div class="pp-tool">
+      <div class="pp-buscar">
+        <span style="color:#94a3b8;font-size:14px">🔍</span>
+        <input id="pp-buscar" placeholder="Buscar por beneficiario, concepto, referencia o nota…" oninput="filtrarPprog()">
+      </div>
+      <select id="pp-estatus" class="pp-f" onchange="cargarPprog()">
+        <option value="por_pagar">Por pagar</option>
+        <option value="vencido">Solo vencidos</option>
+        <option value="pagado">Pagados</option>
+        <option value="cancelado">Cancelados</option>
+        <option value="">Todos</option>
+      </select>
+      <select id="pp-prioridad" class="pp-f" onchange="cargarPprog()">
+        <option value="">Toda prioridad</option>
+        <option value="alta">Alta</option>
+        <option value="normal">Normal</option>
+        <option value="baja">Baja</option>
+      </select>
+      <select id="pp-cuenta" class="pp-f" onchange="cargarPprog()"><option value="">Toda cuenta</option></select>
+      <input type="date" id="pp-desde" onchange="cargarPprog()" class="pp-f" title="Desde (fecha programada)">
+      <input type="date" id="pp-hasta" onchange="cargarPprog()" class="pp-f" title="Hasta (fecha programada)">
+      <button class="btn bo bsm" onclick="pprogPreset('mes')">Este mes</button>
+      <button class="btn bo bsm" onclick="pprogPreset('30')">Próximos 30 días</button>
+      <button class="btn bo bsm" onclick="pprogPreset('todo')">Sin filtro de fecha</button>
+    </div>
+    <div id="pp-body"><p class="empty">Cargando…</p></div>`;
+
+  await pprogCargarCuentas();
+  cargarPprog();
+}
+
+async function pprogCargarCuentas(forzar) {
+  if (!forzar && window._ppCuentas) return;
+  try { window._ppCuentas = await api('/bancos/cuentas?activa=true'); }
+  catch(e) { window._ppCuentas = []; }
+  const sel = $('pp-cuenta');
+  if (sel) sel.innerHTML = '<option value="">Toda cuenta</option>' +
+    window._ppCuentas.map(c => `<option value="${c.id}">${ppNombreCuenta(c)}</option>`).join('');
+}
+
+function ppNombreCuenta(c) {
+  const nombre = (c.alias || '').trim() || c.banco;
+  const fin = (c.numero_cuenta || '').slice(-4);
+  return fin ? `${nombre} ····${fin}` : nombre;
+}
+
+function pprogPreset(tipo) {
+  const hoy = new Date(), y = hoy.getFullYear(), pad = n => String(n).padStart(2,'0');
+  if (tipo === 'mes') {
+    $('pp-desde').value = `${y}-${pad(hoy.getMonth()+1)}-01`;
+    $('pp-hasta').value = new Date(y, hoy.getMonth()+1, 0).toISOString().slice(0,10);
+  } else if (tipo === '30') {
+    const fin = new Date(hoy); fin.setDate(fin.getDate() + 30);
+    $('pp-desde').value = hoy.toISOString().slice(0,10);
+    $('pp-hasta').value = fin.toISOString().slice(0,10);
+  } else {
+    $('pp-desde').value = '';
+    $('pp-hasta').value = '';
+  }
+  cargarPprog();
+}
+
+let _ppBuscarTO = null;
+function filtrarPprog() { clearTimeout(_ppBuscarTO); _ppBuscarTO = setTimeout(cargarPprog, 250); }
+
+async function cargarPprog() {
+  const p = [];
+  const e = $('pp-estatus')?.value, d = $('pp-desde')?.value, h = $('pp-hasta')?.value;
+  const pr = $('pp-prioridad')?.value, cu = $('pp-cuenta')?.value;
+  const b = ($('pp-buscar')?.value || '').trim();
+  if (e)  p.push(`estatus=${e}`);
+  if (d)  p.push(`desde=${d}`);
+  if (h)  p.push(`hasta=${h}`);
+  if (pr) p.push(`prioridad=${pr}`);
+  if (cu) p.push(`cuenta_id=${cu}`);
+  if (b)  p.push(`buscar=${encodeURIComponent(b)}`);
+  $('pp-body').innerHTML = '<p class="empty">Cargando…</p>';
+  try {
+    const r = await api(`/pagos-programados${p.length?'?'+p.join('&'):''}`);
+    window._ppData = r;
+    pintarPprogKpis(r.totales);
+    pintarPprogTabla(r);
+  } catch(err) { $('pp-body').innerHTML = `<p class="empty">${err.message}</p>`; }
+}
+
+function pintarPprogKpis(t) {
+  const el = $('pp-kpis');
+  if (!el || !t) return;
+  const kpi = (l, v, s) => `<div class="pp-kpi"><div class="l">${l}</div><div class="v">${v}</div>
+    ${s?`<div class="s">${s}</div>`:''}</div>`;
+  el.innerHTML =
+    kpi('Por pagar',    fmt(t.por_pagar),  `${t.n_por_pagar} compromiso${t.n_por_pagar==1?'':'s'}`) +
+    kpi('Vencido',      fmt(t.vencido),    `${t.n_vencidos} con fecha pasada`) +
+    kpi('Próximos 7 días', fmt(t.proximos_7), 'Lo que entra esta semana') +
+    kpi('Pagado',       fmt(t.pagado),     `${t.n_pagados} liquidado${t.n_pagados==1?'':'s'}`);
+}
+
+function pintarPprogTabla(r) {
+  const d = r.data || [];
+  if (!d.length) {
+    const G = r.global || {};
+    $('pp-body').innerHTML = `<p class="empty">No hay pagos programados con estos filtros.${
+      parseInt(G.n||0) > 0
+        ? `<br><small style="color:var(--muted)">Hay ${G.n} programado${G.n==1?'':'s'} en total, entre ${fmtDate(G.primera)} y ${fmtDate(G.ultima)}. Prueba con <strong>Sin filtro de fecha</strong> o cambiando el estatus.</small>`
+        : `<br><small style="color:var(--muted)">Todavía no se ha capturado ninguno.</small>`}</p>`;
+    return;
+  }
+  $('pp-body').innerHTML = `
+  <div class="card" style="padding:0;overflow:hidden">
+    <div class="tscroll"><table>
+      <thead><tr>
+        <th>Programado</th><th>Beneficiario</th><th>Concepto</th><th>Cuenta prevista</th>
+        <th>Prioridad</th><th style="text-align:right">Monto</th><th>Estatus</th><th>Acciones</th>
+      </tr></thead>
+      <tbody>${d.map(p => ppFila(p)).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function ppFila(p) {
+  const pr = PP_PRIORIDAD[p.prioridad] || PP_PRIORIDAD.normal;
+  const cerrado = p.estatus !== 'programado';
+  const clase = p.vencido ? 'pp-vencido' : cerrado ? 'pp-cerrado' : '';
+
+  // Los días solo informan mientras el pago siga pendiente; una vez pagado o
+  // cancelado la cuenta regresiva deja de significar algo.
+  let dias = '';
+  if (p.estatus === 'programado') {
+    const n = parseInt(p.dias);
+    dias = n < 0  ? `<div class="pp-dias" style="color:var(--danger)">vencido hace ${Math.abs(n)} d</div>`
+         : n === 0 ? `<div class="pp-dias" style="color:var(--warning)">es hoy</div>`
+         : `<div class="pp-dias">en ${n} d</div>`;
+  }
+
+  const estatus = p.vencido
+    ? `<span class="pp-pill" style="background:#fef2f2;border-color:#fecaca;color:#b91c1c">⚠ Vencido</span>`
+    : p.estatus === 'pagado'
+      ? `<span class="pp-pill" style="background:#f0fdf4;border-color:#bbf7d0;color:#166534">✔ Pagado</span>`
+      : p.estatus === 'cancelado'
+        ? `<span class="pp-pill" style="background:#f1f5f9;border-color:#e2e8f0;color:#64748b">✕ Cancelado</span>`
+        : `<span class="pp-pill" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8">◷ Programado</span>`;
+
+  const acciones = [];
+  if (ppPuedeEditar() && p.estatus === 'programado')
+    acciones.push(`<button class="btn bsuc bsm" onclick="openPprogPagar(${p.id})" title="Marcar como pagado">✔ Pagar</button>`);
+  if (ppPuedeEditar() && p.estatus === 'pagado')
+    acciones.push(`<button class="btn bo bsm" onclick="revertirPprogPago(${p.id})" title="Regresar a programado">↩</button>`);
+  if (ppPuedeEditar() && p.estatus !== 'pagado')
+    acciones.push(`<button class="btn bg bsm" onclick="openPprog(${p.id})" title="Editar">✏️</button>`);
+  if (ppPuedeEditar() && p.estatus === 'programado')
+    acciones.push(`<button class="btn bd bsm" onclick="cancelarPprog(${p.id})" title="Cancelar este pago">✕</button>`);
+  if (ppPuedeEditar() && p.estatus === 'cancelado')
+    acciones.push(`<button class="btn bo bsm" onclick="reactivarPprog(${p.id})" title="Reactivar">↩</button>`);
+  if (ppPuedeTodo())
+    acciones.push(`<button class="btn bd bsm" onclick="borrarPprog(${p.id})" title="Borrar definitivamente"
+      style="background:#fff0f0;border-color:#ffd7d7">🗑️</button>`);
+
+  return `<tr class="${clase}">
+    <td style="white-space:nowrap"><strong>${fmtDate(p.fecha_programada)}</strong>${dias}</td>
+    <td style="font-weight:700">${p.beneficiario}${
+      p.referencia?`<br><span style="color:var(--muted);font-size:11px">Ref. ${p.referencia}</span>`:''}</td>
+    <td style="font-size:12px">${p.concepto || '<span style="color:var(--muted)">—</span>'}${
+      p.notas?`<br><span style="color:var(--muted);font-size:10.5px">${p.notas.replace(/\n/g,' · ')}</span>`:''}</td>
+    <td style="font-size:11.5px">${p.cuenta || '<span style="color:var(--muted)">Sin definir</span>'}
+      <div style="color:var(--muted);font-size:10px">${p.forma_pago || ''}</div></td>
+    <td><span class="pp-pill" style="background:${pr.fondo};border-color:${pr.borde};color:${pr.color}">${pr.etiqueta}</span></td>
+    <td style="text-align:right;font-weight:800;white-space:nowrap">${fmt(p.monto)}</td>
+    <td>${estatus}${p.estatus==='pagado'&&p.pagado_en?`<div style="color:var(--muted);font-size:10px;margin-top:2px">${fmtDate(p.pagado_en)}</div>`:''}</td>
+    <td style="white-space:nowrap">${acciones.join(' ') || '<span style="color:var(--muted);font-size:11px">—</span>'}</td>
+  </tr>`;
+}
+
+// ── Alta y edición ──────────────────────────
+async function openPprog(id = null) {
+  await pprogCargarCuentas();
+  const hoy = new Date().toISOString().slice(0,10);
+  $('modal-pprog-body').innerHTML = `
+  <h4 style="margin-bottom:14px">${id?'Editar':'Nuevo'} pago programado</h4>
+  <div class="fg">
+    <div class="fi full"><label>Beneficiario *</label>
+      <input id="pp-c-benef" placeholder="A quién se le paga"></div>
+    <div class="fi full"><label>Concepto</label>
+      <input id="pp-c-concepto" placeholder="Renta de oficina, IMSS, crédito…"></div>
+    <div class="fi"><label>Monto *</label>
+      <input type="number" id="pp-c-monto" min="0.01" step="0.01" placeholder="0.00"></div>
+    <div class="fi"><label>Fecha programada *</label>
+      <input type="date" id="pp-c-fecha" value="${hoy}"></div>
+    <div class="fi"><label>Prioridad</label>
+      <select id="pp-c-prioridad">
+        <option value="alta">Alta</option>
+        <option value="normal" selected>Normal</option>
+        <option value="baja">Baja</option>
+      </select></div>
+    <div class="fi"><label>Forma de pago</label>
+      <select id="pp-c-forma">
+        <option value="transferencia">Transferencia</option>
+        <option value="cheque">Cheque</option>
+        <option value="efectivo">Efectivo</option>
+        <option value="domiciliado">Domiciliado</option>
+        <option value="otro">Otro</option>
+      </select></div>
+    <div class="fi full"><label>Cuenta prevista</label>
+      <select id="pp-c-cuenta">
+        <option value="">Sin definir</option>
+        ${(window._ppCuentas||[]).map(c => `<option value="${c.id}">${ppNombreCuenta(c)}</option>`).join('')}
+      </select>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:4px">
+        Solo deja asentado de dónde saldría el dinero. No genera movimiento en Bancos.
+      </div></div>
+    <div class="fi full"><label>Referencia</label>
+      <input id="pp-c-ref" placeholder="Folio, contrato o número de recibo"></div>
+    <div class="fi full"><label>Notas</label>
+      <textarea id="pp-c-notas" rows="2" placeholder="Observaciones"></textarea></div>
+  </div>
+  <div class="form-actions">
+    <button class="btn bo" onclick="closeModal('modal-pprog')">Cancelar</button>
+    <button class="btn bs" onclick="savePprog(${id||null})">Guardar</button>
+  </div>`;
+  if (id) {
+    try {
+      const p = await api(`/pagos-programados/${id}`);
+      $('pp-c-benef').value     = p.beneficiario     || '';
+      $('pp-c-concepto').value  = p.concepto         || '';
+      $('pp-c-monto').value     = p.monto            || '';
+      $('pp-c-fecha').value     = p.fecha_programada || hoy;
+      $('pp-c-prioridad').value = p.prioridad        || 'normal';
+      $('pp-c-forma').value     = p.forma_pago       || 'transferencia';
+      $('pp-c-cuenta').value    = p.cuenta_id        || '';
+      $('pp-c-ref').value       = p.referencia       || '';
+      $('pp-c-notas').value     = p.notas            || '';
+    } catch(e) { toast(e.message, 'err'); }
+  }
+  openModal('modal-pprog');
+}
+
+async function savePprog(id) {
+  const body = {
+    beneficiario    : $('pp-c-benef').value.trim(),
+    concepto        : $('pp-c-concepto').value.trim(),
+    monto           : $('pp-c-monto').value,
+    fecha_programada: $('pp-c-fecha').value,
+    prioridad       : $('pp-c-prioridad').value,
+    forma_pago      : $('pp-c-forma').value,
+    cuenta_id       : $('pp-c-cuenta').value || null,
+    referencia      : $('pp-c-ref').value.trim(),
+    notas           : $('pp-c-notas').value.trim()
+  };
+  if (!body.beneficiario)     return toast('El beneficiario es obligatorio.', 'err');
+  if (!body.fecha_programada) return toast('La fecha programada es obligatoria.', 'err');
+  if (!(parseFloat(body.monto) > 0)) return toast('El monto debe ser mayor a cero.', 'err');
+  try {
+    if (id) await api(`/pagos-programados/${id}`, { method:'PUT',  body: JSON.stringify(body) });
+    else    await api('/pagos-programados',        { method:'POST', body: JSON.stringify(body) });
+    toast(id ? 'Pago programado actualizado.' : 'Pago programado.');
+    closeModal('modal-pprog');
+    cargarPprog();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+// ── Marcar pagado ───────────────────────────
+function openPprogPagar(id) {
+  const p = (window._ppData?.data || []).find(x => x.id === id);
+  if (!p) return;
+  $('modal-pprog-pagar-body').innerHTML = `
+  <h4 style="margin-bottom:4px">Marcar como pagado</h4>
+  <p style="font-size:12.5px;color:var(--muted);margin-bottom:14px">
+    ${p.beneficiario} · <strong style="color:var(--dark)">${fmt(p.monto)}</strong>
+    · programado para ${fmtDate(p.fecha_programada)}
+  </p>
+  <div class="fg">
+    <div class="fi"><label>Fecha de pago</label>
+      <input type="date" id="pp-p-fecha" value="${new Date().toISOString().slice(0,10)}"></div>
+    <div class="fi"><label>Referencia del pago</label>
+      <input id="pp-p-ref" placeholder="Folio o número de operación"></div>
+    <div class="fi full"><label>Notas</label>
+      <textarea id="pp-p-notas" rows="2" placeholder="Opcional"></textarea></div>
+  </div>
+  <div style="background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:9px 11px;
+              font-size:11px;color:var(--muted);margin-top:4px">
+    Esto cierra el compromiso en la agenda. <strong>No</strong> registra el movimiento en Bancos.
+  </div>
+  <div class="form-actions">
+    <button class="btn bo" onclick="closeModal('modal-pprog-pagar')">Cancelar</button>
+    <button class="btn bsuc" onclick="confirmarPprogPagar(${id})">Confirmar pago</button>
+  </div>`;
+  openModal('modal-pprog-pagar');
+}
+
+async function confirmarPprogPagar(id) {
+  try {
+    await api(`/pagos-programados/${id}/pagar`, { method:'PATCH', body: JSON.stringify({
+      pagado_en      : $('pp-p-fecha').value,
+      pago_referencia: $('pp-p-ref').value.trim(),
+      pago_notas     : $('pp-p-notas').value.trim()
+    })});
+    toast('Pago registrado en la agenda.');
+    closeModal('modal-pprog-pagar');
+    cargarPprog();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function revertirPprogPago(id) {
+  if (!await confirm2('¿Regresar este pago a "programado"? Se borra la fecha y referencia del pago.')) return;
+  try {
+    await api(`/pagos-programados/${id}/pagar`, { method:'PATCH', body: JSON.stringify({ revertir:true }) });
+    toast('El pago volvió a programado.');
+    cargarPprog();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+// ── Cancelar / reactivar / borrar ───────────
+async function cancelarPprog(id) {
+  if (!await confirm2('¿Cancelar este pago programado? Queda a la vista como cancelado, no se borra.')) return;
+  try {
+    await api(`/pagos-programados/${id}/cancelar`, { method:'PATCH', body: JSON.stringify({}) });
+    toast('Pago cancelado.');
+    cargarPprog();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function reactivarPprog(id) {
+  try {
+    await api(`/pagos-programados/${id}/cancelar`, { method:'PATCH', body: JSON.stringify({ reactivar:true }) });
+    toast('Pago reactivado.');
+    cargarPprog();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function borrarPprog(id) {
+  if (!await confirm2('¿Borrar definitivamente este pago programado? No se puede deshacer.')) return;
+  try {
+    await api(`/pagos-programados/${id}`, { method:'DELETE' });
+    toast('Pago programado borrado.');
+    cargarPprog();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+function exportarPprogExcel() {
+  const d = window._ppData?.data || [];
+  if (!d.length) return toast('No hay nada que exportar con estos filtros.', 'err');
+  exportToExcel(
+    d.map(p => ({ ...p, estatus_txt: p.vencido ? 'vencido' : p.estatus })),
+    [['fecha_programada','Programado'],['beneficiario','Beneficiario'],['concepto','Concepto'],
+     ['monto','Monto'],['prioridad','Prioridad'],['cuenta','Cuenta prevista'],['forma_pago','Forma de pago'],
+     ['referencia','Referencia'],['estatus_txt','Estatus'],['pagado_en','Pagado el'],
+     ['pago_referencia','Ref. del pago'],['notas','Notas']],
+    'Programacion_Pagos');
 }
 
 // ══ CAJA CHICA (TESORERÍA) ══════════════════

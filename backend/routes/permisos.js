@@ -36,6 +36,8 @@ const MODULOS_SEED = [
   { clave:'bonoPuntualidad', nombre:'Bono de Puntualidad', icono:'🏅', grupo:'Recursos Humanos', orden:36,
     nota:'Quién gana el bono del periodo y de cuánto es. Se asigna aparte del Reloj Checador porque muestra importes: en Ver solo se consulta, y de Editar en adelante se pueden cambiar los montos de cada colaborador.' },
   { clave:'cajaChica',    nombre:'Caja Chica',          icono:'💵', grupo:'Tesorería',            orden:40 },
+  { clave:'programacionPagos', nombre:'Programación de Pagos', icono:'📅', grupo:'Tesorería',          orden:41,
+    nota:'Agenda de lo que hay que pagar y cuándo. Se captura aparte: no lee los gastos de CxP ni genera movimiento bancario. En Editar además se marca pagado y se cancela.' },
   { clave:'bancos',       nombre:'Cuentas Bancarias',   icono:'🏦', grupo:'Bancos',               orden:50 },
   { clave:'reportes',     nombre:'Reportes',            icono:'📋', grupo:'Dirección',            orden:8  },
   { clave:'estadisticas', nombre:'Estadísticas',        icono:'📈', grupo:'Dirección',            orden:9  },
@@ -66,11 +68,11 @@ const PERFILES_SEED = [
 
   { clave:'tesoreria', nombre:'Tesorería', color:'#059669', es_sistema:true,
     descripcion:'Maneja caja chica y bancos.',
-    permisos: { cajaChica: T, bancos: E, vacaciones: C, gastos: E, dashboard: V } },
+    permisos: { cajaChica: T, programacionPagos: T, bancos: E, vacaciones: C, gastos: E, dashboard: V } },
 
   { clave:'tesoreria_consulta', nombre:'Tesorería (consulta)', color:'#0284c7', es_sistema:true,
     descripcion:'Consulta caja chica y bancos, sin poder modificar.',
-    permisos: { cajaChica: V, bancos: V, vacaciones: C, dashboard: V } },
+    permisos: { cajaChica: V, programacionPagos: V, bancos: V, vacaciones: C, dashboard: V } },
 
   { clave:'checador', nombre:'Reloj Checador', color:'#a16207', es_sistema:true,
     descripcion:'Perfil de la tablet del kiosco. Solo marca entradas y salidas.',
