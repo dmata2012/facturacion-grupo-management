@@ -12343,8 +12343,6 @@ async function renderChecadorTablet() {
       .emp-info { flex:1;min-width:0 }
       .emp-name { font-size:14px;font-weight:800;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis }
       .emp-role { font-size:11px;color:#94a3b8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis }
-      .emp-hora { font-size:10px;color:#22c55e;margin-top:2px;font-weight:700;font-family:'Consolas',monospace }
-      .emp-row.done-completa .emp-hora { color:#60a5fa }
       /* Badge de notificaciones pendientes */
       .emp-notif { position:relative;flex-shrink:0;font-size:20px;filter:drop-shadow(0 0 6px rgba(245,158,11,.7));
         animation:notifRing 2.2s ease-in-out infinite;transform-origin:50% 10% }
@@ -12583,15 +12581,15 @@ function renderTabEmpList() {
   if (!lista.length) { cont.innerHTML = `<div style="padding:22px;text-align:center;color:#64748b;font-size:13px;grid-column:1/-1">Sin resultados</div>`; return; }
   cont.innerHTML = lista.map(e => {
     const reg = regByEmp[e.id];
+    // Sin horas en el kiosco. Esta pantalla la ve todo el mundo al pasar, y
+    // poner "Entrada 09:22" junto al nombre exhibe ante los compañeros a quien
+    // llegó tarde. El estado sí se ve —TRABAJANDO o COMPLETO, por el color y
+    // la etiqueta—, que es lo único que hace falta para saber si ya checaste.
+    // Las horas siguen en Lista de Asistencia y en Mi Asistencia, que es donde
+    // corresponde.
     let claseEstado = '';
-    let horaInfo = '';
-    if (reg?.hora_entrada && reg?.hora_salida) {
-      claseEstado = 'done-completa';
-      horaInfo = `<div class="emp-hora">🕐 ${String(reg.hora_entrada).slice(0,5)} → ${String(reg.hora_salida).slice(0,5)}</div>`;
-    } else if (reg?.hora_entrada) {
-      claseEstado = 'done-entrada';
-      horaInfo = `<div class="emp-hora">📥 Entrada ${String(reg.hora_entrada).slice(0,5)}</div>`;
-    }
+    if (reg?.hora_entrada && reg?.hora_salida) claseEstado = 'done-completa';
+    else if (reg?.hora_entrada)                claseEstado = 'done-entrada';
     const nPend = (window._tabNotifCount || {})[e.id] || 0;
     const badgeNotif = nPend ? `<div class="emp-notif" title="${nPend} mensaje${nPend!==1?'s':''} sin leer">🔔${nPend>1?`<span class="n">${nPend}</span>`:''}</div>` : '';
     return `
@@ -12600,7 +12598,6 @@ function renderTabEmpList() {
       <div class="emp-info">
         <div class="emp-name">${e.nombre}</div>
         <div class="emp-role">${e.numero_colaborador?'#'+e.numero_colaborador+' · ':''}${e.puesto||'Sin puesto'}</div>
-        ${horaInfo}
       </div>
       ${badgeNotif}
     </div>`;
