@@ -954,25 +954,38 @@ async function puntosDePuntualidad({ desde, hasta, matriz }) {
 
   const porEmpleado = new Map(matriz.empleados.map(e => [e.empleado_id, e]));
   const llegadas = new Map();   // fecha -> [{empleado_id, anticipacion, hora}]
+  // Por que se quedo fuera cada registro. Sin esto, cuando nadie compite la
+  // pantalla solo puede decir "no hay nada" y no se sabe si es que no hay
+  // marcas, si todos llegaron tarde o si falta configurar horarios.
+  const descartes = { fin_de_semana: 0, descanso: 0, antes_de_su_alta: 0,
+                      sin_horario: 0, llegaron_tarde: 0 };
+  const sinHorario = new Set();
+
   for (const r of regs.rows) {
     const e = porEmpleado.get(r.empleado_id);
     if (!e) continue;
     const d = new Date(r.fecha + 'T00:00:00').getDay();
-    if (!DIAS_DE_LA_COMPETENCIA.includes(d)) continue;
-    if (e.fecha_ingreso && r.fecha < e.fecha_ingreso) continue;
+    if (!DIAS_DE_LA_COMPETENCIA.includes(d)) { descartes.fin_de_semana++; continue; }
+    if (e.fecha_ingreso && r.fecha < e.fecha_ingreso) { descartes.antes_de_su_alta++; continue; }
 
     const h = horarioDelDia(e, d);
-    if (h.descansa) continue;
+    if (h.descansa) { descartes.descanso++; continue; }
     const real = minutosDe(r.hora_entrada);
     if (real === null) continue;
 
     let valor;
     if (POR_ANTICIPACION) {
       const esperada = minutosDe(h.entrada);
-      if (esperada === null) continue;        // sin horario no hay con qué comparar
+      // Sin hora de entrada configurada no hay con qué comparar: ese
+      // colaborador no compite, y hay que decirlo.
+      if (esperada === null) {
+        descartes.sin_horario++;
+        sinHorario.add(e.empleado_id);
+        continue;
+      }
       valor = esperada - real;                // positivo = llegó antes
       // Llegar tarde no compite, aunque sea el menos tarde de todos.
-      if (valor < 0) continue;
+      if (valor < 0) { descartes.llegaron_tarde++; continue; }
     } else {
       valor = -real;                          // mientras más temprano, más alto
     }
@@ -1074,7 +1087,14 @@ async function puntosDePuntualidad({ desde, hasta, matriz }) {
 
   return { por_anticipacion: POR_ANTICIPACION, semanas,
            puntos_periodo: Object.fromEntries(puntos),
-           dias };
+           dias,
+           // Para poder explicar un periodo sin ganadores.
+           diagnostico: {
+             registros: regs.rows.length,
+             descartes,
+             sin_horario: [...sinHorario].map(id => ({
+               empleado_id: id, nombre: porEmpleado.get(id)?.nombre || '' }))
+           } };
 }
 
 // Modulo propio, no el del Reloj Checador: aqui se ven importes por persona, y
@@ -1153,7 +1173,8 @@ router.get('/bono-puntualidad', permiso('bonoPuntualidad', NIVEL.VER), async (re
       semanal: {
         monto: montoSemanal,
         por_anticipacion: pts.por_anticipacion,
-        semanas: pts.semanas
+        semanas: pts.semanas,
+        diagnostico: pts.diagnostico
       },
       resumen: {
         con_derecho : activas.filter(f => f.gana).length,

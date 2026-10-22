@@ -11706,12 +11706,52 @@ function bnBloqueSemanal(d) {
         💰 Monto: ${fmt(sm.monto)}</button>`
       : `<span style="font-size:12px;font-weight:700">Monto: ${fmt(sm.monto)}</span>`}
     </div>
-    ${!semanas.length
-      ? '<p class="empty" style="margin:0">No hay semanas completas en el periodo elegido.</p>'
+    ${!semanas.length ? bnPorQueNadieCompitio(sm)
       : `<div style="display:flex;gap:10px;flex-wrap:wrap">${semanas.map(tarjeta).join('')}</div>`}
     ${d.resumen.sin_monto_semanal ? `<div style="margin-top:10px;font-size:11.5px;color:#92400e">
        ⚠ Hay ganadores pero el monto está en cero, así que no se paga nada.</div>` : ''}
   </div>`;
+}
+
+// Cuando no hay ningun ganador, decir POR QUE. Antes salia "no hay semanas
+// completas", que ademas de inutil era falso: no se revisa que la semana este
+// completa, lo que pasa es que nadie llego a competir.
+function bnPorQueNadieCompitio(sm) {
+  const g = sm.diagnostico;
+  const caja = (txt, accion) => `
+    <div style="background:#fff;border:1.5px solid #fcd34d;border-radius:11px;padding:12px 14px;
+         font-size:12.5px;color:#78350f;line-height:1.55">${txt}
+      ${accion ? `<div style="margin-top:6px">${accion}</div>` : ''}</div>`;
+
+  if (!g) return '<p class="empty" style="margin:0">Sin datos para este periodo.</p>';
+  const d = g.descartes || {};
+
+  if (!g.registros)
+    return caja('<strong>No hay marcas de entrada en este periodo.</strong> '
+      + 'Nadie checó, o las fechas elegidas no son las correctas.');
+
+  // La causa mas probable y la que no se nota: sin hora de entrada no hay
+  // contra que medir la anticipacion.
+  if ((g.sin_horario || []).length)
+    return caja(
+      `<strong>${g.sin_horario.length} colaborador${g.sin_horario.length != 1 ? 'es' : ''} no tiene${
+        g.sin_horario.length != 1 ? 'n' : ''} hora de entrada configurada</strong>, `
+      + 'así que no hay contra qué medir su anticipación y quedan fuera del concurso: '
+      + g.sin_horario.map(x => x.nombre).join(', ') + '.',
+      'Se configura en <strong>Empleados</strong>, en el horario de cada quien.');
+
+  if (d.llegaron_tarde && !d.sin_horario)
+    return caja(`<strong>Nadie llegó antes de su hora en este periodo.</strong> `
+      + `Los ${d.llegaron_tarde} registros útiles fueron llegadas tarde, y llegar tarde no compite.`);
+
+  const fuera = (d.fin_de_semana || 0) + (d.descanso || 0) + (d.antes_de_su_alta || 0);
+  if (fuera >= g.registros)
+    return caja('<strong>Ningún registro cayó en día de competencia.</strong> '
+      + 'Solo cuentan de lunes a viernes, y en días que no sean descanso de la persona.');
+
+  return caja('<strong>Nadie juntó puntos en este periodo.</strong> '
+    + `De ${g.registros} marcas: ${d.llegaron_tarde || 0} llegaron tarde, `
+    + `${d.fin_de_semana || 0} fueron fin de semana, ${d.descanso || 0} en día de descanso.`);
 }
 
 async function bnEditarMontoSemanal() {
