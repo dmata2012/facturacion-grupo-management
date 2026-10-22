@@ -8789,6 +8789,7 @@ async function conciliacion() {
       <div class="fi"><label>Hasta</label><input type="date" id="con-hasta" value="${iso(fin)}"></div>
       <button class="btn bs" id="con-btn" onclick="conConciliar()" disabled>Conciliar</button>
     </div>
+    <div id="con-meses"></div>
   </div>
 
   <div id="con-resultado"></div>`;
@@ -8905,10 +8906,61 @@ async function conLeerArchivo(input) {
     if (fechas.length) { $('con-desde').value = fechas[0]; $('con-hasta').value = fechas[fechas.length - 1]; }
     ayuda.textContent = `${_conFilas.length} facturas leídas, del ${fmtDate(fechas[0])} al ${fmtDate(fechas[fechas.length-1])}.`;
     ayuda.className = 'cli-ayuda ok';
+    conBotonesDeMes();
     if (btn) btn.disabled = false;
   } catch (e) {
     ayuda.textContent = e.message; ayuda.className = 'cli-ayuda mal';
   }
+}
+
+// Si el archivo trae varios meses —subir el año entero y conciliar mes por mes
+// es lo normal— se ofrecen de botón, con cuántas facturas trae cada uno. Sin
+// esto habría que teclear las fechas doce veces.
+function conBotonesDeMes() {
+  const caja = $('con-meses');
+  if (!caja) return;
+  const porMes = {};
+  for (const x of (_conFilas || [])) {
+    if (!x.fecha) continue;
+    const m = x.fecha.slice(0, 7);
+    porMes[m] = (porMes[m] || 0) + 1;
+  }
+  const meses = Object.keys(porMes).sort();
+  if (meses.length < 2) { caja.innerHTML = ''; return; }
+
+  const NOMBRE = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const finDe = (m) => {
+    const [a, mes] = m.split('-').map(Number);
+    return `${m}-${String(new Date(a, mes, 0).getDate()).padStart(2, '0')}`;
+  };
+  caja.innerHTML = `
+    <div style="margin-top:12px;padding-top:11px;border-top:1px solid var(--border)">
+      <div style="font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;
+           color:var(--muted);margin-bottom:7px">Conciliar un mes del archivo</div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap">
+        ${meses.map(m => {
+          const [a, n] = m.split('-');
+          return `<button class="btn bo bsm" style="padding:4px 11px"
+            onclick="conElegirMes('${m}-01','${finDe(m)}',this)">
+            ${NOMBRE[+n - 1]} ${a}
+            <span style="opacity:.6;font-weight:400"> · ${porMes[m]}</span></button>`;
+        }).join('')}
+        <button class="btn bo bsm" style="padding:4px 11px"
+          onclick="conElegirMes('${meses[0]}-01','${finDe(meses[meses.length-1])}',this)">
+          Todo el archivo <span style="opacity:.6;font-weight:400"> · ${_conFilas.length}</span></button>
+      </div>
+    </div>`;
+}
+
+function conElegirMes(desde, hasta, btn) {
+  $('con-desde').value = desde;
+  $('con-hasta').value = hasta;
+  // Marcar cuál quedó elegido, para no perderse al ir mes por mes.
+  document.querySelectorAll('#con-meses button').forEach(b => {
+    b.classList.remove('bs'); b.classList.add('bo');
+  });
+  if (btn) { btn.classList.remove('bo'); btn.classList.add('bs'); }
+  conConciliar();
 }
 
 async function conConciliar() {
