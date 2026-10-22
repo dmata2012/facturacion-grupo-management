@@ -11653,6 +11653,80 @@ function bnVisibles(d) {
   return [...conDerecho, ...perdieron, ...fuera];
 }
 
+// ── Bono extra al mas puntual de la semana ───────────────────
+// Cada dia gana 1 punto quien llego con mas anticipacion A SU HORARIO; el de
+// mas puntos en la semana se lleva el extra, que se suma a su bono normal.
+function bnBloqueSemanal(d) {
+  const sm = d.semanal;
+  if (!sm) return '';
+  const puedeEditar = puede('bonoPuntualidad', NIVEL.EDITAR) !== false;
+  const semanas = sm.semanas || [];
+
+  const tarjeta = (sem) => {
+    const g = sem.ganador;
+    return `
+    <div style="flex:1;min-width:265px;background:#fff;border:1.5px solid ${g ? '#fcd34d' : 'var(--border)'};
+         border-radius:12px;padding:12px 14px">
+      <div style="font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">
+        ${fmtDate(sem.desde)} — ${fmtDate(sem.hasta)}</div>
+      ${g ? `
+        <div style="font-size:15px;font-weight:900;color:var(--dark);margin-top:4px">🏆 ${g.nombre}</div>
+        <div style="font-size:11.5px;color:var(--muted)">
+          ${g.puntos} punto${g.puntos != 1 ? 's' : ''} de ${sem.dias.length} día${sem.dias.length != 1 ? 's' : ''}
+          ${sm.por_anticipacion ? ` · ${g.minutos_antes} min de anticipación` : ''}</div>
+        ${sem.empate ? `<div style="font-size:11px;color:#b45309;margin-top:3px">
+           Hubo empate; ganó por número de colaborador.</div>` : ''}
+        ${sm.monto ? `<div style="font-size:13px;font-weight:800;color:var(--success);margin-top:5px">
+           + ${fmt(sm.monto)}</div>`
+         : `<div style="font-size:11px;color:#b45309;margin-top:5px">Sin monto asignado: no suma nada.</div>`}`
+      : `<div style="font-size:12.5px;color:var(--muted);margin-top:5px">
+           Nadie ganó esta semana.
+           ${(sem.descalificados || []).length
+             ? `${sem.descalificados[0].nombre} llevaba ${sem.descalificados[0].puntos} punto${sem.descalificados[0].puntos != 1 ? 's' : ''}
+                pero tuvo falta o retardo.`
+             : 'No hubo registros suficientes.'}</div>`}
+      ${sem.dias.length ? `
+      <div style="margin-top:8px;padding-top:7px;border-top:1px solid var(--border);
+           font-size:10.5px;color:var(--muted);line-height:1.6">
+        ${sem.dias.map(x => `${fmtDate(x.fecha).slice(5)} · ${x.ganadores.map(y => y.nombre.split(' ')[0]).join(' y ')}
+          <span style="opacity:.7">${x.ganadores[0].hora}</span>`).join('<br>')}
+      </div>` : ''}
+    </div>`;
+  };
+
+  return `
+  <div class="card" style="margin-bottom:14px;background:#fffdf5;border-color:#fde68a">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:11px">
+      <span style="font-size:13.5px;font-weight:900;color:#92400e">🏆 Bono extra al más puntual de la semana</span>
+      <span style="font-size:11.5px;color:var(--muted);flex:1;min-width:200px">
+        Cada día gana 1 punto quien llegó con más anticipación
+        ${sm.por_anticipacion ? 'a su propio horario' : '(hora del reloj)'}.
+        El de más puntos se lleva el extra, que se suma a su bono normal.</span>
+      ${puedeEditar ? `<button class="btn bo bsm" onclick="bnEditarMontoSemanal()">
+        💰 Monto: ${fmt(sm.monto)}</button>`
+      : `<span style="font-size:12px;font-weight:700">Monto: ${fmt(sm.monto)}</span>`}
+    </div>
+    ${!semanas.length
+      ? '<p class="empty" style="margin:0">No hay semanas completas en el periodo elegido.</p>'
+      : `<div style="display:flex;gap:10px;flex-wrap:wrap">${semanas.map(tarjeta).join('')}</div>`}
+    ${d.resumen.sin_monto_semanal ? `<div style="margin-top:10px;font-size:11.5px;color:#92400e">
+       ⚠ Hay ganadores pero el monto está en cero, así que no se paga nada.</div>` : ''}
+  </div>`;
+}
+
+async function bnEditarMontoSemanal() {
+  const actual = _bnData?.semanal?.monto || 0;
+  const txt = window.prompt('Monto del bono extra para el más puntual de la semana:', actual);
+  if (txt === null) return;
+  const monto = parseFloat(String(txt).replace(/[^0-9.]/g, ''));
+  if (!(monto >= 0)) return toast('Monto no válido.', 'err');
+  try {
+    await api('/checador/bono-semanal-monto', { method:'PUT', body: JSON.stringify({ monto }) });
+    toast(`Bono semanal: ${fmt(monto)}.`);
+    cargarBono();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
 function renderBono(d) {
   const r = d.resumen;
   const conDerecho = d.filas.filter(f => f.gana);
@@ -11684,8 +11758,10 @@ function renderBono(d) {
         <div class="sub">Con retardo o ausencia</div></div>
       <div class="kpi primary"><div class="kpi-icon">💵</div>
         <div class="label">Total a pagar</div><div class="value">${fmt(r.total_pagar)}</div>
-        <div class="sub">${r.sin_monto ? `⚠ ${r.sin_monto} sin monto asignado` : 'Suma de los que ganan'}</div></div>
+        <div class="sub">${r.sin_monto ? `⚠ ${r.sin_monto} sin monto asignado` : 'Bono normal + extra semanal'}</div></div>
     </div>
+
+    ${bnBloqueSemanal(d)}
 
     ${r.sin_monto ? `<div class="card" style="margin-bottom:12px;background:#fffbeb;border-color:#fcd34d;
         font-size:12px;color:#92400e;line-height:1.5">
@@ -11711,11 +11787,12 @@ function renderBono(d) {
         <th>Colaborador</th><th>Puesto</th>
         <th style="text-align:center">Días trabajados</th>
         <th>Por qué lo pierde</th>
+        <th style="text-align:center" title="Días en que fue quien llegó con más anticipación">🏅 Puntos</th>
         <th style="text-align:right">Monto</th>
         <th style="text-align:center">¿Gana?</th>
       </tr></thead>
       <tbody>
-        ${!visibles.length ? `<tr><td colspan="6" class="empty">
+        ${!visibles.length ? `<tr><td colspan="7" class="empty">
           Ningún colaborador en este grupo durante el periodo.</td></tr>` : ''}
         ${visibles.map(f => `
           <tr style="${f.sin_actividad ? 'opacity:.5' : ''}">
@@ -11729,8 +11806,14 @@ function renderBono(d) {
                    <a href="#" onclick="event.preventDefault();bnDetalle(${f.empleado_id})"
                       style="margin-left:6px;font-size:10.5px">ver días</a>`}
             </td>
+            <td style="text-align:center;white-space:nowrap">
+              ${f.puntos ? `<span style="font-weight:800">${f.puntos}</span>` : '<span style="color:var(--muted)">—</span>'}
+              ${f.semanas_ganadas ? `<span title="Ganó el bono extra de la semana" style="margin-left:3px">🏆${
+                 f.semanas_ganadas > 1 ? f.semanas_ganadas : ''}</span>` : ''}
+            </td>
             <td style="text-align:right;font-weight:800;color:${f.gana && f.monto ? '#047857' : 'var(--muted)'}">
-              ${f.gana ? fmt(f.monto) : '—'}</td>
+              ${f.gana ? fmt(f.monto) : '—'}${f.bono_semanal
+                ? `<div style="font-size:10.5px;font-weight:700;color:#b45309">+ ${fmt(f.bono_semanal)} semanal</div>` : ''}</td>
             <td style="text-align:center">
               ${f.sin_actividad ? '<span class="gt-pill nd">n/a</span>'
                 : f.gana ? '<span class="gt-pill vig">Sí</span>'
@@ -17084,7 +17167,58 @@ async function cargarMiAsistencia() {
       return;
     }
     renderMiAsistencia(d);
+    // Los puntos van aparte: se calculan comparando contra toda la plantilla,
+    // no salen del expediente propio. Si falla, la pantalla no se cae.
+    cargarMisPuntos(desde, hasta);
   } catch(e) { $('ma-body').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`; }
+}
+
+// Puntos de puntualidad del colaborador: cuantos dias fue el que llego con mas
+// anticipacion. Sin importes: aqui no van.
+async function cargarMisPuntos(desde, hasta) {
+  let caja = $('ma-puntos');
+  if (!caja) {
+    caja = document.createElement('div');
+    caja.id = 'ma-puntos';
+    $('ma-body').prepend(caja);
+  }
+  try {
+    const d = await api(`/checador/mis-puntos?desde=${desde}&hasta=${hasta}`);
+    if (d.vinculado === false) { caja.innerHTML = ''; return; }
+    if (!d.puntos && !d.semanas_ganadas) {
+      caja.innerHTML = `
+        <div class="card" style="margin-bottom:12px;background:#f8fafc">
+          <div style="font-size:12.5px;color:var(--muted);line-height:1.5">
+            🏅 <strong>Puntos de puntualidad:</strong> 0 este periodo.
+            Cada día gana 1 punto quien llega con más anticipación a su horario.
+          </div>
+        </div>`;
+      return;
+    }
+    caja.innerHTML = `
+      <div class="card" style="margin-bottom:12px;background:linear-gradient(135deg,#fffbeb,#fef3c7);
+           border-color:#fcd34d">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <div style="text-align:center;min-width:72px">
+            <div style="font-size:30px;font-weight:900;color:#92400e;line-height:1">${d.puntos}</div>
+            <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:#b45309">
+              punto${d.puntos != 1 ? 's' : ''}</div>
+          </div>
+          <div style="flex:1;min-width:210px;font-size:12.5px;color:#78350f;line-height:1.5">
+            Fuiste quien llegó con más anticipación en
+            <strong>${d.puntos}</strong> de ${d.puntos_del_periodo} día${d.puntos_del_periodo != 1 ? 's' : ''}.
+            ${d.semanas_ganadas ? `<div style="margin-top:3px;font-weight:700">
+               🏆 Ganaste el bono extra en ${d.semanas_ganadas} semana${d.semanas_ganadas != 1 ? 's' : ''}.</div>` : ''}
+          </div>
+        </div>
+        ${d.dias.length ? `<div style="margin-top:9px;padding-top:8px;border-top:1px solid #fcd34d;
+             font-size:11px;color:#92400e;line-height:1.7">
+          ${d.dias.map(x => `${fmtDate(x.fecha)} · ${x.hora}${
+             x.minutos_antes != null ? ` (${x.minutos_antes} min antes)` : ''}${
+             x.compartido ? ' · compartido' : ''}`).join('<br>')}
+        </div>` : ''}
+      </div>`;
+  } catch (e) { caja.innerHTML = ''; }
 }
 
 function renderMiAsistencia(d) {

@@ -39,6 +39,23 @@ router.use(verificarToken);
   } catch (e) { console.warn('Migración tolerancia_min:', e.message); }
 })();
 
+// Monto del bono extra semanal al mas puntual. Es uno solo para toda la
+// empresa —lo gana una persona por semana—, a diferencia del bono de
+// puntualidad normal, que es por persona.
+(async () => {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS fac_config (
+        clave TEXT PRIMARY KEY,
+        valor TEXT,
+        actualizado_por_nombre TEXT,
+        actualizado_en TIMESTAMP DEFAULT NOW()
+      )`);
+    await query(`INSERT INTO fac_config(clave, valor) VALUES('bono_semanal_puntualidad','0')
+                 ON CONFLICT (clave) DO NOTHING`);
+  } catch (e) { console.warn('Config del bono semanal:', e.message); }
+})();
+
 // Migración idempotente: notificaciones dirigidas a colaboradores para mostrar al marcar entrada
 (async () => {
   try {
@@ -898,6 +915,168 @@ const CODIGOS_QUE_TUMBAN = {
   'P/G': 'permiso con goce'
 };
 
+// ══ PUNTOS DE PUNTUALIDAD · BONO EXTRA SEMANAL ════════════════
+//
+// Cada dia laborable gana 1 punto quien llego con MAS ANTICIPACION a su propia
+// hora de entrada. No se compara la hora del reloj a secas: con turnos
+// distintos, quien entra a las 7 le ganaria siempre a quien entra a las 11, y
+// el premio dejaria de ser a la puntualidad para ser al turno que te tocó.
+//
+// Para cambiarlo a hora del reloj basta con poner POR_ANTICIPACION en false:
+// entonces el punto se da a la hora de llegada mas temprana, sin mirar horarios.
+const POR_ANTICIPACION = true;
+
+// De lunes a viernes. El sabado no entra aunque se trabaje: la competencia es
+// semanal y cinco dias le dan la misma oportunidad a todos.
+const DIAS_DE_LA_COMPETENCIA = [1, 2, 3, 4, 5];
+
+// Lunes de la semana a la que pertenece una fecha.
+function lunesDe(fechaISO) {
+  const d = new Date(fechaISO + 'T00:00:00');
+  const dow = d.getDay();                 // 0 = domingo
+  d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+  return d.toISOString().slice(0, 10);
+}
+const sumaDias = (fechaISO, n) => {
+  const d = new Date(fechaISO + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+// Reparte los puntos del periodo y saca un ganador por semana.
+// Recibe la matriz ya construida para no volver a consultar lo mismo.
+async function puntosDePuntualidad({ desde, hasta, matriz }) {
+  const regs = await query(
+    `SELECT empleado_id, TO_CHAR(fecha,'YYYY-MM-DD') AS fecha, hora_entrada
+       FROM fac_reloj_checador
+      WHERE fecha BETWEEN $1::date AND $2::date AND hora_entrada IS NOT NULL`,
+    [desde, hasta]);
+
+  const porEmpleado = new Map(matriz.empleados.map(e => [e.empleado_id, e]));
+  const llegadas = new Map();   // fecha -> [{empleado_id, anticipacion, hora}]
+  for (const r of regs.rows) {
+    const e = porEmpleado.get(r.empleado_id);
+    if (!e) continue;
+    const d = new Date(r.fecha + 'T00:00:00').getDay();
+    if (!DIAS_DE_LA_COMPETENCIA.includes(d)) continue;
+    if (e.fecha_ingreso && r.fecha < e.fecha_ingreso) continue;
+
+    const h = horarioDelDia(e, d);
+    if (h.descansa) continue;
+    const real = minutosDe(r.hora_entrada);
+    if (real === null) continue;
+
+    let valor;
+    if (POR_ANTICIPACION) {
+      const esperada = minutosDe(h.entrada);
+      if (esperada === null) continue;        // sin horario no hay con qué comparar
+      valor = esperada - real;                // positivo = llegó antes
+      // Llegar tarde no compite, aunque sea el menos tarde de todos.
+      if (valor < 0) continue;
+    } else {
+      valor = -real;                          // mientras más temprano, más alto
+    }
+    if (!llegadas.has(r.fecha)) llegadas.set(r.fecha, []);
+    llegadas.get(r.fecha).push({ empleado_id: r.empleado_id, valor, hora: String(r.hora_entrada).slice(0, 5) });
+  }
+
+  // El punto del día: para el mejor. Si dos empatan al minuto, punto para los dos.
+  const dias = [];
+  const puntos = new Map();
+  const anticipacionTotal = new Map();
+  for (const fecha of [...llegadas.keys()].sort()) {
+    const lista = llegadas.get(fecha);
+    const mejor = Math.max(...lista.map(x => x.valor));
+    const ganan = lista.filter(x => x.valor === mejor);
+    ganan.forEach(g => puntos.set(g.empleado_id, (puntos.get(g.empleado_id) || 0) + 1));
+    lista.forEach(x => anticipacionTotal.set(x.empleado_id,
+      (anticipacionTotal.get(x.empleado_id) || 0) + x.valor));
+    dias.push({
+      fecha, semana: lunesDe(fecha), compitieron: lista.length,
+      ganadores: ganan.map(g => ({
+        empleado_id: g.empleado_id,
+        nombre: porEmpleado.get(g.empleado_id)?.nombre || '',
+        hora: g.hora,
+        minutos_antes: POR_ANTICIPACION ? g.valor : null
+      }))
+    });
+  }
+
+  // ── El ganador de cada semana ──
+  const semanas = [];
+  const porSemana = {};
+  dias.forEach(d => { (porSemana[d.semana] = porSemana[d.semana] || []).push(d); });
+
+  for (const lunes of Object.keys(porSemana).sort()) {
+    const delSemana = porSemana[lunes];
+    const pts = new Map(), antic = new Map();
+    delSemana.forEach(d => d.ganadores.forEach(g =>
+      pts.set(g.empleado_id, (pts.get(g.empleado_id) || 0) + 1)));
+
+    // Para desempatar hace falta la anticipacion de ESA semana, no la del periodo.
+    const fechas = new Set(delSemana.map(d => d.fecha));
+    for (const [fecha, lista] of llegadas) {
+      if (!fechas.has(fecha)) continue;
+      lista.forEach(x => antic.set(x.empleado_id, (antic.get(x.empleado_id) || 0) + x.valor));
+    }
+
+    // Gana uno solo. Quien tenga falta o retardo en la semana queda fuera: el
+    // premio es a la puntualidad de la semana completa, no a un buen lunes.
+    const limpio = (empId) => {
+      const e = porEmpleado.get(empId);
+      if (!e) return false;
+      for (let i = 0; i < 5; i++) {
+        const f = sumaDias(lunes, i);
+        if (f < desde || f > hasta) continue;
+        const c = e.celdas?.[f];
+        if (!c || !c.c || c.c === 'D') continue;
+        if (c.c !== 'A') return false;          // falta, permiso, vacaciones…
+        if (c.r) return false;                  // retardo
+      }
+      return true;
+    };
+
+    // Quien junto puntos pero no cierra la semana limpio. Se devuelve aparte
+    // para poder explicar por que no gano, en vez de que desaparezca del
+    // tablero sin motivo.
+    const descalificados = [...pts.entries()]
+      .filter(([id]) => !limpio(id))
+      .map(([id, n]) => ({ empleado_id: id, nombre: porEmpleado.get(id)?.nombre || '', puntos: n }))
+      .sort((a, b) => b.puntos - a.puntos);
+
+    const candidatos = [...pts.entries()]
+      .filter(([id]) => limpio(id))
+      .map(([id, n]) => ({
+        empleado_id: id, nombre: porEmpleado.get(id)?.nombre || '',
+        numero_colaborador: porEmpleado.get(id)?.numero_colaborador || null,
+        puntos: n, minutos_antes: antic.get(id) || 0
+      }))
+      // Más puntos; si empatan, más minutos de anticipación en la semana; y si
+      // aun así empatan, el número de colaborador, que es estable y no deja el
+      // resultado al azar.
+      .sort((a, b) => b.puntos - a.puntos
+                   || b.minutos_antes - a.minutos_antes
+                   || String(a.numero_colaborador).localeCompare(String(b.numero_colaborador)));
+
+    semanas.push({
+      desde: lunes, hasta: sumaDias(lunes, 4),
+      dias: delSemana,
+      tabla: candidatos,
+      descalificados,
+      ganador: candidatos[0] || null,
+      // Si dos quedan iguales hasta el final, se avisa: gana uno, pero conviene
+      // que quien paga lo sepa.
+      empate: candidatos.length > 1
+           && candidatos[0].puntos === candidatos[1].puntos
+           && candidatos[0].minutos_antes === candidatos[1].minutos_antes
+    });
+  }
+
+  return { por_anticipacion: POR_ANTICIPACION, semanas,
+           puntos_periodo: Object.fromEntries(puntos),
+           dias };
+}
+
 // Modulo propio, no el del Reloj Checador: aqui se ven importes por persona, y
 // quien marca entradas o revisa la lista de asistencia no tiene por que verlos.
 router.get('/bono-puntualidad', permiso('bonoPuntualidad', NIVEL.VER), async (req, res) => {
@@ -945,16 +1124,96 @@ router.get('/bono-puntualidad', permiso('bonoPuntualidad', NIVEL.VER), async (re
       };
     });
 
+    // ── Bono extra al mas puntual de cada semana ──
+    // Se suma al bono de siempre, no lo sustituye: quien gana la semana cobra
+    // su bono normal MAS el extra.
+    const cfg = await query(`SELECT valor FROM fac_config WHERE clave='bono_semanal_puntualidad'`);
+    const montoSemanal = Math.max(0, parseFloat(cfg.rows[0]?.valor || 0) || 0);
+    const pts = await puntosDePuntualidad({ desde, hasta, matriz: m });
+
+    const porEmp = new Map(filas.map(f => [f.empleado_id, f]));
+    filas.forEach(f => {
+      f.puntos = 0; f.semanas_ganadas = 0; f.bono_semanal = 0;
+    });
+    pts.dias.forEach(d => d.ganadores.forEach(g => {
+      const f = porEmp.get(g.empleado_id); if (f) f.puntos++;
+    }));
+    pts.semanas.forEach(sem => {
+      if (!sem.ganador) return;
+      const f = porEmp.get(sem.ganador.empleado_id);
+      if (!f) return;
+      f.semanas_ganadas++;
+      f.bono_semanal = +(f.bono_semanal + montoSemanal).toFixed(2);
+      f.a_pagar = +(f.a_pagar + montoSemanal).toFixed(2);
+    });
+
     const activas = filas.filter(f => !f.sin_actividad);
     res.json({
       desde, hasta, filas,
+      semanal: {
+        monto: montoSemanal,
+        por_anticipacion: pts.por_anticipacion,
+        semanas: pts.semanas
+      },
       resumen: {
         con_derecho : activas.filter(f => f.gana).length,
         sin_derecho : activas.filter(f => !f.gana).length,
         sin_actividad: filas.length - activas.length,
         total_pagar : +filas.reduce((a, f) => a + f.a_pagar, 0).toFixed(2),
-        sin_monto   : activas.filter(f => f.gana && !f.monto).length
+        sin_monto   : activas.filter(f => f.gana && !f.monto).length,
+        semanas     : pts.semanas.length,
+        total_semanal: +(montoSemanal * pts.semanas.filter(x => x.ganador).length).toFixed(2),
+        sin_monto_semanal: pts.semanas.some(x => x.ganador) && !montoSemanal
       }
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Monto del bono extra semanal. Es uno solo para toda la empresa: lo gana una
+// persona por semana, no depende del puesto.
+router.put('/bono-semanal-monto', permiso('bonoPuntualidad', NIVEL.EDITAR), async (req, res) => {
+  try {
+    const monto = Math.max(0, parseFloat(req.body?.monto) || 0);
+    await query(
+      `INSERT INTO fac_config(clave, valor, actualizado_por_nombre, actualizado_en)
+       VALUES('bono_semanal_puntualidad',$1,$2,NOW())
+       ON CONFLICT (clave) DO UPDATE
+         SET valor=EXCLUDED.valor, actualizado_por_nombre=EXCLUDED.actualizado_por_nombre,
+             actualizado_en=NOW()`,
+      [String(monto), req.usuario?.nombre || null]);
+    res.json({ ok: true, monto });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Puntos de puntualidad de un colaborador, para su propia pantalla de
+// asistencia. No devuelve importes: ahi no van.
+router.get('/mis-puntos', async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    if (!desde || !hasta) return res.status(400).json({ error: 'Se requieren desde y hasta.' });
+    // El colaborador sale de la SESION, no de la peticion: recibiendolo por
+    // parametro cualquiera podria consultar los puntos —y las horas de
+    // llegada— de otra persona.
+    const u = await query(`SELECT empleado_id FROM fac_usuarios WHERE id=$1`, [req.usuario.id]);
+    const id = u.rows[0]?.empleado_id || null;
+    if (!id) return res.json({ vinculado: false, puntos: 0, dias: [], semanas: [], semanas_ganadas: 0 });
+
+    const m = await construirMatriz({ desde, hasta });
+    const pts = await puntosDePuntualidad({ desde, hasta, matriz: m });
+
+    const mios = pts.dias.filter(d => d.ganadores.some(g => g.empleado_id === id));
+    const semanasGanadas = pts.semanas.filter(x => x.ganador && x.ganador.empleado_id === id);
+    res.json({
+      desde, hasta,
+      puntos: mios.length,
+      dias: mios.map(d => ({ fecha: d.fecha,
+        hora: d.ganadores.find(g => g.empleado_id === id)?.hora || null,
+        minutos_antes: d.ganadores.find(g => g.empleado_id === id)?.minutos_antes ?? null,
+        compartido: d.ganadores.length > 1 })),
+      semanas_ganadas: semanasGanadas.length,
+      semanas: semanasGanadas.map(x => ({ desde: x.desde, hasta: x.hasta, puntos: x.ganador.puntos })),
+      // Cuantos puntos repartio el periodo, para saber contra que se compara.
+      puntos_del_periodo: pts.dias.length
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
