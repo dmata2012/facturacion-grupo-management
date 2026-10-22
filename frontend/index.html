@@ -736,6 +736,7 @@ canvas{max-height:230px}
         <div class="nav-group-items">
           <a href="#" onclick="nav('concentrado')" id="nav-concentrado"><span class="ni"><svg><use href="#i-chart"/></svg></span> Concentrado Anual</a>
           <a href="#" onclick="nav('mensualDireccion')" id="nav-mensualDireccion"><span class="ni"><svg><use href="#i-clipboard"/></svg></span> Reporte Mensual</a>
+          <a href="#" onclick="nav('conciliacion')" id="nav-conciliacion"><span class="ni"><svg><use href="#i-check"/></svg></span> Conciliación Microsip</a>
           <a href="#" onclick="nav('estadoCuenta')" id="nav-estadoCuenta"><span class="ni"><svg><use href="#i-doc"/></svg></span> Estado de Cuenta</a>
           <a href="#" onclick="nav('reportes')"     id="nav-reportes"><span class="ni"><svg><use href="#i-clipboard"/></svg></span> Reportes</a>
           <a href="#" onclick="nav('estadisticas')" id="nav-estadisticas"><span class="ni"><svg><use href="#i-chart"/></svg></span> Estadísticas</a>
@@ -1369,13 +1370,14 @@ function nav(page) {
     concentrado:'Concentrado Anual', otrosIngresos:'Otros Ingresos S/F',
     expedienteAsistencia:'Expediente de Asistencia',
     bonoPuntualidad:'Bono de Puntualidad',
-    mensualDireccion:'Reporte Mensual'
+    mensualDireccion:'Reporte Mensual',
+    conciliacion:'Conciliación Microsip'
   };
   const mt = $('mt-title');
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
     dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones, asistencia, concentrado, otrosIngresos,
-    mensualDireccion, expedienteAsistencia, bonoPuntualidad, miAsistencia
+    mensualDireccion, expedienteAsistencia, bonoPuntualidad, miAsistencia, conciliacion
   };
   if (pages[page]) pages[page]();
 }
@@ -8754,6 +8756,383 @@ function ecExportar() {
   })));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detalle), 'Facturas');
   XLSX.writeFile(wb, `Estado_de_Cuenta_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+// ══ CONCILIACIÓN CONTRA MICROSIP ═════════════════════════════
+// Cruza lo que tiene el sistema contra lo que reporta Microsip, por periodo.
+// El archivo NO se guarda: se lee en el navegador, se cruza y se contesta.
+let _conRes = null;     // el último resultado, para exportarlo
+let _conFilas = null;   // las filas leídas del Excel
+
+async function conciliacion() {
+  const hoy = new Date();
+  const ini = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+  const fin = new Date(hoy.getFullYear(), hoy.getMonth(), 0);
+  const iso = d => d.toISOString().slice(0, 10);
+
+  $('content').innerHTML = `
+  <div class="page-header">
+    <div class="page-header-left">
+      <div class="page-title">Conciliación Microsip</div>
+      <div class="page-sub">Compara lo facturado en el sistema contra lo que reporta Microsip</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
+      <div class="fi" style="min-width:230px;flex:1">
+        <label>Archivo de Microsip (Excel)</label>
+        <input type="file" id="con-archivo" accept=".xlsx,.xls" onchange="conLeerArchivo(this)">
+        <div class="cli-ayuda" id="con-archivo-ayuda">Exportación de facturas emitidas del periodo.</div>
+      </div>
+      <div class="fi"><label>Desde</label><input type="date" id="con-desde" value="${iso(ini)}"></div>
+      <div class="fi"><label>Hasta</label><input type="date" id="con-hasta" value="${iso(fin)}"></div>
+      <button class="btn bs" id="con-btn" onclick="conConciliar()" disabled>Conciliar</button>
+    </div>
+  </div>
+
+  <div id="con-resultado"></div>`;
+  conCargarCierres();
+}
+
+// Lee el Excel de Microsip. Tres cuidados que vienen del archivo real:
+//
+//  · El encabezado NO está en el primer renglón: arriba viene el título del
+//    reporte. Se busca la fila que trae "UUID".
+//
+//  · La fecha que importa es la de EMISIÓN (columna "Fecha"), no la del
+//    timbrado. En enero hay una factura emitida el 31/01 y timbrada el 03/02:
+//    pertenece a enero, y es contra fecha_emision que se compara el sistema.
+//
+//  · Pero "Fecha" viene ambigua (1/9/26 puede ser 9 de enero o 1 de
+//    septiembre). En vez de suponer el formato, se deduce mirando TODO el
+//    archivo: si en algún renglón el primer número pasa de 12, es día/mes; si
+//    el segundo pasa de 12, es mes/día. Se decide una vez y se aplica a todos.
+//    Si el archivo no alcanza a delatarse, se cae a "Fecha Timbrado", que sí
+//    viene siempre dd/mm/aaaa.
+function conLeerMicrosip(wb) {
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const filas = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+  const iEnc = filas.findIndex(f =>
+    f.some(c => String(c).trim().toUpperCase() === 'UUID'));
+  if (iEnc < 0) throw new Error('El archivo no parece de Microsip: no encontré la columna UUID.');
+
+  const enc = filas[iEnc].map(c => String(c).trim().toUpperCase());
+  const col = (...nombres) => {
+    for (const n of nombres) {
+      const i = enc.indexOf(n.toUpperCase());
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+  const c = {
+    estado: col('Estado SAT'), tipo: col('Tipo'),
+    timbrado: col('Fecha Timbrado'), fecha: col('Fecha'),
+    serie: col('Serie'), folio: col('Folio'), uuid: col('UUID'),
+    rfcE: col('RFC Emisor'), nomE: col('Nombre Emisor'),
+    rfcR: col('RFC Receptor'), nomR: col('Nombre Receptor'),
+    sub: col('SubTotal'), iva: col('IVA 16%', 'IVA'), total: col('Total XML', 'Total'),
+  };
+  const falta = ['uuid', 'total'].filter(k => c[k] < 0);
+  if (falta.length) throw new Error('Al archivo le faltan columnas necesarias: ' + falta.join(', '));
+
+  const v = (f, i) => i >= 0 ? String(f[i] == null ? '' : f[i]).trim() : '';
+  const cuerpo = filas.slice(iEnc + 1).filter(f => v(f, c.uuid));
+
+  // Deducir el orden de la columna "Fecha" con todo el archivo a la vista.
+  const orden = conOrdenFecha(cuerpo.map(f => v(f, c.fecha)));
+
+  const out = [];
+  for (const f of cuerpo) {
+    out.push({
+      estado_sat: v(f, c.estado), tipo: v(f, c.tipo),
+      // Emisión para comparar; timbrado como respaldo y como dato.
+      fecha: conFecha(v(f, c.fecha), orden) || conFecha(v(f, c.timbrado), 'dm'),
+      fecha_timbrado: conFecha(v(f, c.timbrado), 'dm'),
+      serie: v(f, c.serie), folio: v(f, c.folio), uuid: v(f, c.uuid),
+      rfc_emisor: v(f, c.rfcE), nombre_emisor: v(f, c.nomE),
+      rfc_receptor: v(f, c.rfcR), nombre_receptor: v(f, c.nomR),
+      subtotal: v(f, c.sub), iva: v(f, c.iva), total: v(f, c.total),
+    });
+  }
+  return out;
+}
+
+// Mira todas las fechas de la columna y decide si vienen día/mes o mes/día.
+// Un número mayor a 12 en una de las dos posiciones lo delata; con 37 renglones
+// de un mes real siempre hay alguno. Si ninguno delata nada, devuelve null y
+// quien llama se va a Fecha Timbrado, que no es ambigua.
+function conOrdenFecha(textos) {
+  let dm = 0, md = 0;
+  for (const t of textos) {
+    const m = String(t || '').match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-]/);
+    if (!m) continue;
+    if (+m[1] > 12) dm++;
+    if (+m[2] > 12) md++;
+  }
+  // Si los dos se contradicen, no hay forma de confiar en la columna.
+  if (dm && md) return null;
+  return dm ? 'dm' : md ? 'md' : null;
+}
+
+// "14/01/2026 02:32:47 p. m." con orden 'dm' -> "2026-01-14".
+// "1/31/26" con orden 'md' -> "2026-01-31".
+function conFecha(txt, orden) {
+  if (!orden) return '';
+  const m = String(txt || '').match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if (!m) return '';
+  let a = m[3];
+  const d = orden === 'dm' ? m[1] : m[2];
+  const mes = orden === 'dm' ? m[2] : m[1];
+  if (+mes < 1 || +mes > 12 || +d < 1 || +d > 31) return '';
+  if (a.length === 2) a = '20' + a;
+  return `${a}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+async function conLeerArchivo(input) {
+  const ayuda = $('con-archivo-ayuda');
+  const btn = $('con-btn');
+  _conFilas = null; if (btn) btn.disabled = true;
+  const file = input.files && input.files[0];
+  if (!file) return;
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    _conFilas = conLeerMicrosip(wb);
+    if (!_conFilas.length) throw new Error('No encontré ninguna factura en el archivo.');
+    // Si el archivo trae un solo mes, se ajusta el periodo solo.
+    const fechas = _conFilas.map(x => x.fecha).filter(Boolean).sort();
+    if (fechas.length) { $('con-desde').value = fechas[0]; $('con-hasta').value = fechas[fechas.length - 1]; }
+    ayuda.textContent = `${_conFilas.length} facturas leídas, del ${fmtDate(fechas[0])} al ${fmtDate(fechas[fechas.length-1])}.`;
+    ayuda.className = 'cli-ayuda ok';
+    if (btn) btn.disabled = false;
+  } catch (e) {
+    ayuda.textContent = e.message; ayuda.className = 'cli-ayuda mal';
+  }
+}
+
+async function conConciliar() {
+  if (!_conFilas) return toast('Primero elige el archivo de Microsip.', 'warn');
+  const desde = $('con-desde').value, hasta = $('con-hasta').value;
+  if (!desde || !hasta) return toast('Elige el periodo.', 'warn');
+  $('con-resultado').innerHTML = '<div class="card"><p class="empty">Conciliando…</p></div>';
+  try {
+    _conRes = await api('/conciliacion/microsip', {
+      method: 'POST', body: JSON.stringify({ desde, hasta, filas: _conFilas })
+    });
+    conPintar();
+  } catch (e) {
+    $('con-resultado').innerHTML = `<div class="card"><p class="empty" style="color:var(--red)">${e.message}</p></div>`;
+  }
+}
+
+function conPintar() {
+  const d = _conRes, r = d.resumen;
+  const cuadra = r.diferencia_facturas === 0 && Math.abs(r.diferencia_monto) < 0.01;
+  const tile = (rotulo, valor, color, sub) => `
+    <div style="flex:1;min-width:150px;background:#fff;border:1.5px solid var(--border);
+         border-radius:11px;padding:12px 14px">
+      <div style="font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">${rotulo}</div>
+      <div style="font-size:19px;font-weight:900;color:${color};margin-top:3px">${valor}</div>
+      ${sub ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${sub}</div>` : ''}
+    </div>`;
+
+  $('con-resultado').innerHTML = `
+  <div style="margin:4px 0 12px;padding:16px;border-radius:var(--r);
+       border:1.5px solid ${cuadra ? '#86efac' : '#fecaca'};
+       background:${cuadra ? '#f0fdf4' : '#fef2f2'}">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+      <span style="font-size:15px;font-weight:900;color:${cuadra ? '#166534' : '#991b1b'}">
+        ${cuadra ? '✔ El periodo cuadra' : '⚠ Hay diferencias'}</span>
+      <span style="font-size:12.5px;color:var(--dark)">${fmtDate(d.desde)} al ${fmtDate(d.hasta)}</span>
+      ${d.cerrado ? `<span style="background:#dcfce7;border:1px solid #86efac;border-radius:20px;
+        padding:2px 10px;font-size:11px;font-weight:700;color:#166534">
+        🔒 Cerrado el ${d.cerrado.cuando}${d.cerrado.cerrado_por_nombre ? ' por ' + d.cerrado.cerrado_por_nombre : ''}</span>` : ''}
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      ${tile('Microsip', r.microsip.facturas + ' facturas', 'var(--dark)',
+             fmt(r.microsip.total) + (r.microsip.canceladas ? ` · ${r.microsip.canceladas} cancelada(s) aparte` : ''))}
+      ${tile('Sistema', r.sistema.facturas + ' facturas', 'var(--dark)',
+             fmt(r.sistema.total) + (r.sistema.canceladas ? ` · ${r.sistema.canceladas} cancelada(s) aparte` : ''))}
+      ${tile('Diferencia', (r.diferencia_facturas > 0 ? '+' : '') + r.diferencia_facturas + ' facturas',
+             cuadra ? 'var(--success)' : 'var(--danger)', fmt(r.diferencia_monto))}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;font-size:11.5px">
+      ${conChip('✓ Cuadran', r.cuadran, '#166534', '#f0fdf4')}
+      ${conChip('⚠ Difieren', r.difieren, '#92400e', '#fffbeb')}
+      ${conChip('🟠 Solo en Microsip', r.solo_microsip, '#9a3412', '#fff7ed')}
+      ${conChip('🔵 Solo en el sistema', r.solo_sistema, '#1e40af', '#eff6ff')}
+      ${r.descartadas ? conChip('✕ Descartadas del archivo', r.descartadas, '#991b1b', '#fef2f2') : ''}
+      ${r.fuera_del_periodo ? conChip('📅 De otro periodo', r.fuera_del_periodo, '#4a4a4a', '#f3f4f6') : ''}
+    </div>
+    <div style="margin-top:13px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn bo bsm" onclick="conExportar()">⬇ Excel</button>
+      ${r.puede_cerrar && !d.cerrado && (ME.rol === 'admin' || ME.rol === 'gerente')
+        ? `<button class="btn bs bsm" onclick="conCerrarMes()">🔒 Cerrar el mes</button>` : ''}
+      ${d.cerrado && (ME.rol === 'admin' || ME.rol === 'gerente')
+        ? `<button class="btn bo bsm" onclick="conReabrir()">Reabrir</button>` : ''}
+      ${!r.puede_cerrar ? `<span style="font-size:11.5px;color:var(--muted);align-self:center">
+         Para cerrar el mes no debe quedar ninguna diferencia.</span>` : ''}
+    </div>
+  </div>
+
+  ${conTabla('Solo en Microsip — no llegaron al sistema', d.solo_microsip, '#9a3412', 'microsip')}
+  ${conTabla('Con diferencias', d.difieren, '#92400e', 'difieren')}
+  ${conTabla('Solo en el sistema — Microsip no las tiene', d.solo_sistema, '#1e40af', 'sistema')}
+  ${d.descartadas.length ? conTabla('Descartadas del archivo', d.descartadas, '#991b1b', 'descartadas') : ''}
+  ${(d.fuera_del_periodo||[]).length ? conTabla('Del archivo, pero de otro periodo — no se conciliaron aquí', d.fuera_del_periodo, '#4a4a4a', 'fuera') : ''}
+  <div id="con-cierres"></div>`;
+  conCargarCierres();
+}
+
+const conChip = (txt, n, color, fondo) => `
+  <span style="background:${fondo};border:1px solid ${color}33;border-radius:20px;
+    padding:3px 11px;font-weight:700;color:${color}">${txt}: ${n}</span>`;
+
+function conTabla(titulo, filas, color, tipo) {
+  if (!filas || !filas.length) return '';
+  const cab = tipo === 'fuera'
+    ? '<th>Folio</th><th>Cliente</th><th>Emisora</th><th>Fecha</th><th style="text-align:right">Total</th><th>Motivo</th>'
+    : tipo === 'difieren'
+    ? '<th>Folio</th><th>Cliente</th><th>Fecha</th><th>Qué no coincide</th>'
+    : tipo === 'descartadas'
+      ? '<th>Folio</th><th>UUID</th><th style="text-align:right">Total</th><th>Motivo</th>'
+      : '<th>Folio</th><th>Cliente</th><th>Emisora</th><th>Fecha</th><th style="text-align:right">Total</th><th>Estatus</th>';
+  return `
+  <div class="card" style="margin-bottom:12px">
+    <div style="font-size:12.5px;font-weight:800;color:${color};margin-bottom:9px">
+      ${titulo} <span style="color:var(--muted);font-weight:600">· ${filas.length}</span></div>
+    <div class="tscroll" style="max-height:45vh;overflow:auto"><table style="font-size:12px">
+      <thead><tr>${cab}</tr></thead>
+      <tbody>${filas.map(x => conFila(x, tipo)).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function conFila(x, tipo) {
+  const folio = (x.serie && x.folio && !String(x.folio).startsWith(x.serie))
+    ? x.serie + x.folio : (x.folio || '—');
+  if (tipo === 'fuera')
+    return `<tr><td style="font-weight:700;white-space:nowrap">${folio}</td>
+      <td style="font-size:11.5px">${x.receptor || '—'}</td>
+      <td style="font-size:11.5px">${x.emisor || '—'}</td>
+      <td style="white-space:nowrap;font-size:11.5px;font-weight:700">${fmtDate(x.fecha)}</td>
+      <td style="text-align:right;white-space:nowrap;font-weight:700">${fmt(x.total)}</td>
+      <td style="font-size:11px;color:var(--muted)">${x.motivo}</td></tr>`;
+  if (tipo === 'descartadas')
+    return `<tr><td style="font-weight:700">${folio}</td>
+      <td style="font-family:ui-monospace,monospace;font-size:10.5px">${x.uuid || '—'}</td>
+      <td style="text-align:right">${fmt(x.total)}</td>
+      <td style="color:var(--danger)">${x.motivo}</td></tr>`;
+  if (tipo === 'difieren')
+    return `<tr><td style="font-weight:700;white-space:nowrap">${folio}</td>
+      <td style="font-size:11.5px">${x.receptor || x.receptor_sistema || '—'}</td>
+      <td style="white-space:nowrap;font-size:11.5px;color:var(--muted)">${fmtDate(x.fecha)}</td>
+      <td>${x.diferencias.map(dd => `
+        <div style="font-size:11.5px;line-height:1.5">
+          <strong style="color:${dd.grave ? 'var(--danger)' : '#b45309'}">${dd.campo}</strong>
+          — Microsip: <strong>${typeof dd.microsip === 'number' ? fmt(dd.microsip) : dd.microsip}</strong>
+          · Sistema: <strong>${typeof dd.sistema === 'number' ? fmt(dd.sistema) : dd.sistema}</strong>
+        </div>`).join('')}</td></tr>`;
+  const estatus = x.cancelada ? 'CANCELADA en el SAT' : (x.estatus || 'vigente');
+  return `<tr><td style="font-weight:700;white-space:nowrap">${
+      x.id ? `<a href="#" onclick="detalleFactura(${x.id})" style="color:var(--red)">${folio}</a>` : folio}</td>
+    <td style="font-size:11.5px">${x.receptor || x.nombre_receptor || '—'}</td>
+    <td style="font-size:11.5px">${x.emisor || x.nombre_emisor || '—'}</td>
+    <td style="white-space:nowrap;font-size:11.5px;color:var(--muted)">${fmtDate(x.fecha)}</td>
+    <td style="text-align:right;white-space:nowrap;font-weight:700">${fmt(x.total)}</td>
+    <td style="font-size:11px;${/CANCEL/i.test(estatus) ? 'color:var(--danger);font-weight:700' : 'color:var(--muted)'}">${estatus}</td>
+  </tr>`;
+}
+
+async function conCerrarMes() {
+  const d = _conRes;
+  if (!d || !d.resumen.puede_cerrar) return toast('Todavía hay diferencias.', 'err');
+  const notas = (window.prompt('Notas del cierre (opcional):', '') || '').trim();
+  if (!await confirm2(`¿Cerrar el periodo ${fmtDate(d.desde)} al ${fmtDate(d.hasta)}?`
+      + String.fromCharCode(10) + String.fromCharCode(10)
+      + `${d.resumen.microsip.facturas} facturas por ${fmt(d.resumen.microsip.total)}, sin diferencias.`
+      + String.fromCharCode(10) + 'Queda registrado con tu nombre. Se puede reabrir después.')) return;
+  try {
+    await api('/conciliacion/cerrar', { method: 'POST',
+      body: JSON.stringify({ desde: d.desde, hasta: d.hasta, resumen: d.resumen, notas }) });
+    toast('Periodo cerrado.');
+    conConciliar();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function conReabrir() {
+  const d = _conRes;
+  if (!await confirm2('¿Reabrir este periodo? Dejará de contar como cerrado.')) return;
+  try {
+    await api(`/conciliacion/cierres?desde=${d.desde}&hasta=${d.hasta}`, { method: 'DELETE' });
+    toast('Periodo reabierto.');
+    conConciliar();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function conCargarCierres() {
+  const caja = $('con-cierres');
+  if (!caja) return;
+  try {
+    const r = await api('/conciliacion/cierres');
+    if (!r.cierres.length) { caja.innerHTML = ''; return; }
+    caja.innerHTML = `
+      <div class="card">
+        <div style="font-size:12.5px;font-weight:800;margin-bottom:9px">Periodos cerrados</div>
+        <div class="tscroll"><table style="font-size:12px">
+          <thead><tr><th>Periodo</th><th style="text-align:right">Facturas</th>
+            <th style="text-align:right">Total</th><th>Cerró</th><th>Cuándo</th><th>Notas</th></tr></thead>
+          <tbody>${r.cierres.map(x => `<tr>
+            <td style="font-weight:700;white-space:nowrap">${fmtDate(x.desde)} — ${fmtDate(x.hasta)}</td>
+            <td style="text-align:right">${x.facturas_microsip}</td>
+            <td style="text-align:right;font-weight:700">${fmt(x.total_microsip)}</td>
+            <td style="font-size:11.5px">${x.cerrado_por_nombre || '—'}</td>
+            <td style="white-space:nowrap;font-size:11.5px;color:var(--muted)">${x.cerrado_en}</td>
+            <td style="font-size:11.5px;color:var(--muted)">${x.notas || ''}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>`;
+  } catch (e) { caja.innerHTML = ''; }
+}
+
+function conExportar() {
+  if (!_conRes) return toast('No hay nada que exportar.', 'warn');
+  const d = _conRes, r = d.resumen;
+  const aoa = [
+    ['GRUPO MANAGEMENT'],
+    [`CONCILIACIÓN CONTRA MICROSIP · ${d.desde} al ${d.hasta}`],
+    [`Generado: ${new Date().toLocaleString('es-MX')}`], [],
+    ['', 'Facturas', 'Total'],
+    ['Microsip', r.microsip.facturas, r.microsip.total],
+    ['Sistema', r.sistema.facturas, r.sistema.total],
+    ['Diferencia', r.diferencia_facturas, r.diferencia_monto], [],
+  ];
+  const bloque = (titulo, filas, cols) => {
+    if (!filas.length) return;
+    aoa.push([titulo + ' (' + filas.length + ')']);
+    aoa.push(cols.map(c => c[0]));
+    filas.forEach(x => aoa.push(cols.map(c => c[1](x))));
+    aoa.push([]);
+  };
+  const base = [['Folio', x => (x.serie || '') + (x.folio || '')], ['UUID', x => x.uuid || ''],
+                ['Cliente', x => x.receptor || x.nombre_receptor || ''],
+                ['Emisora', x => x.emisor || x.nombre_emisor || ''],
+                ['Fecha', x => x.fecha || ''], ['Subtotal', x => x.subtotal || 0],
+                ['IVA', x => x.iva || 0], ['Total', x => x.total || 0],
+                ['Estatus', x => x.cancelada ? 'CANCELADA' : (x.estatus || 'vigente')]];
+  bloque('SOLO EN MICROSIP', d.solo_microsip, base);
+  bloque('SOLO EN EL SISTEMA', d.solo_sistema, base);
+  bloque('CON DIFERENCIAS', d.difieren, base.concat([
+    ['Qué no coincide', x => x.diferencias.map(dd =>
+      `${dd.campo}: Microsip ${dd.microsip} / Sistema ${dd.sistema}`).join(' | ')]]));
+  bloque('CUADRAN', d.cuadran, base);
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:16},{wch:38},{wch:30},{wch:26},{wch:12},{wch:14},{wch:13},{wch:14},{wch:14},{wch:60}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Conciliación');
+  XLSX.writeFile(wb, `Conciliacion_Microsip_${d.desde}_a_${d.hasta}.xlsx`);
 }
 
 // ══ CLIENTES ═════════════════════════════════
