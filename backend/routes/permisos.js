@@ -17,6 +17,8 @@ const MODULOS_SEED = [
   { clave:'mensualDireccion',nombre:'Reporte Mensual',  icono:'📋', grupo:'Dirección',            orden:6,
     nota:'Ingresos, gastos operativos e impuestos por empresa, mes a mes.' },
   { clave:'estadoCuenta', nombre:'Estado de Cuenta',    icono:'📑', grupo:'Dirección',            orden:7  },
+  { clave:'conciliacion', nombre:'Conciliación Microsip', icono:'⚖', grupo:'Dirección',          orden:10,
+    nota:'Cruza las facturas del sistema contra el reporte de Microsip, por periodo. En Ver se consulta; de Editar en adelante se puede cerrar y reabrir el mes.' },
   { clave:'clientes',     nombre:'Clientes',            icono:'🏢', grupo:'Ingresos (CxC)',       orden:13 },
   { clave:'otrosIngresos',nombre:'Otros Ingresos S/F',  icono:'💵', grupo:'Ingresos (CxC)',       orden:14,
     nota:'Cobros por servicio que no generan factura. Suman al Concentrado como ingreso no facturado.' },
