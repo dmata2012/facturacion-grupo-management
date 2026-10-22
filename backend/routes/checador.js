@@ -53,6 +53,16 @@ router.use(verificarToken);
       )`);
     await query(`INSERT INTO fac_config(clave, valor) VALUES('bono_semanal_puntualidad','0')
                  ON CONFLICT (clave) DO NOTHING`);
+    // A quien gano la semana pasada se le felicita al marcar entrada. Se anota
+    // para que el aviso salga UNA vez: sin esto reaparece cada vez que vuelve a
+    // marcar, y deja de significar algo.
+    await query(`
+      CREATE TABLE IF NOT EXISTS fac_puntualidad_avisos (
+        empleado_id INT NOT NULL,
+        semana DATE NOT NULL,
+        visto_en TIMESTAMP DEFAULT NOW(),
+        PRIMARY KEY (empleado_id, semana)
+      )`);
   } catch (e) { console.warn('Config del bono semanal:', e.message); }
 })();
 
@@ -1099,6 +1109,47 @@ async function puntosDePuntualidad({ desde, hasta, matriz }) {
            } };
 }
 
+// ¿Esta persona gano la semana PASADA? Se usa al marcar entrada, para
+// felicitarla en el kiosco.
+//
+// Se revisa la semana anterior completa, no la de hoy: la de hoy apenas va
+// empezando y todavia no hay ganador.
+//
+// El aviso se da una sola vez por semana ganada. No se amarra al lunes: si esa
+// persona el lunes descansa o falta, el reconocimiento se perderia. Sale la
+// primera vez que vuelve a marcar entrada, que para casi todos es el lunes.
+async function felicitacionPendiente(empleadoId, hoyISO) {
+  try {
+    const lunesEsta = lunesDe(hoyISO);
+    const lunesPasada = sumaDias(lunesEsta, -7);
+    const viernesPasada = sumaDias(lunesPasada, 4);
+
+    const ya = await query(
+      `SELECT 1 FROM fac_puntualidad_avisos WHERE empleado_id=$1 AND semana=$2::date`,
+      [empleadoId, lunesPasada]);
+    if (ya.rows.length) return null;
+
+    const m = await construirMatriz({ desde: lunesPasada, hasta: viernesPasada });
+    const pts = await puntosDePuntualidad({ desde: lunesPasada, hasta: viernesPasada, matriz: m });
+    const sem = pts.semanas.find(s => s.desde === lunesPasada);
+    if (!sem || !sem.ganador || sem.ganador.empleado_id !== empleadoId) return null;
+
+    const cfg = await query(`SELECT valor FROM fac_config WHERE clave='bono_semanal_puntualidad'`);
+    // Se marca como visto en cuanto se devuelve: si el kiosco se cierra antes de
+    // que lo lean, se pierde, pero es preferible a que reaparezca en cada marca.
+    await query(
+      `INSERT INTO fac_puntualidad_avisos(empleado_id, semana) VALUES($1,$2::date)
+       ON CONFLICT DO NOTHING`, [empleadoId, lunesPasada]);
+
+    return {
+      semana_desde: lunesPasada, semana_hasta: viernesPasada,
+      puntos: sem.ganador.puntos,
+      dias: sem.dias.length,
+      monto: Math.max(0, parseFloat(cfg.rows[0]?.valor || 0) || 0)
+    };
+  } catch (e) { console.warn('Felicitación de puntualidad:', e.message); return null; }
+}
+
 // Modulo propio, no el del Reloj Checador: aqui se ven importes por persona, y
 // quien marca entradas o revisa la lista de asistencia no tiene por que verlos.
 router.get('/bono-puntualidad', permiso('bonoPuntualidad', NIVEL.VER), async (req, res) => {
@@ -1680,13 +1731,17 @@ router.post('/entrada', async (req, res) => {
     let notificaciones = [];
     try { notificaciones = await notificacionesPendientes(empleado_id); } catch(e) {}
 
+    // Si gano la puntualidad de la semana pasada, se le felicita aqui mismo.
+    const felicitacion = await felicitacionPendiente(empleado_id, hoy);
+
     res.json({
       ok: true, empleado: emp.rows[0].nombre, hora: horaAhora,
       retardo_minutos: minutosRetardo,
       es_descanso: esDescanso,
       en_vacaciones: enVacaciones,
       ubicacion: ubiInfo ? { nombre: ubiInfo.nombre, distancia: ubiInfo.distancia } : null,
-      notificaciones
+      notificaciones,
+      felicitacion
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
