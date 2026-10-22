@@ -8950,11 +8950,23 @@ function conPintar() {
         🔒 Cerrado el ${d.cerrado.cuando}${d.cerrado.cerrado_por_nombre ? ' por ' + d.cerrado.cerrado_por_nombre : ''}</span>` : ''}
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      ${tile('Microsip', r.microsip.facturas + ' facturas', 'var(--dark)',
-             fmt(r.microsip.total) + (r.microsip.canceladas ? ` · ${r.microsip.canceladas} cancelada(s) aparte` : ''))}
-      ${tile('Sistema', r.sistema.facturas + ' facturas', 'var(--dark)',
-             fmt(r.sistema.total) + (r.sistema.canceladas ? ` · ${r.sistema.canceladas} cancelada(s) aparte` : ''))}
-      ${tile('Diferencia', (r.diferencia_facturas > 0 ? '+' : '') + r.diferencia_facturas + ' facturas',
+      ${(() => {
+        // Antes el número grande eran las VIGENTES y se leía como el total del
+        // mes: "36" cuando el sistema tenía 40. Ahora arriba va el total y
+        // abajo el desglose, porque la comparación se hace sobre las vigentes
+        // (los reportes del sistema ya excluyen canceladas).
+        const caja = (rotulo, x, deDonde) => {
+          const total = x.facturas + (x.canceladas || 0);
+          return tile(rotulo, total + ' factura' + (total != 1 ? 's' : ''), 'var(--dark)',
+            `${deDonde}<div style="margin-top:3px;color:var(--dark);font-weight:600">
+               ${x.facturas} vigente${x.facturas != 1 ? 's' : ''}
+               ${x.canceladas ? ` · ${x.canceladas} cancelada${x.canceladas != 1 ? 's' : ''}` : ''}</div>
+             <div style="margin-top:1px">${fmt(x.total)} vigente</div>`);
+        };
+        return caja('Microsip', r.microsip, 'leídas del archivo')
+             + caja('Sistema',  r.sistema,  'en el periodo');
+      })()}
+      ${tile('Diferencia en vigentes', (r.diferencia_facturas > 0 ? '+' : '') + r.diferencia_facturas + ' facturas',
              cuadra ? 'var(--success)' : 'var(--danger)', fmt(r.diferencia_monto))}
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;font-size:11.5px">
