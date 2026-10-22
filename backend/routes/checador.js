@@ -917,14 +917,16 @@ const CODIGOS_QUE_TUMBAN = {
 
 // ══ PUNTOS DE PUNTUALIDAD · BONO EXTRA SEMANAL ════════════════
 //
-// Cada dia laborable gana 1 punto quien llego con MAS ANTICIPACION a su propia
-// hora de entrada. No se compara la hora del reloj a secas: con turnos
-// distintos, quien entra a las 7 le ganaria siempre a quien entra a las 11, y
-// el premio dejaria de ser a la puntualidad para ser al turno que te tocó.
+// Cada dia laborable gana 1 punto QUIEN REGISTRO ENTRADA MAS TEMPRANO. Se mide
+// la hora del reloj tal cual, sin compararla contra el horario de cada quien:
+// es la regla que pidio direccion y la mas facil de explicar, porque cualquiera
+// puede ver la lista de llegadas y saber quien gano.
 //
-// Para cambiarlo a hora del reloj basta con poner POR_ANTICIPACION en false:
-// entonces el punto se da a la hora de llegada mas temprana, sin mirar horarios.
-const POR_ANTICIPACION = true;
+// Consecuencia a tener presente: si hay turnos distintos, quien entra mas
+// temprano lleva ventaja. Poniendo POR_ANTICIPACION en true se cambia a medir
+// cuantos minutos antes de SU hora llego cada quien, y entonces compiten todos
+// parejo sin importar el turno.
+const POR_ANTICIPACION = false;
 
 // De lunes a viernes. El sabado no entra aunque se trabaje: la competencia es
 // semanal y cinco dias le dan la misma oportunidad a todos.

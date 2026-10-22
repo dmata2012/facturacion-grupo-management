@@ -11674,6 +11674,9 @@ function bnBloqueSemanal(d) {
         <div style="font-size:11.5px;color:var(--muted)">
           ${g.puntos} punto${g.puntos != 1 ? 's' : ''} de ${sem.dias.length} día${sem.dias.length != 1 ? 's' : ''}
           ${sm.por_anticipacion ? ` · ${g.minutos_antes} min de anticipación` : ''}</div>
+        ${sem.dias.length > g.puntos ? `<div style="font-size:10.5px;color:var(--muted)">
+           Los otros ${sem.dias.length - g.puntos} día${sem.dias.length - g.puntos != 1 ? 's' : ''}
+           llegó primero alguien más.</div>` : ''}
         ${sem.empate ? `<div style="font-size:11px;color:#b45309;margin-top:3px">
            Hubo empate; ganó por número de colaborador.</div>` : ''}
         ${sm.monto ? `<div style="font-size:13px;font-weight:800;color:var(--success);margin-top:5px">
@@ -11699,8 +11702,9 @@ function bnBloqueSemanal(d) {
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:11px">
       <span style="font-size:13.5px;font-weight:900;color:#92400e">🏆 Bono extra al más puntual de la semana</span>
       <span style="font-size:11.5px;color:var(--muted);flex:1;min-width:200px">
-        Cada día gana 1 punto quien llegó con más anticipación
-        ${sm.por_anticipacion ? 'a su propio horario' : '(hora del reloj)'}.
+        ${sm.por_anticipacion
+          ? 'Cada día gana 1 punto quien llegó con más anticipación a su propio horario.'
+          : 'Cada día gana 1 punto quien registró entrada más temprano, por la hora del reloj.'}
         El de más puntos se lleva el extra, que se suma a su bono normal.</span>
       ${puedeEditar ? `<button class="btn bo bsm" onclick="bnEditarMontoSemanal()">
         💰 Monto: ${fmt(sm.monto)}</button>`
@@ -11725,6 +11729,9 @@ function bnPorQueNadieCompitio(sm) {
 
   if (!g) return '<p class="empty" style="margin:0">Sin datos para este periodo.</p>';
   const d = g.descartes || {};
+  // Midiendo por hora de reloj no hace falta tener horario configurado ni se
+  // descarta a quien llega tarde: esos motivos no pueden aparecer.
+  const porReloj = sm.por_anticipacion === false;
 
   if (!g.registros)
     return caja('<strong>No hay marcas de entrada en este periodo.</strong> '
@@ -11732,7 +11739,7 @@ function bnPorQueNadieCompitio(sm) {
 
   // La causa mas probable y la que no se nota: sin hora de entrada no hay
   // contra que medir la anticipacion.
-  if ((g.sin_horario || []).length)
+  if (!porReloj && (g.sin_horario || []).length)
     return caja(
       `<strong>${g.sin_horario.length} colaborador${g.sin_horario.length != 1 ? 'es' : ''} no tiene${
         g.sin_horario.length != 1 ? 'n' : ''} hora de entrada configurada</strong>, `
@@ -11740,7 +11747,7 @@ function bnPorQueNadieCompitio(sm) {
       + g.sin_horario.map(x => x.nombre).join(', ') + '.',
       'Se configura en <strong>Empleados</strong>, en el horario de cada quien.');
 
-  if (d.llegaron_tarde && !d.sin_horario)
+  if (!porReloj && d.llegaron_tarde && !d.sin_horario)
     return caja(`<strong>Nadie llegó antes de su hora en este periodo.</strong> `
       + `Los ${d.llegaron_tarde} registros útiles fueron llegadas tarde, y llegar tarde no compite.`);
 
