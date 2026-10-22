@@ -9025,7 +9025,11 @@ function conFila(x, tipo) {
       <td style="text-align:right">${fmt(x.total)}</td>
       <td style="color:var(--danger)">${x.motivo}</td></tr>`;
   if (tipo === 'difieren')
-    return `<tr><td style="font-weight:700;white-space:nowrap">${folio}</td>
+    // El folio abre la factura: desde ahí se ve completa y, si está cancelada
+    // por error, se puede reactivar sin salir de la conciliación.
+    return `<tr><td style="font-weight:700;white-space:nowrap">${
+        x.id ? `<a href="#" onclick="detalleFactura(${x.id});return false"
+                   title="Abrir la factura" style="color:var(--red)">${folio}</a>` : folio}</td>
       <td style="font-size:11.5px">${x.receptor || x.receptor_sistema || '—'}</td>
       <td style="white-space:nowrap;font-size:11.5px;color:var(--muted)">${fmtDate(x.fecha)}</td>
       <td>${x.diferencias.map(dd => `
@@ -9036,7 +9040,8 @@ function conFila(x, tipo) {
         </div>`).join('')}</td></tr>`;
   const estatus = x.cancelada ? 'CANCELADA en el SAT' : (x.estatus || 'vigente');
   return `<tr><td style="font-weight:700;white-space:nowrap">${
-      x.id ? `<a href="#" onclick="detalleFactura(${x.id})" style="color:var(--red)">${folio}</a>` : folio}</td>
+      x.id ? `<a href="#" onclick="detalleFactura(${x.id});return false"
+                 title="Abrir la factura" style="color:var(--red)">${folio}</a>` : folio}</td>
     <td style="font-size:11.5px">${x.receptor || x.nombre_receptor || '—'}</td>
     <td style="font-size:11.5px">${x.emisor || x.nombre_emisor || '—'}</td>
     <td style="white-space:nowrap;font-size:11.5px;color:var(--muted)">${fmtDate(x.fecha)}</td>
