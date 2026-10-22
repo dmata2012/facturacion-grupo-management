@@ -64,6 +64,7 @@ app.use('/api/permisos',  require('./routes/permisos'));
 app.use('/api/ingresos-sf', require('./routes/ingresos-sf'));
 app.use('/api/sat',       require('./routes/sat'));
 app.use('/api/pagos-programados', require('./routes/pagos-programados'));
+app.use('/api/solicitudes-pago', require('./routes/solicitudes-pago'));
 
 // ── Health check ──────────────────────────────
 app.get('/api/health', async (req, res) => {

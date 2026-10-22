@@ -226,8 +226,16 @@ router.patch('/:id/pagar', permiso('programacionPagos', NIVEL.EDITAR), async (re
   try {
     const { pagado_en, pago_referencia, pago_notas, revertir } = req.body;
 
-    const actual = await query(`SELECT estatus FROM fac_pagos_programados WHERE id=$1`, [req.params.id]);
+    const actual = await query(
+      `SELECT estatus, solicitud_id FROM fac_pagos_programados WHERE id=$1`, [req.params.id]);
     if (!actual.rows.length) return res.status(404).json({ error: 'Pago programado no encontrado.' });
+
+    // Un renglón que vino de una solicitud de pago no se liquida desde aquí: al
+    // marcarlo pagado allá se avisa por correo al solicitante, y cerrarlo por
+    // este lado dejaría a la solicitud abierta y al aviso sin salir.
+    if (actual.rows[0].solicitud_id && !revertir)
+      return res.status(400).json({
+        error: 'Este pago viene de una solicitud. Márcalo pagado desde la Cola de Pagos para que se avise a quien lo pidió.' });
 
     if (revertir) {
       await query(

@@ -36,6 +36,10 @@ const MODULOS_SEED = [
   { clave:'bonoPuntualidad', nombre:'Bono de Puntualidad', icono:'🏅', grupo:'Recursos Humanos', orden:36,
     nota:'Quién gana el bono del periodo y de cuánto es. Se asigna aparte del Reloj Checador porque muestra importes: en Ver solo se consulta, y de Editar en adelante se pueden cambiar los montos de cada colaborador.' },
   { clave:'cajaChica',    nombre:'Caja Chica',          icono:'💵', grupo:'Tesorería',            orden:40 },
+  { clave:'solicitudesPago', nombre:'Solicitudes de Pago',   icono:'🧾', grupo:'Mi espacio',           orden:7,
+    nota:'Pedir un pago y seguir el tuyo. En Editar además se autorizan o rechazan las de todos, que es el permiso del autorizador.' },
+  { clave:'colaPagos',       nombre:'Cola de Pagos',          icono:'⏱', grupo:'Tesorería',            orden:42,
+    nota:'Pantalla en vivo de Tesorería con las solicitudes ya autorizadas. En Editar se toman, se sueltan y se marcan pagadas, lo que dispara el aviso por correo al solicitante.' },
   { clave:'programacionPagos', nombre:'Programación de Pagos', icono:'📅', grupo:'Tesorería',          orden:41,
     nota:'Agenda de lo que hay que pagar y cuándo. Se captura aparte: no lee los gastos de CxP ni genera movimiento bancario. En Editar además se marca pagado y se cancela.' },
   { clave:'bancos',       nombre:'Cuentas Bancarias',   icono:'🏦', grupo:'Bancos',               orden:50 },
@@ -64,15 +68,18 @@ const PERFILES_SEED = [
 
   { clave:'capturista', nombre:'Capturista', color:'#0891b2', es_sistema:true,
     descripcion:'Captura facturas y apoya en Recursos Humanos.',
-    permisos: { facturas: E, clientes: E, empleados: E, vacaciones: C, gastos: C, dashboard: V, asistencia: V } },
+    permisos: { facturas: E, clientes: E, empleados: E, vacaciones: C, gastos: C,
+                solicitudesPago: C, dashboard: V, asistencia: V } },
 
   { clave:'tesoreria', nombre:'Tesorería', color:'#059669', es_sistema:true,
-    descripcion:'Maneja caja chica y bancos.',
-    permisos: { cajaChica: T, programacionPagos: T, bancos: E, vacaciones: C, gastos: E, dashboard: V } },
+    descripcion:'Maneja caja chica y bancos, y procesa la cola de solicitudes de pago.',
+    permisos: { cajaChica: T, programacionPagos: T, colaPagos: T, solicitudesPago: C,
+                bancos: E, vacaciones: C, gastos: E, dashboard: V } },
 
   { clave:'tesoreria_consulta', nombre:'Tesorería (consulta)', color:'#0284c7', es_sistema:true,
-    descripcion:'Consulta caja chica y bancos, sin poder modificar.',
-    permisos: { cajaChica: V, programacionPagos: V, bancos: V, vacaciones: C, dashboard: V } },
+    descripcion:'Consulta caja chica, bancos y la cola de pagos, sin poder modificar.',
+    permisos: { cajaChica: V, programacionPagos: V, colaPagos: V, solicitudesPago: C,
+                bancos: V, vacaciones: C, dashboard: V } },
 
   { clave:'checador', nombre:'Reloj Checador', color:'#a16207', es_sistema:true,
     descripcion:'Perfil de la tablet del kiosco. Solo marca entradas y salidas.',
@@ -88,7 +95,7 @@ const PERFILES_SEED = [
   // solicitudes de todos; 'misVacaciones' está acotado a su propio expediente.
   { clave:'colaborador', nombre:'Colaborador', color:'#0d9488', es_sistema:true,
     descripcion:'Solo puede solicitar sus vacaciones y ver sus propios días. No ve información de nadie más.',
-    permisos: { misVacaciones: C, miAsistencia: V } }
+    permisos: { misVacaciones: C, miAsistencia: V, solicitudesPago: C } }
 ];
 
 (async () => {

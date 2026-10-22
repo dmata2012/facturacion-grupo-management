@@ -728,6 +728,7 @@ canvas{max-height:230px}
       <a href="#" onclick="nav('dashboard')" id="nav-dashboard" style="margin-top:8px"><span class="ni"><svg><use href="#i-home"/></svg></span> Dashboard</a>
       <a href="#" onclick="nav('misVacaciones')" id="nav-misVacaciones"><span class="ni"><svg><use href="#i-palm"/></svg></span> Mis Vacaciones</a>
       <a href="#" onclick="nav('miAsistencia')" id="nav-miAsistencia"><span class="ni"><svg><use href="#i-clock"/></svg></span> Mi Asistencia</a>
+      <a href="#" onclick="nav('solicitudesPago')" id="nav-solicitudesPago"><span class="ni"><svg><use href="#i-invoice"/></svg></span> Solicitudes de Pago</a>
 
       <div class="nav-group" data-group="direccion">
         <button class="nav-group-toggle" onclick="toggleNavGroup('direccion')">
@@ -796,6 +797,7 @@ canvas{max-height:230px}
         <div class="nav-group-items">
           <a href="#" onclick="nav('cajaChica')" id="nav-cajaChica"><span class="ni"><svg><use href="#i-wallet"/></svg></span> Caja Chica</a>
           <a href="#" onclick="nav('programacionPagos')" id="nav-programacionPagos"><span class="ni"><svg><use href="#i-calendar"/></svg></span> Programación de Pagos</a>
+          <a href="#" onclick="nav('colaPagos')" id="nav-colaPagos"><span class="ni"><svg><use href="#i-clock"/></svg></span> Cola de Pagos</a>
         </div>
       </div>
 
@@ -868,6 +870,10 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-cc-devuelto"><div class="modal modal-sm" id="modal-cc-devuelto-body"></div></div>
 <div class="overlay" id="modal-cc-informe"><div class="modal" style="width:min(1000px,96vw)" id="modal-cc-informe-body"></div></div>
 <div class="overlay" id="modal-cc-cats"><div class="modal" style="width:min(1000px,96vw);position:relative" id="modal-cc-cats-body"></div></div>
+<div class="overlay" id="modal-sol"><div class="modal" id="modal-sol-body"></div></div>
+<div class="overlay" id="modal-sol-autorizar"><div class="modal modal-sm" id="modal-sol-autorizar-body"></div></div>
+<div class="overlay" id="modal-sol-pagar"><div class="modal modal-sm" id="modal-sol-pagar-body"></div></div>
+<div class="overlay" id="modal-sol-ver"><div class="modal" id="modal-sol-ver-body"></div></div>
 <div class="overlay" id="modal-pprog"><div class="modal modal-sm" id="modal-pprog-body"></div></div>
 <div class="overlay" id="modal-pprog-pagar"><div class="modal modal-sm" id="modal-pprog-pagar-body"></div></div>
 <div class="overlay" id="modal-cambiar-clave"><div class="modal modal-sm" id="modal-cambiar-clave-body"></div></div>
@@ -1091,9 +1097,9 @@ async function cargarMisPermisos() {
 }
 
 // Páginas permitidas por rol restringido
-const PAGES_CAPTURISTA         = ['facturas', 'empleados', 'vacaciones'];
-const PAGES_TESORERIA          = ['cajaChica', 'programacionPagos', 'bancos', 'vacaciones'];
-const PAGES_TESORERIA_CONSULTA = ['cajaChica', 'programacionPagos', 'bancos', 'vacaciones'];
+const PAGES_CAPTURISTA         = ['facturas', 'empleados', 'vacaciones', 'solicitudesPago'];
+const PAGES_TESORERIA          = ['cajaChica', 'programacionPagos', 'colaPagos', 'solicitudesPago', 'bancos', 'vacaciones'];
+const PAGES_TESORERIA_CONSULTA = ['cajaChica', 'programacionPagos', 'colaPagos', 'solicitudesPago', 'bancos', 'vacaciones'];
 const PAGES_CHECADOR           = ['checador'];
 
 // Una factura se traba (no se edita ni se borra) cuando su desglose esta
@@ -1374,14 +1380,15 @@ function nav(page) {
     expedienteAsistencia:'Expediente de Asistencia',
     bonoPuntualidad:'Bono de Puntualidad',
     mensualDireccion:'Reporte Mensual',
-    programacionPagos:'Programación de Pagos'
+    programacionPagos:'Programación de Pagos',
+    solicitudesPago:'Solicitudes de Pago', colaPagos:'Cola de Pagos'
   };
   const mt = $('mt-title');
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
     dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones, asistencia, concentrado, otrosIngresos,
     mensualDireccion, expedienteAsistencia, bonoPuntualidad, miAsistencia,
-    programacionPagos
+    programacionPagos, solicitudesPago, colaPagos
   };
   if (pages[page]) pages[page]();
 }
@@ -18517,6 +18524,601 @@ async function imprimirSolicitudVac(id) {
   } catch(e) { toast(e.message, 'err'); }
 }
 
+// ══ SOLICITUDES DE PAGO ═════════════════════
+// Dos pantallas sobre el mismo expediente: aquí se pide y se autoriza; la cola
+// de Tesorería (más abajo) es donde se trabaja. Los permisos son dos módulos
+// distintos porque autorizar y pagar las hace gente distinta.
+function solPuedeAutorizar() { return puedeO('solicitudesPago', NIVEL.EDITAR, canAdmin()); }
+function solPuedeBorrar()    { return puedeO('solicitudesPago', NIVEL.TODO,   canAdmin()); }
+function colaPuedeTrabajar() { return puedeO('colaPagos', NIVEL.EDITAR, isTesoreria() || canAdmin()); }
+
+const SOL_TIPO = {
+  efectivo     : { etiqueta:'Efectivo',             icono:'💵' },
+  cheque       : { etiqueta:'Cheque',               icono:'🧾' },
+  dispersion   : { etiqueta:'Dispersión',           icono:'📊' },
+  transferencia: { etiqueta:'Transferencia / SPEI', icono:'🏦' }
+};
+const SOL_ESTATUS = {
+  pendiente : { etiqueta:'Por autorizar', fondo:'#fffbeb', borde:'#fde68a', color:'#b45309' },
+  autorizada: { etiqueta:'En cola',       fondo:'#eff6ff', borde:'#bfdbfe', color:'#1d4ed8' },
+  en_proceso: { etiqueta:'En proceso',    fondo:'#f5f3ff', borde:'#ddd6fe', color:'#6d28d9' },
+  pagada    : { etiqueta:'Pagada',        fondo:'#f0fdf4', borde:'#bbf7d0', color:'#166534' },
+  rechazada : { etiqueta:'Rechazada',     fondo:'#fef2f2', borde:'#fecaca', color:'#b91c1c' },
+  cancelada : { etiqueta:'Cancelada',     fondo:'#f1f5f9', borde:'#e2e8f0', color:'#64748b' }
+};
+function solSello(e) {
+  const x = SOL_ESTATUS[e] || SOL_ESTATUS.pendiente;
+  return `<span class="sol-pill" style="background:${x.fondo};border-color:${x.borde};color:${x.color}">${x.etiqueta}</span>`;
+}
+
+// Estilos compartidos por las dos pantallas
+const SOL_CSS = `
+  <style>
+    .sol-pill{display:inline-flex;align-items:center;gap:4px;font-size:9.5px;font-weight:900;
+      padding:2px 9px;border-radius:99px;text-transform:uppercase;letter-spacing:.4px;
+      white-space:nowrap;border:1px solid transparent}
+    .sol-hero{border-radius:16px;padding:16px 20px;color:#fff;margin-bottom:14px;position:relative;overflow:hidden}
+    .sol-hero-t{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;position:relative;z-index:1}
+    .sol-hero h2{margin:0;font-size:18px;font-weight:900;letter-spacing:-.3px}
+    .sol-hero .sub{font-size:11px;opacity:.8;margin-top:1px}
+    .sol-kpis{display:flex;flex-wrap:wrap;margin-top:14px;position:relative;z-index:1;
+      background:rgba(0,0,0,.16);border-radius:11px;overflow:hidden}
+    .sol-kpi{flex:1;min-width:125px;padding:9px 14px;border-right:1px solid rgba(255,255,255,.12)}
+    .sol-kpi:last-child{border-right:none}
+    .sol-kpi .l{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.9px;opacity:.72}
+    .sol-kpi .v{font-size:17px;font-weight:900;line-height:1.15;margin-top:1px;letter-spacing:-.4px}
+    .sol-kpi .s{font-size:9.5px;opacity:.7;margin-top:1px}
+    .sol-tool{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+    .sol-f{border:1.5px solid var(--border);border-radius:10px;padding:8px 11px;
+      font-size:12.5px;font-weight:700;background:#fff;color:#475569}
+    .sol-buscar{flex:1;min-width:180px;display:flex;align-items:center;gap:8px;background:#fff;
+      border:1.5px solid var(--border);border-radius:10px;padding:8px 12px}
+    .sol-buscar input{flex:1;border:none;outline:none;font-size:13px;background:none;color:var(--dark)}
+    tr.sol-urge td{background:#fff7f7}
+    .sol-folio{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;font-weight:800;color:var(--red)}
+  </style>`;
+
+function solKpi(l, v, s) {
+  return `<div class="sol-kpi"><div class="l">${l}</div><div class="v">${v}</div>${s?`<div class="s">${s}</div>`:''}</div>`;
+}
+
+// ── PANTALLA 1: pedir y autorizar ───────────
+async function solicitudesPago() {
+  const autoriza = solPuedeAutorizar();
+  $('content').innerHTML = SOL_CSS + `
+    <div class="sol-hero" style="background:linear-gradient(135deg,#312e81 0%,#4338ca 55%,#4f46e5 100%)">
+      <div class="sol-hero-t">
+        <div>
+          <h2>Solicitudes de Pago</h2>
+          <div class="sub">${autoriza
+            ? 'Pide un pago y autoriza los de todos · Lo autorizado pasa a la cola de Tesorería'
+            : 'Pide un pago y sigue en qué va · Te avisamos por correo cuando esté pagado'}</div>
+        </div>
+        <button class="btn bsm" onclick="openSolicitud()"
+                style="background:#fff;color:#4338ca;font-weight:900;border:none">＋ Pedir un pago</button>
+      </div>
+      <div class="sol-kpis" id="sol-kpis"></div>
+    </div>
+
+    <div class="sol-tool">
+      <div class="sol-buscar">
+        <span style="color:#94a3b8;font-size:14px">🔍</span>
+        <input id="sol-buscar" placeholder="Folio, beneficiario, concepto o referencia…" oninput="filtrarSol()">
+      </div>
+      <select id="sol-estatus" class="sol-f" onchange="cargarSol()">
+        <option value="abiertas">En curso</option>
+        <option value="pendiente">Por autorizar</option>
+        <option value="autorizada">En cola</option>
+        <option value="en_proceso">En proceso</option>
+        <option value="pagada">Pagadas</option>
+        <option value="rechazada">Rechazadas</option>
+        <option value="">Todas</option>
+      </select>
+      <select id="sol-tipo" class="sol-f" onchange="cargarSol()">
+        <option value="">Toda forma de pago</option>
+        ${Object.entries(SOL_TIPO).map(([k,v]) => `<option value="${k}">${v.etiqueta}</option>`).join('')}
+      </select>
+      ${autoriza ? `<label class="sol-f" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="sol-mias" onchange="cargarSol()"> Solo las mías</label>` : ''}
+      <button class="btn bo bsm" onclick="exportarSolExcel()">⬇ Excel</button>
+    </div>
+    <div id="sol-body"><p class="empty">Cargando…</p></div>`;
+  cargarSol();
+}
+
+let _solBuscarTO = null;
+function filtrarSol() { clearTimeout(_solBuscarTO); _solBuscarTO = setTimeout(cargarSol, 250); }
+
+async function cargarSol() {
+  const p = [];
+  const e = $('sol-estatus')?.value, t = $('sol-tipo')?.value;
+  const b = ($('sol-buscar')?.value || '').trim();
+  if (e) p.push(`estatus=${e}`);
+  if (t) p.push(`tipo_pago=${t}`);
+  if (b) p.push(`buscar=${encodeURIComponent(b)}`);
+  if ($('sol-mias')?.checked) p.push('mias=true');
+  $('sol-body').innerHTML = '<p class="empty">Cargando…</p>';
+  try {
+    const r = await api(`/solicitudes-pago${p.length?'?'+p.join('&'):''}`);
+    window._solData = r;
+    const t2 = r.totales;
+    $('sol-kpis').innerHTML =
+      solKpi('Por autorizar', fmt(t2.por_autorizar), `${t2.n_pendientes} solicitud${t2.n_pendientes==1?'':'es'}`) +
+      solKpi('En curso',      fmt(t2.abierto),       `${t2.n_autorizadas} en cola · ${t2.n_proceso} en proceso`) +
+      solKpi('Pagado',        fmt(t2.pagado),        `${t2.n_pagadas} concluida${t2.n_pagadas==1?'':'s'}`);
+    pintarSol(r);
+  } catch(err) { $('sol-body').innerHTML = `<p class="empty">${err.message}</p>`; }
+}
+
+function pintarSol(r) {
+  const d = r.data || [];
+  if (!d.length) { $('sol-body').innerHTML = '<p class="empty">No hay solicitudes con estos filtros.</p>'; return; }
+  const autoriza = solPuedeAutorizar();
+  $('sol-body').innerHTML = `
+  <div class="card" style="padding:0;overflow:hidden">
+    <div class="tscroll"><table>
+      <thead><tr>
+        <th>Folio</th>${r.ve_todas?'<th>Solicita</th>':''}<th>Beneficiario</th><th>Concepto</th>
+        <th>Forma</th><th>Requerido</th><th style="text-align:right">Importe</th>
+        <th>Estatus</th><th>Acciones</th>
+      </tr></thead>
+      <tbody>${d.map(s => {
+        const tp = SOL_TIPO[s.tipo_pago] || {};
+        const mio = ME && s.solicitante_id === ME.id;
+        const acc = [];
+        acc.push(`<button class="btn bo bsm" onclick="verSolicitud(${s.id})" title="Ver detalle">👁</button>`);
+        if (s.estatus === 'pendiente' && autoriza)
+          acc.push(`<button class="btn bsuc bsm" onclick="openAutorizarSol(${s.id})" title="Autorizar o rechazar">✔ Autorizar</button>`);
+        if (s.estatus === 'pendiente' && mio)
+          acc.push(`<button class="btn bg bsm" onclick="openSolicitud(${s.id})" title="Editar">✏️</button>`,
+                   `<button class="btn bd bsm" onclick="cancelarSol(${s.id})" title="Cancelar">✕</button>`);
+        if (solPuedeBorrar())
+          acc.push(`<button class="btn bd bsm" onclick="borrarSol(${s.id})" title="Borrar"
+                    style="background:#fff0f0;border-color:#ffd7d7">🗑️</button>`);
+        return `<tr class="${s.urgente && s.estatus!=='pagada' ? 'sol-urge':''}">
+          <td><span class="sol-folio">${s.folio||'—'}</span>
+            ${s.urgente?'<div style="font-size:9.5px;font-weight:900;color:var(--danger)">URGENTE</div>':''}</td>
+          ${r.ve_todas?`<td style="font-size:11.5px">${s.solicitante||'—'}</td>`:''}
+          <td style="font-weight:700">${s.beneficiario}</td>
+          <td style="font-size:12px">${s.concepto}</td>
+          <td style="font-size:11.5px;white-space:nowrap">${tp.icono||''} ${tp.etiqueta||s.tipo_pago}</td>
+          <td style="font-size:11.5px;white-space:nowrap">${s.fecha_requerida?fmtDate(s.fecha_requerida):'—'}
+            ${s.atrasada?'<div style="font-size:9.5px;font-weight:800;color:var(--danger)">fecha pasada</div>':''}</td>
+          <td style="text-align:right;font-weight:800;white-space:nowrap">${fmt(s.monto)}</td>
+          <td>${solSello(s.estatus)}</td>
+          <td style="white-space:nowrap">${acc.join(' ')}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+// ── Alta / edición de una solicitud ─────────
+function solCamposPorTipo() {
+  const t = $('sol-c-tipo')?.value;
+  const ver = (id, mostrar) => { const e = $(id); if (e) e.style.display = mostrar ? '' : 'none'; };
+  ver('sol-g-banco',  t === 'transferencia' || t === 'dispersion');
+  ver('sol-g-cheque', t === 'cheque');
+}
+
+async function openSolicitud(id = null) {
+  $('modal-sol-body').innerHTML = `
+  <h4 style="margin-bottom:14px">${id?'Editar':'Nueva'} solicitud de pago</h4>
+  <div class="fg">
+    <div class="fi full"><label>Beneficiario *</label>
+      <input id="sol-c-benef" placeholder="A quién se le paga"></div>
+    <div class="fi full"><label>Concepto *</label>
+      <input id="sol-c-concepto" placeholder="Por qué se paga"></div>
+    <div class="fi"><label>Importe *</label>
+      <input type="number" id="sol-c-monto" min="0.01" step="0.01" placeholder="0.00"></div>
+    <div class="fi"><label>Forma de pago *</label>
+      <select id="sol-c-tipo" onchange="solCamposPorTipo()">
+        ${Object.entries(SOL_TIPO).map(([k,v]) => `<option value="${k}">${v.icono} ${v.etiqueta}</option>`).join('')}
+      </select></div>
+    <div class="fi"><label>Se necesita para</label>
+      <input type="date" id="sol-c-fecha"></div>
+    <div class="fi"><label>Referencia</label>
+      <input id="sol-c-ref" placeholder="Factura, contrato o folio"></div>
+
+    <div class="fi full" id="sol-g-banco" style="display:none">
+      <div style="background:#f8fafc;border:1.5px solid var(--border);border-radius:10px;padding:12px">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;
+                    color:var(--muted);margin-bottom:8px">Datos para depositar</div>
+        <div class="fg" style="gap:10px">
+          <div class="fi"><label>Banco</label><input id="sol-c-banco" placeholder="BBVA, Santander…"></div>
+          <div class="fi"><label>Titular de la cuenta</label><input id="sol-c-titular" placeholder="A nombre de quién"></div>
+          <div class="fi"><label>CLABE</label><input id="sol-c-clabe" placeholder="18 dígitos" maxlength="18"></div>
+          <div class="fi"><label>o Número de cuenta</label><input id="sol-c-cuenta" placeholder="Si no tienes CLABE"></div>
+        </div>
+        <div style="font-size:10.5px;color:var(--muted);margin-top:6px">
+          Hace falta la CLABE o el número de cuenta; sin eso Tesorería no puede dispersar.
+        </div>
+      </div>
+    </div>
+
+    <div class="fi full" id="sol-g-cheque" style="display:none">
+      <label>Cheque a nombre de</label>
+      <input id="sol-c-chnombre" placeholder="Como debe salir impreso en el cheque">
+    </div>
+
+    <div class="fi full"><label>Notas</label>
+      <textarea id="sol-c-notas" rows="2" placeholder="Lo que Tesorería deba saber"></textarea></div>
+
+    <div class="fi full" style="background:#fff7f7;border:1.5px solid #fecaca;border-radius:8px;padding:10px 12px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;color:#b91c1c;margin-bottom:0">
+        <input type="checkbox" id="sol-c-urgente" style="width:17px;height:17px;cursor:pointer">
+        <span>Marcar como urgente</span>
+      </label>
+      <div style="font-size:10.5px;color:#7f1d1d;margin-top:4px;margin-left:25px">
+        Sube al principio de la cola de Tesorería. Úsalo solo cuando de verdad lo sea.
+      </div>
+    </div>
+  </div>
+  <div class="form-actions">
+    <button class="btn bo" onclick="closeModal('modal-sol')">Cancelar</button>
+    <button class="btn bs" onclick="guardarSolicitud(${id||null})">${id?'Guardar cambios':'Enviar solicitud'}</button>
+  </div>`;
+
+  if (id) {
+    try {
+      const s = await api(`/solicitudes-pago/${id}`);
+      $('sol-c-benef').value    = s.beneficiario || '';
+      $('sol-c-concepto').value = s.concepto     || '';
+      $('sol-c-monto').value    = s.monto        || '';
+      $('sol-c-tipo').value     = s.tipo_pago    || 'transferencia';
+      $('sol-c-fecha').value    = s.fecha_requerida || '';
+      $('sol-c-ref').value      = s.referencia   || '';
+      $('sol-c-banco').value    = s.banco        || '';
+      $('sol-c-titular').value  = s.titular      || '';
+      $('sol-c-clabe').value    = s.clabe        || '';
+      $('sol-c-cuenta').value   = s.cuenta       || '';
+      $('sol-c-chnombre').value = s.cheque_a_nombre_de || '';
+      $('sol-c-notas').value    = s.notas        || '';
+      $('sol-c-urgente').checked = !!s.urgente;
+    } catch(e) { toast(e.message, 'err'); }
+  }
+  solCamposPorTipo();
+  openModal('modal-sol');
+}
+
+async function guardarSolicitud(id) {
+  const body = {
+    beneficiario      : $('sol-c-benef').value.trim(),
+    concepto          : $('sol-c-concepto').value.trim(),
+    monto             : $('sol-c-monto').value,
+    tipo_pago         : $('sol-c-tipo').value,
+    fecha_requerida   : $('sol-c-fecha').value || null,
+    referencia        : $('sol-c-ref').value.trim(),
+    banco             : $('sol-c-banco').value.trim(),
+    titular           : $('sol-c-titular').value.trim(),
+    clabe             : $('sol-c-clabe').value.trim(),
+    cuenta            : $('sol-c-cuenta').value.trim(),
+    cheque_a_nombre_de: $('sol-c-chnombre').value.trim(),
+    notas             : $('sol-c-notas').value.trim(),
+    urgente           : $('sol-c-urgente').checked
+  };
+  if (!body.beneficiario) return toast('Falta el beneficiario.', 'err');
+  if (!body.concepto)     return toast('Falta el concepto.', 'err');
+  if (!(parseFloat(body.monto) > 0)) return toast('El importe debe ser mayor a cero.', 'err');
+  try {
+    if (id) await api(`/solicitudes-pago/${id}`, { method:'PUT',  body: JSON.stringify(body) });
+    else    await api('/solicitudes-pago',        { method:'POST', body: JSON.stringify(body) });
+    toast(id ? 'Solicitud actualizada.' : 'Solicitud enviada a autorización.');
+    closeModal('modal-sol');
+    cargarSol();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+// ── Detalle ─────────────────────────────────
+async function verSolicitud(id) {
+  try {
+    const s = await api(`/solicitudes-pago/${id}`);
+    const tp = SOL_TIPO[s.tipo_pago] || {};
+    const dato = (l, v) => v ? `<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)">
+      <div style="min-width:150px;font-size:11.5px;color:var(--muted);font-weight:700">${l}</div>
+      <div style="font-size:12.5px;font-weight:600;color:var(--dark)">${v}</div></div>` : '';
+    $('modal-sol-ver-body').innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px">
+        <h4 style="margin:0"><span class="sol-folio" style="font-size:14px">${s.folio}</span></h4>
+        ${solSello(s.estatus)}
+      </div>
+      ${dato('Beneficiario', s.beneficiario)}
+      ${dato('Concepto', s.concepto)}
+      ${dato('Importe', `${fmt(s.monto)} ${s.moneda}`)}
+      ${dato('Forma de pago', `${tp.icono||''} ${tp.etiqueta||s.tipo_pago}`)}
+      ${dato('Se necesita para', s.fecha_requerida ? fmtDate(s.fecha_requerida) : '')}
+      ${dato('Urgente', s.urgente ? 'Sí' : '')}
+      ${dato('Banco', s.banco)}
+      ${dato('Titular', s.titular)}
+      ${dato('CLABE', s.clabe)}
+      ${dato('Cuenta', s.cuenta)}
+      ${dato('Cheque a nombre de', s.cheque_a_nombre_de)}
+      ${dato('Referencia', s.referencia)}
+      ${dato('Notas', s.notas)}
+      <div style="margin-top:14px;font-size:11px;font-weight:800;text-transform:uppercase;
+                  letter-spacing:.6px;color:var(--muted)">Línea de vida</div>
+      ${dato('Solicitó', `${s.solicitante || '—'} · ${fmtDate(s.solicitado_el)}`)}
+      ${dato('Autorizó', s.autorizador)}
+      ${dato('Nota de autorización', s.autorizacion_nota)}
+      ${dato('Motivo del rechazo', s.rechazo_motivo)}
+      ${dato('Tomada por', s.tomada_por_nombre)}
+      ${dato('Pagó', s.pagada_por_nombre)}
+      ${dato('Pagada el', s.pagada_en_txt)}
+      ${dato('Referencia del pago', s.pago_referencia)}
+      ${dato('Aviso por correo', s.estatus === 'pagada'
+          ? (s.correo_enviado_en ? `Enviado a ${s.solicitante_email}`
+             : `<span style="color:var(--danger)">No salió (${s.correo_error||'—'})</span>`)
+          : '')}
+      <div class="form-actions">
+        ${s.estatus === 'pagada' && !s.correo_enviado_en && colaPuedeTrabajar()
+          ? `<button class="btn bo" onclick="reenviarAvisoSol(${s.id})">✉ Reintentar aviso</button>` : ''}
+        <button class="btn bs" onclick="closeModal('modal-sol-ver')">Cerrar</button>
+      </div>`;
+    openModal('modal-sol-ver');
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function reenviarAvisoSol(id) {
+  try {
+    const r = await api(`/solicitudes-pago/${id}/reenviar-aviso`, { method:'POST', body:'{}' });
+    toast(r.ok ? 'Aviso enviado.' : `No salió: ${r.error}`, r.ok ? 'ok' : 'err');
+    closeModal('modal-sol-ver');
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+// ── Autorizar / rechazar ────────────────────
+function openAutorizarSol(id) {
+  const s = (window._solData?.data || []).find(x => x.id === id);
+  if (!s) return;
+  $('modal-sol-autorizar-body').innerHTML = `
+    <h4 style="margin-bottom:4px">Autorizar solicitud</h4>
+    <p style="font-size:12.5px;color:var(--muted);margin-bottom:14px">
+      <span class="sol-folio">${s.folio}</span> · ${s.beneficiario} ·
+      <strong style="color:var(--dark)">${fmt(s.monto)}</strong>
+    </p>
+    <div style="background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:10px 12px;
+                font-size:12px;color:var(--dark);margin-bottom:12px">
+      ${s.concepto}${s.urgente?' <strong style="color:var(--danger)">· URGENTE</strong>':''}
+    </div>
+    <div class="fg">
+      <div class="fi full"><label>Nota o motivo</label>
+        <textarea id="sol-a-nota" rows="2" placeholder="Opcional al autorizar · obligatorio al rechazar"></textarea></div>
+    </div>
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:9px 11px;
+                font-size:11px;color:#1e3a8a">
+      Al autorizar, la solicitud entra a la <strong>cola de Tesorería</strong> y se crea su renglón
+      en Programación de Pagos.
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-sol-autorizar')">Cancelar</button>
+      <button class="btn bd" onclick="resolverSol(${id},true)">✕ Rechazar</button>
+      <button class="btn bsuc" onclick="resolverSol(${id},false)">✔ Autorizar</button>
+    </div>`;
+  openModal('modal-sol-autorizar');
+}
+
+async function resolverSol(id, rechazar) {
+  const nota = $('sol-a-nota').value.trim();
+  if (rechazar && !nota) return toast('Para rechazar escribe el motivo.', 'err');
+  try {
+    await api(`/solicitudes-pago/${id}/autorizar`, { method:'PATCH',
+      body: JSON.stringify(rechazar ? { rechazar:true, motivo:nota } : { nota }) });
+    toast(rechazar ? 'Solicitud rechazada.' : 'Autorizada: ya está en la cola de Tesorería.');
+    closeModal('modal-sol-autorizar');
+    cargarSol();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function cancelarSol(id) {
+  if (!await confirm2('¿Cancelar esta solicitud?')) return;
+  try {
+    await api(`/solicitudes-pago/${id}/cancelar`, { method:'PATCH', body:'{}' });
+    toast('Solicitud cancelada.'); cargarSol();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function borrarSol(id) {
+  if (!await confirm2('¿Borrar la solicitud definitivamente? También se quita de Programación de Pagos.')) return;
+  try {
+    await api(`/solicitudes-pago/${id}`, { method:'DELETE' });
+    toast('Solicitud borrada.'); cargarSol();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+function exportarSolExcel() {
+  const d = window._solData?.data || [];
+  if (!d.length) return toast('No hay nada que exportar.', 'err');
+  exportToExcel(d, [['folio','Folio'],['solicitante','Solicita'],['beneficiario','Beneficiario'],
+    ['concepto','Concepto'],['monto','Importe'],['tipo_pago','Forma de pago'],
+    ['fecha_requerida','Requerido'],['estatus','Estatus'],['autorizador','Autorizó'],
+    ['tomada_por_nombre','Tomada por'],['pagada_por_nombre','Pagó'],['pago_referencia','Ref. del pago']],
+    'Solicitudes_Pago');
+}
+
+// ══ COLA DE PAGOS EN VIVO (TESORERÍA) ═══════
+// La pantalla se refresca sola cada pocos segundos. No hay websockets en el
+// proyecto; se sigue el mismo sondeo que ya usa la tablet del checador.
+const COLA_CADA_MS = 10000;
+
+async function colaPagos() {
+  $('content').innerHTML = SOL_CSS + `
+    <style>
+      .cola-card{border:1.5px solid var(--border);border-radius:13px;padding:13px 15px;background:#fff;
+        display:flex;gap:14px;align-items:center;flex-wrap:wrap;transition:border-color .15s}
+      .cola-card.urge{border-color:#fca5a5;background:#fff8f8}
+      .cola-card.mia{border-color:#a5b4fc;background:#f8f9ff}
+      .cola-izq{flex:1;min-width:230px}
+      .cola-ben{font-size:14.5px;font-weight:800;color:var(--dark);line-height:1.25}
+      .cola-con{font-size:12px;color:#475569;margin-top:1px}
+      .cola-meta{font-size:11px;color:var(--muted);margin-top:4px;display:flex;gap:10px;flex-wrap:wrap}
+      .cola-monto{font-size:19px;font-weight:900;color:var(--dark);letter-spacing:-.5px;white-space:nowrap}
+      .cola-vivo{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700}
+      .cola-punto{width:8px;height:8px;border-radius:50%;background:#4ade80;
+        box-shadow:0 0 0 0 rgba(74,222,128,.7);animation:colaLatido 2s infinite}
+      @keyframes colaLatido{0%{box-shadow:0 0 0 0 rgba(74,222,128,.7)}
+        70%{box-shadow:0 0 0 7px rgba(74,222,128,0)}100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}}
+    </style>
+    <div class="sol-hero" style="background:linear-gradient(135deg,#0c4a6e 0%,#0369a1 55%,#0284c7 100%)">
+      <div class="sol-hero-t">
+        <div>
+          <h2>Cola de Pagos</h2>
+          <div class="sub">Solicitudes autorizadas esperando a Tesorería · Se actualiza sola</div>
+        </div>
+        <div class="cola-vivo" style="background:rgba(0,0,0,.2);padding:6px 12px;border-radius:99px;color:#fff">
+          <span class="cola-punto"></span><span id="cola-sello">conectando…</span>
+        </div>
+      </div>
+      <div class="sol-kpis" id="cola-kpis"></div>
+    </div>
+    <div id="cola-body"><p class="empty">Cargando…</p></div>`;
+
+  await cargarCola();
+  clearInterval(window._colaTimer);
+  window._colaTimer = setInterval(() => {
+    // Si el usuario ya se fue a otra pantalla, el sondeo se apaga solo: sin
+    // esto seguiría pegándole al servidor toda la sesión.
+    if (!$('cola-body')) { clearInterval(window._colaTimer); return; }
+    cargarCola(true);
+  }, COLA_CADA_MS);
+}
+
+async function cargarCola(silencioso) {
+  try {
+    const r = await api('/solicitudes-pago/cola');
+    window._colaData = r;
+    const t = r.totales;
+    $('cola-kpis').innerHTML =
+      solKpi('En espera',  String(t.en_espera),  fmt(t.monto_espera)) +
+      solKpi('En proceso', String(t.en_proceso), fmt(t.monto_proceso)) +
+      solKpi('Urgentes',   String(t.urgentes),   t.urgentes ? 'Atender primero' : 'Ninguna') +
+      solKpi('Pagado hoy', fmt(t.pagado_hoy),    `${t.n_pagado_hoy} solicitud${t.n_pagado_hoy==1?'':'es'}`);
+    const sello = $('cola-sello');
+    if (sello) sello.textContent = 'actualizado ' + new Date(r.al).toLocaleTimeString('es-MX');
+    pintarCola(r.data);
+  } catch(e) {
+    if (!silencioso) $('cola-body').innerHTML = `<p class="empty">${e.message}</p>`;
+    const sello = $('cola-sello');
+    if (sello) sello.textContent = 'sin conexión';
+  }
+}
+
+function pintarCola(d) {
+  if (!d.length) {
+    $('cola-body').innerHTML = `<div class="card" style="text-align:center;padding:46px 30px">
+      <div style="font-size:46px">✅</div>
+      <h3 style="margin:10px 0 6px;font-size:18px;font-weight:900">No hay nada en la cola</h3>
+      <p style="font-size:13px;color:var(--muted)">Cuando autoricen una solicitud aparecerá aquí sola.</p>
+    </div>`;
+    return;
+  }
+  const trabaja = colaPuedeTrabajar();
+  $('cola-body').innerHTML = `<div style="display:flex;flex-direction:column;gap:9px">${d.map(s => {
+    const tp = SOL_TIPO[s.tipo_pago] || {};
+    const mia = ME && s.tomada_por === ME.id;
+    const destino = s.tipo_pago === 'cheque'
+      ? (s.cheque_a_nombre_de ? `Cheque a: ${s.cheque_a_nombre_de}` : '')
+      : (s.clabe ? `CLABE ${s.clabe}` : s.cuenta ? `Cuenta ${s.cuenta}` : '');
+    return `<div class="cola-card ${s.urgente?'urge':''} ${mia?'mia':''}">
+      <div class="cola-izq">
+        <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+          <span class="sol-folio">${s.folio}</span>
+          ${s.urgente?'<span class="sol-pill" style="background:#fef2f2;border-color:#fecaca;color:#b91c1c">Urgente</span>':''}
+          ${solSello(s.estatus)}
+        </div>
+        <div class="cola-ben" style="margin-top:4px">${s.beneficiario}</div>
+        <div class="cola-con">${s.concepto}</div>
+        <div class="cola-meta">
+          <span>${tp.icono||''} ${tp.etiqueta||s.tipo_pago}</span>
+          ${s.banco?`<span>${s.banco}</span>`:''}
+          ${destino?`<span>${destino}</span>`:''}
+          ${s.fecha_requerida?`<span>Para el ${fmtDate(s.fecha_requerida)}</span>`:''}
+          <span>Pidió ${s.solicitante||'—'}</span>
+          ${s.estatus==='en_proceso'?`<span style="color:#6d28d9;font-weight:800">
+            ${mia?'La tienes tú':'La tiene '+(s.tomada_por_nombre||'alguien')}</span>`:''}
+        </div>
+      </div>
+      <div class="cola-monto">${fmt(s.monto)}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn bo bsm" onclick="verSolicitud(${s.id})" title="Ver detalle">👁</button>
+        ${trabaja && s.estatus==='autorizada'
+          ? `<button class="btn bs bsm" onclick="tomarCola(${s.id})">Tomar</button>` : ''}
+        ${trabaja && s.estatus==='en_proceso'
+          ? `<button class="btn bo bsm" onclick="soltarCola(${s.id})" title="Devolver a la cola">↩</button>
+             <button class="btn bsuc bsm" onclick="openPagarCola(${s.id})">✔ Marcar pagada</button>` : ''}
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+async function tomarCola(id) {
+  try {
+    await api(`/solicitudes-pago/${id}/tomar`, { method:'PATCH', body:'{}' });
+    toast('La tomaste: ahora está en proceso.');
+  } catch(e) {
+    // Si alguien más se adelantó, el servidor lo dice con nombre y apellido
+    toast(e.message, 'err');
+  }
+  cargarCola();
+}
+
+async function soltarCola(id) {
+  try {
+    await api(`/solicitudes-pago/${id}/soltar`, { method:'PATCH', body:'{}' });
+    toast('Devuelta a la cola.');
+  } catch(e) { toast(e.message, 'err'); }
+  cargarCola();
+}
+
+async function openPagarCola(id) {
+  const s = (window._colaData?.data || []).find(x => x.id === id);
+  if (!s) return;
+  let cuentas = [];
+  try { cuentas = await api('/bancos/cuentas?activa=true'); } catch {}
+  $('modal-sol-pagar-body').innerHTML = `
+    <h4 style="margin-bottom:4px">Marcar como pagada</h4>
+    <p style="font-size:12.5px;color:var(--muted);margin-bottom:14px">
+      <span class="sol-folio">${s.folio}</span> · ${s.beneficiario} ·
+      <strong style="color:var(--dark)">${fmt(s.monto)}</strong>
+    </p>
+    <div class="fg">
+      <div class="fi"><label>Referencia del pago</label>
+        <input id="cola-p-ref" placeholder="Folio SPEI, cheque o recibo"></div>
+      <div class="fi"><label>Cuenta de donde salió</label>
+        <select id="cola-p-cuenta"><option value="">Sin definir</option>
+          ${cuentas.map(c => `<option value="${c.id}">${(c.alias||'').trim()||c.banco}${
+            c.numero_cuenta?' ····'+c.numero_cuenta.slice(-4):''}</option>`).join('')}
+        </select></div>
+      <div class="fi full"><label>Notas</label>
+        <textarea id="cola-p-notas" rows="2" placeholder="Opcional"></textarea></div>
+    </div>
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:9px 11px;
+                font-size:11px;color:#166534">
+      Al confirmar se cierra el renglón en Programación de Pagos y se le avisa por correo a
+      <strong>${s.solicitante||'quien lo pidió'}</strong>.
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-sol-pagar')">Cancelar</button>
+      <button class="btn bsuc" onclick="confirmarPagoCola(${id})">Confirmar pago</button>
+    </div>`;
+  openModal('modal-sol-pagar');
+}
+
+async function confirmarPagoCola(id) {
+  try {
+    const r = await api(`/solicitudes-pago/${id}/pagar`, { method:'PATCH', body: JSON.stringify({
+      pago_referencia: $('cola-p-ref').value.trim(),
+      pago_notas     : $('cola-p-notas').value.trim(),
+      cuenta_id      : $('cola-p-cuenta').value || null
+    })});
+    // El pago ya quedó; que el correo no salga es un aviso, no un fracaso
+    toast(r.correo?.ok ? 'Pagada. Se avisó por correo al solicitante.'
+                       : 'Pagada, pero el aviso por correo no salió. Puedes reintentarlo desde el detalle.',
+          r.correo?.ok ? 'ok' : 'err');
+    closeModal('modal-sol-pagar');
+    cargarCola();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
 // ══ PROGRAMACIÓN DE PAGOS (TESORERÍA) ═══════
 // Agenda de lo que hay que pagar y cuándo. Es independiente de Gastos (CxP):
 // aquí se capturan los compromisos a mano y marcar pagado solo mueve el estatus
@@ -18779,6 +19381,7 @@ async function openPprog(id = null) {
         <option value="transferencia">Transferencia</option>
         <option value="cheque">Cheque</option>
         <option value="efectivo">Efectivo</option>
+        <option value="dispersion">Dispersión</option>
         <option value="domiciliado">Domiciliado</option>
         <option value="otro">Otro</option>
       </select></div>
