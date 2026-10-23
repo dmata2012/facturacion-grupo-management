@@ -795,6 +795,7 @@ canvas{max-height:230px}
         </button>
         <div class="nav-group-items">
           <a href="#" onclick="nav('cajaChica')" id="nav-cajaChica"><span class="ni"><svg><use href="#i-wallet"/></svg></span> Caja Chica</a>
+          <a href="#" onclick="nav('beneficiarios')" id="nav-beneficiarios"><span class="ni"><svg><use href="#i-building"/></svg></span> Beneficiarios</a>
         </div>
       </div>
 
@@ -1364,6 +1365,7 @@ function nav(page) {
     estadoCuenta:'Estado de Cuenta', clientes:'Clientes',
     receptoras:'Empresas Emisoras', nomina:'Nómina', empleados:'Empleados',
     vacaciones:'Vacaciones', checador:'Reloj Checador', cajaChica:'Caja Chica',
+    beneficiarios:'Beneficiarios',
     reportes:'Reportes', estadisticas:'Estadísticas', usuarios:'Usuarios y Permisos',
     catalogo:'Conceptos de Desglose', bancos:'Bancos', gastos:'Gastos (CxP)',
     misVacaciones:'Mis Vacaciones', miAsistencia:'Mi Asistencia', asistencia:'Lista de Asistencia',
@@ -1377,7 +1379,8 @@ function nav(page) {
   if (mt) mt.textContent = titulos[page] || 'Facturación';
   const pages = {
     dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones, asistencia, concentrado, otrosIngresos,
-    mensualDireccion, expedienteAsistencia, bonoPuntualidad, miAsistencia, conciliacion
+    mensualDireccion, expedienteAsistencia, bonoPuntualidad, miAsistencia, conciliacion,
+    beneficiarios
   };
   if (pages[page]) pages[page]();
 }
@@ -9202,6 +9205,367 @@ function conExportar() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Conciliación');
   XLSX.writeFile(wb, `Conciliacion_Microsip_${d.desde}_a_${d.hasta}.xlsx`);
+}
+
+// ══ BENEFICIARIOS · a quién le dispersamos ═══════════════════
+// Catálogo de personas y empresas a las que se les paga POR CUENTA DE UN
+// CLIENTE, por transferencia, cheque o efectivo. Hoy los pagos no mueven el
+// saldo de las cuentas —así se pidió—, pero se guardan con su cuenta de origen
+// para que el día que deban afectarlo no haya que recapturar nada.
+let _benData = null, _benClientes = [], _benCuentas = [];
+
+async function beneficiarios() {
+  $('content').innerHTML = `
+  <div class="page-header">
+    <div class="page-header-left">
+      <div class="page-title">🏦 Beneficiarios</div>
+      <div class="page-sub">A quién se le dispersa, por cuenta de qué cliente</div>
+    </div>
+    ${puedeO('cajaChica', NIVEL.CAPTURAR, canWrite())
+      ? `<div style="display:flex;gap:8px">
+           <button class="btn bo" onclick="openPagoBen()">＋ Registrar pago</button>
+           <button class="btn bs" onclick="openBeneficiario()">＋ Nuevo beneficiario</button>
+         </div>` : ''}
+  </div>
+
+  <div class="card">
+    <div class="filters">
+      <input id="ben-buscar" placeholder="🔍 Nombre, RFC o concepto..." style="width:230px"
+             oninput="cargarBeneficiarios()">
+      <select id="ben-cliente" onchange="cargarBeneficiarios()" style="max-width:260px">
+        <option value="">👥 Todos los clientes</option>
+        <option value="sin">⚠ Sin cliente asignado</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)">
+        <input type="checkbox" id="ben-inactivos" onchange="cargarBeneficiarios()"> Ver dados de baja
+      </label>
+    </div>
+    <div id="ben-aviso"></div>
+    <div id="ben-tabla"><p class="empty">Cargando…</p></div>
+  </div>`;
+
+  try {
+    const cl = await api('/clientes');
+    _benClientes = Array.isArray(cl) ? cl : (cl.clientes || cl.data || []);
+    const sel = $('ben-cliente');
+    _benClientes.forEach(c => {
+      const o = document.createElement('option');
+      o.value = c.id;
+      o.textContent = (c.nombre_comercial && c.nombre_comercial.trim()) || c.razon_social || '';
+      sel.appendChild(o);
+    });
+  } catch (e) { _benClientes = []; }
+  try { _benCuentas = await api('/bancos/cuentas'); } catch (e) { _benCuentas = []; }
+  await cargarBeneficiarios();
+}
+
+async function cargarBeneficiarios() {
+  const q = new URLSearchParams();
+  const b = $('ben-buscar').value.trim();
+  const c = $('ben-cliente').value;
+  if (b) q.set('buscar', b);
+  if (c) q.set('cliente_id', c);
+  if ($('ben-inactivos').checked) q.set('incluir_inactivos', 'true');
+  try {
+    _benData = await api('/tesoreria/beneficiarios?' + q.toString());
+    renderBeneficiarios();
+  } catch (e) {
+    $('ben-tabla').innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`;
+  }
+}
+
+function renderBeneficiarios() {
+  const d = _benData, lista = d.beneficiarios || [];
+  const puede = puedeO('cajaChica', NIVEL.CAPTURAR, canWrite());
+
+  // Los que venían de Bancos no tienen cliente. Se avisa una vez, con el filtro
+  // a la mano, en vez de dejarlos perdidos entre los demás.
+  $('ben-aviso').innerHTML = (d.sin_cliente && $('ben-cliente').value !== 'sin')
+    ? `<div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:11px;
+         padding:10px 13px;margin-bottom:11px;display:flex;gap:11px;align-items:center;flex-wrap:wrap">
+        <div style="flex:1;min-width:230px;font-size:12.5px;color:#78350f;line-height:1.5">
+          <strong>${d.sin_cliente} beneficiario${d.sin_cliente != 1 ? 's' : ''} sin cliente asignado.</strong>
+          Son los que ya estaban capturados en Bancos. Mientras no tengan cliente,
+          no aparecen al filtrar por uno.
+        </div>
+        <button class="btn bo bsm" onclick="$('ben-cliente').value='sin';cargarBeneficiarios()">
+          Verlos</button>
+      </div>` : '';
+
+  if (!lista.length) {
+    $('ben-tabla').innerHTML = `<p class="empty">Sin beneficiarios con ese filtro.</p>`;
+    return;
+  }
+
+  $('ben-tabla').innerHTML = `
+    <div class="tscroll"><table>
+      <thead><tr>
+        <th>Beneficiario</th><th>Cliente</th><th>Para depositar</th>
+        <th style="text-align:center">Pagos</th><th style="text-align:right">Pagado</th><th></th>
+      </tr></thead>
+      <tbody>${lista.map(x => `
+        <tr style="${x.activo ? '' : 'opacity:.5'}">
+          <td>
+            <div style="font-weight:700">${x.tipo === 'empresa' ? '🏢' : '👤'} ${x.nombre_completo}</div>
+            <div style="font-size:11px;color:var(--muted)">
+              ${x.rfc || 'Sin RFC'}${x.concepto ? ' · ' + x.concepto : ''}
+              ${x.activo ? '' : ' · <strong>dado de baja</strong>'}</div>
+          </td>
+          <td style="font-size:11.5px">${x.cliente
+            || '<span style="color:#b45309">Sin asignar</span>'}</td>
+          <td style="font-size:11.5px;color:var(--muted)">
+            ${x.clabe
+              ? `${x.banco || 'Banco'}<div style="font-family:ui-monospace,monospace;font-size:10.5px">${x.clabe}</div>`
+              : '<em>Solo efectivo</em>'}</td>
+          <td style="text-align:center;font-weight:700">${x.pagos || 0}</td>
+          <td style="text-align:right;font-weight:700">${fmt(x.pagado || 0)}</td>
+          <td style="white-space:nowrap;text-align:right">
+            ${x.pagos ? `<button class="btn bo bsm" style="padding:3px 8px;font-size:10.5px"
+                 onclick="verPagosBen(${x.id},'${(x.nombre_completo || '').replace(/'/g, "\\'")}')">
+                 Pagos</button>` : ''}
+            ${puede ? `<button class="btn bg bsm" style="padding:3px 8px;font-size:10.5px"
+                 onclick="openBeneficiario(${x.id})">✏️</button>` : ''}
+            ${puede ? `<button class="btn ${x.activo ? 'bd' : 'bsuc'} bsm" style="padding:3px 8px;font-size:10.5px"
+                 onclick="bajaBeneficiario(${x.id}, ${!x.activo})">
+                 ${x.activo ? 'Baja' : 'Alta'}</button>` : ''}
+          </td>
+        </tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+function openBeneficiario(id) {
+  const x = id ? (_benData.beneficiarios || []).find(b => b.id === id) : {};
+  const sv = v => (v == null ? '' : String(v)).replace(/"/g, '&quot;');
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:var(--grad-red);
+         color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:19px;font-weight:900">${id ? 'Editar' : 'Nuevo'} beneficiario</div>
+      <div style="font-size:11.5px;opacity:.9;margin-top:3px">
+        A quién se le paga por cuenta de un cliente.</div>
+    </div>
+    <div class="fg">
+      <div class="fi full"><label>Nombre o razón social *</label>
+        <input id="bn-nombre" value="${sv(x.nombre_completo)}" style="text-transform:uppercase"></div>
+      <div class="fi"><label>RFC</label>
+        <input id="bn-rfc" value="${sv(x.rfc)}" style="text-transform:uppercase"></div>
+      <div class="fi"><label>Tipo</label>
+        <select id="bn-tipo">
+          <option value="persona" ${x.tipo !== 'empresa' ? 'selected' : ''}>👤 Persona</option>
+          <option value="empresa" ${x.tipo === 'empresa' ? 'selected' : ''}>🏢 Empresa</option>
+        </select></div>
+      <div class="fi full"><label>Cliente por cuenta de quien se le paga</label>
+        <select id="bn-cliente">
+          <option value="">— Sin asignar —</option>
+          ${_benClientes.map(c => `<option value="${c.id}" ${String(x.cliente_id) === String(c.id) ? 'selected' : ''}>
+            ${(c.nombre_comercial && c.nombre_comercial.trim()) || c.razon_social}</option>`).join('')}
+        </select>
+        <div class="cli-ayuda">Al dispersar, se filtra por este cliente.</div></div>
+
+      <div class="fi"><label>Banco</label><input id="bn-banco" value="${sv(x.banco)}"></div>
+      <div class="fi"><label>CLABE</label>
+        <input id="bn-clabe" value="${sv(x.clabe)}" maxlength="25"
+               style="font-family:ui-monospace,monospace" oninput="bnRevisaClabe()">
+        <div class="cli-ayuda" id="bn-clabe-ayuda">Opcional: a quien solo cobra en efectivo no le hace falta.</div></div>
+      <div class="fi"><label>Número de cuenta</label><input id="bn-cuenta" value="${sv(x.numero_cuenta)}"></div>
+      <div class="fi"><label>Concepto o puesto</label>
+        <input id="bn-concepto" value="${sv(x.concepto)}" placeholder="Ej: Nómina quincenal"></div>
+      <div class="fi full"><label>Notas</label><textarea id="bn-notas" rows="2">${sv(x.notas)}</textarea></div>
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cancelar</button>
+      <button class="btn bs" onclick="guardarBeneficiario(${id || 'null'})">Guardar</button>
+    </div>`;
+  openModal('modal-gt-cats');
+  bnRevisaClabe();
+}
+
+// La CLABE son 18 dígitos. No se obliga, pero una mal capturada rebota la
+// dispersión en el banco y eso se descubre tarde.
+function bnRevisaClabe() {
+  const e = $('bn-clabe'), a = $('bn-clabe-ayuda');
+  if (!e || !a) return;
+  const d = (e.value || '').replace(/[^0-9]/g, '');
+  if (!d) { a.textContent = 'Opcional: a quien solo cobra en efectivo no le hace falta.';
+            a.className = 'cli-ayuda'; return; }
+  const ok = d.length === 18;
+  a.textContent = ok ? 'CLABE completa (18 dígitos).'
+                     : `Van ${d.length} de 18 dígitos.`;
+  a.className = 'cli-ayuda ' + (ok ? 'ok' : 'mal');
+}
+
+async function guardarBeneficiario(id) {
+  const cuerpo = {
+    nombre_completo: $('bn-nombre').value.trim(),
+    rfc: $('bn-rfc').value.trim(),
+    cliente_id: $('bn-cliente').value || null,
+    tipo: $('bn-tipo').value,
+    banco: $('bn-banco').value.trim(),
+    clabe: $('bn-clabe').value,
+    numero_cuenta: $('bn-cuenta').value.trim(),
+    concepto: $('bn-concepto').value.trim(),
+    notas: $('bn-notas').value.trim(),
+  };
+  if (!cuerpo.nombre_completo) return toast('Falta el nombre.', 'err');
+  const d = (cuerpo.clabe || '').replace(/[^0-9]/g, '');
+  if (d && d.length !== 18 &&
+      !await confirm2(`La CLABE tiene ${d.length} dígitos y deben ser 18.`
+        + String.fromCharCode(10) + String.fromCharCode(10)
+        + 'Una CLABE incompleta rebota la transferencia en el banco.'
+        + String.fromCharCode(10) + '¿Guardar así de todos modos?')) return;
+  try {
+    if (id) await api(`/tesoreria/beneficiarios/${id}`, { method:'PUT', body: JSON.stringify(cuerpo) });
+    else    await api('/tesoreria/beneficiarios', { method:'POST', body: JSON.stringify(cuerpo) });
+    toast(id ? 'Beneficiario actualizado.' : 'Beneficiario registrado.');
+    closeModal('modal-gt-cats');
+    cargarBeneficiarios();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function bajaBeneficiario(id, activar) {
+  const x = (_benData.beneficiarios || []).find(b => b.id === id) || {};
+  if (!activar && x.pagos && !await confirm2(
+      `${x.nombre_completo} tiene ${x.pagos} pago${x.pagos != 1 ? 's' : ''} registrado${x.pagos != 1 ? 's' : ''}.`
+      + String.fromCharCode(10) + String.fromCharCode(10)
+      + 'Darlo de baja NO borra esos pagos: solo deja de aparecer al dispersar.'
+      + String.fromCharCode(10) + '¿Continuar?')) return;
+  try {
+    await api(`/tesoreria/beneficiarios/${id}/activo`, {
+      method:'PATCH', body: JSON.stringify({ activo: !!activar }) });
+    toast(activar ? 'Reactivado.' : 'Dado de baja.');
+    cargarBeneficiarios();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function verPagosBen(id, nombre) {
+  $('modal-gt-cats-body').innerHTML = '<p class="empty">Cargando…</p>';
+  openModal('modal-gt-cats');
+  try {
+    const r = await api(`/tesoreria/beneficiarios/${id}/pagos`);
+    const forma = f => f === 'cheque' ? '🧾 Cheque' : f === 'efectivo' ? '💵 Efectivo' : '🏦 Transferencia';
+    $('modal-gt-cats-body').innerHTML = `
+      <div style="margin:-28px -28px 18px;padding:20px 26px;background:var(--grad-dark);
+           color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">
+          Pagos registrados</div>
+        <div style="font-size:18px;font-weight:900;margin-top:3px">${nombre}</div>
+        <div style="font-size:12.5px;opacity:.9;margin-top:3px">
+          ${r.pagos.length} pago${r.pagos.length != 1 ? 's' : ''} · ${fmt(r.total)}</div>
+      </div>
+      ${!r.pagos.length ? '<p class="empty">Todavía no se le ha pagado nada.</p>' : `
+      <div class="tscroll" style="max-height:52vh;overflow:auto"><table style="font-size:12px">
+        <thead><tr><th>Fecha</th><th>Forma</th><th>Cuenta</th><th>Cliente</th>
+          <th>Referencia</th><th style="text-align:right">Monto</th></tr></thead>
+        <tbody>${r.pagos.map(x => `<tr>
+          <td style="white-space:nowrap">${fmtDate(x.fecha)}</td>
+          <td style="white-space:nowrap;font-size:11.5px">${forma(x.forma)}</td>
+          <td style="font-size:11.5px;color:var(--muted)">${x.cuenta || '—'}</td>
+          <td style="font-size:11.5px">${x.cliente || '—'}</td>
+          <td style="font-size:11px;color:var(--muted)">${x.referencia || ''}</td>
+          <td style="text-align:right;font-weight:700;white-space:nowrap">${fmt(x.monto)}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`}
+      <div class="form-actions">
+        <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button>
+      </div>`;
+  } catch (e) {
+    $('modal-gt-cats-body').innerHTML =
+      `<p class="empty" style="color:var(--red)">${e.message}</p>
+       <div class="form-actions"><button class="btn bo" onclick="closeModal('modal-gt-cats')">Cerrar</button></div>`;
+  }
+}
+
+// ── Registrar un pago ────────────────────────────────────────
+function openPagoBen(beneficiarioId) {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const lista = (_benData && _benData.beneficiarios || []).filter(x => x.activo);
+  $('modal-gt-cats-body').innerHTML = `
+    <div style="margin:-28px -28px 18px;padding:20px 26px;background:var(--grad-red);
+         color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:19px;font-weight:900">Registrar pago</div>
+      <div style="font-size:11.5px;opacity:.9;margin-top:3px">
+        Queda guardado de qué cuenta sale, aunque por ahora no mueva el saldo.</div>
+    </div>
+    <div class="fg">
+      <div class="fi full"><label>Beneficiario *</label>
+        <select id="pb-ben" onchange="pbCambioBen()">
+          <option value="">— Elegir —</option>
+          ${lista.map(x => `<option value="${x.id}" data-cliente="${x.cliente || ''}"
+            ${String(beneficiarioId) === String(x.id) ? 'selected' : ''}>
+            ${x.nombre_completo}${x.cliente ? ' · ' + x.cliente : ''}</option>`).join('')}
+        </select>
+        <div class="cli-ayuda" id="pb-ben-ayuda"></div></div>
+      <div class="fi"><label>Forma de pago *</label>
+        <select id="pb-forma" onchange="pbCambioForma()">
+          <option value="transferencia">🏦 Transferencia</option>
+          <option value="cheque">🧾 Cheque</option>
+          <option value="efectivo">💵 Efectivo</option>
+        </select></div>
+      <div class="fi"><label>Fecha *</label><input type="date" id="pb-fecha" value="${hoy}"></div>
+      <div class="fi full" id="pb-cuenta-caja">
+        <label>Cuenta de donde sale *</label>
+        <select id="pb-cuenta">
+          <option value="">— Elegir cuenta —</option>
+          ${(_benCuentas || []).map(c => `<option value="${c.id}">
+            ${c.banco || ''} ${c.alias ? '· ' + c.alias : ''} ${c.numero_cuenta ? '· ' + c.numero_cuenta : ''}
+          </option>`).join('')}
+        </select>
+        <div class="cli-ayuda">Hoy no descuenta el saldo, pero queda registrado para cuando sí.</div></div>
+      <div class="fi"><label>Monto *</label>
+        <input type="number" step="0.01" id="pb-monto" placeholder="0.00"
+               style="text-align:right;font-weight:800;font-size:17px"></div>
+      <div class="fi"><label>Referencia</label><input id="pb-ref" placeholder="SPEI, folio de cheque…"></div>
+      <div class="fi full"><label>Concepto</label>
+        <input id="pb-concepto" placeholder="Ej: Nómina 1ª quincena de octubre"></div>
+    </div>
+    <div class="form-actions">
+      <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cancelar</button>
+      <button class="btn bs" onclick="guardarPagoBen()">Registrar pago</button>
+    </div>`;
+  openModal('modal-gt-cats');
+  pbCambioForma();
+  pbCambioBen();
+}
+
+// El efectivo no sale de ninguna cuenta del sistema: se esconde el campo para
+// no pedir un dato que no existe.
+function pbCambioForma() {
+  const esEfectivo = $('pb-forma').value === 'efectivo';
+  const caja = $('pb-cuenta-caja');
+  if (caja) caja.style.display = esEfectivo ? 'none' : '';
+}
+
+function pbCambioBen() {
+  const sel = $('pb-ben'), a = $('pb-ben-ayuda');
+  if (!sel || !a) return;
+  const op = sel.options[sel.selectedIndex];
+  const cliente = op ? op.getAttribute('data-cliente') : '';
+  a.textContent = !sel.value ? ''
+    : cliente ? 'Se paga por cuenta de ' + cliente + '.'
+              : 'Este beneficiario no tiene cliente asignado.';
+  a.className = 'cli-ayuda' + (sel.value && !cliente ? ' mal' : '');
+}
+
+async function guardarPagoBen() {
+  const forma = $('pb-forma').value;
+  const cuerpo = {
+    beneficiario_id: $('pb-ben').value || null,
+    forma,
+    cuenta_bancaria_id: forma === 'efectivo' ? null : ($('pb-cuenta').value || null),
+    fecha: $('pb-fecha').value,
+    monto: $('pb-monto').value,
+    referencia: $('pb-ref').value.trim(),
+    concepto: $('pb-concepto').value.trim(),
+  };
+  if (!cuerpo.beneficiario_id) return toast('Elige a quién se le paga.', 'err');
+  if (!(parseFloat(cuerpo.monto) > 0)) return toast('El monto debe ser mayor a 0.', 'err');
+  if (forma !== 'efectivo' && !cuerpo.cuenta_bancaria_id)
+    return toast('Elige de qué cuenta sale el pago.', 'err');
+  try {
+    await api('/tesoreria/dispersiones', { method:'POST', body: JSON.stringify(cuerpo) });
+    toast('Pago registrado.');
+    closeModal('modal-gt-cats');
+    cargarBeneficiarios();
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 // ══ CLIENTES ═════════════════════════════════

@@ -71,6 +71,30 @@ router.use(verificarToken);
         activo BOOLEAN DEFAULT TRUE,
         creado_en TIMESTAMP DEFAULT NOW()
       )`);
+    // El catalogo crece para servir tambien a Tesoreria: a quien se le dispersa,
+    // se le emite cheque o se le paga en efectivo POR CUENTA DE UN CLIENTE.
+    //
+    // Se amplia la tabla que ya existe en vez de hacer una nueva: los cheques ya
+    // emitidos apuntan aqui, y moverlos de lugar los dejaria huerfanos.
+    //
+    // cliente_id va suelto, sin llave foranea obligatoria en el alta: los
+    // beneficiarios que ya estaban capturados no tienen cliente, y exigirselo
+    // los volveria inservibles de golpe. Se van asignando.
+    for (const col of [
+      'cliente_id INT REFERENCES fac_clientes(id) ON DELETE SET NULL',
+      "tipo TEXT DEFAULT 'persona'",         // persona | empresa
+      'banco TEXT',
+      'clabe TEXT',                          // no obligatoria: hay quien cobra en efectivo
+      'numero_cuenta TEXT',
+      'concepto TEXT',                       // puesto o motivo del pago
+      'notas TEXT',
+      'creado_por INT',
+      'actualizado_en TIMESTAMP DEFAULT NOW()',
+    ]) {
+      await query(`ALTER TABLE fac_bancos_beneficiarios ADD COLUMN IF NOT EXISTS ${col}`);
+    }
+    await query(`CREATE INDEX IF NOT EXISTS ix_benef_cliente
+                   ON fac_bancos_beneficiarios(cliente_id)`);
     // Cheques emitidos
     await query(`
       CREATE TABLE IF NOT EXISTS fac_bancos_cheques (

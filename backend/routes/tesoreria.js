@@ -559,4 +559,232 @@ router.get('/kpi', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ══ DISPERSIONES A BENEFICIARIOS ══════════════════════════════
+//
+// Lo que se le paga a la gente de cada cliente: transferencia, cheque o
+// efectivo. El catalogo de a quien se le paga vive en fac_bancos_beneficiarios
+// (compartido con Bancos, para no partir en dos la misma lista).
+//
+// HOY ESTOS MOVIMIENTOS NO MUEVEN SALDOS, por decision del usuario. Pero se
+// guardan completos desde el principio —con su cuenta de origen— para que el
+// dia que si deban afectarlos no haya que recapturar nada: el saldo de una
+// cuenta se CALCULA (saldo_inicial + abonos - cargos - cheques), asi que
+// prenderlos sera agregar un sumando a esa formula, no migrar historicos.
+(async () => {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS fac_tes_dispersiones (
+        id SERIAL PRIMARY KEY,
+        beneficiario_id INT NOT NULL REFERENCES fac_bancos_beneficiarios(id),
+        -- Por cuenta de que cliente se paga. Se guarda aparte del beneficiario
+        -- porque este puede cambiar de cliente y el pago ya hecho no.
+        cliente_id INT REFERENCES fac_clientes(id) ON DELETE SET NULL,
+        forma TEXT NOT NULL,
+        -- De donde sale. En efectivo va nulo: esos pagos no salen de las cajas.
+        cuenta_bancaria_id INT REFERENCES fac_bancos_cuentas(id) ON DELETE SET NULL,
+        cheque_id INT,
+        fecha DATE NOT NULL,
+        monto NUMERIC(14,2) NOT NULL,
+        referencia TEXT,
+        concepto TEXT,
+        -- El interruptor. Apagado hoy; al prenderlo el movimiento entra al saldo
+        -- de su cuenta. Va por renglon y no como ajuste global, para poder
+        -- encenderlo de a poco sin descuadrar lo ya conciliado.
+        afecta_saldo BOOLEAN NOT NULL DEFAULT FALSE,
+        notas TEXT,
+        creado_por INT,
+        creado_por_nombre TEXT,
+        creado_en TIMESTAMP DEFAULT NOW()
+      )`);
+    await query(`CREATE INDEX IF NOT EXISTS ix_disp_fecha ON fac_tes_dispersiones(fecha DESC)`);
+    await query(`CREATE INDEX IF NOT EXISTS ix_disp_benef ON fac_tes_dispersiones(beneficiario_id)`);
+    await query(`CREATE INDEX IF NOT EXISTS ix_disp_cliente ON fac_tes_dispersiones(cliente_id)`);
+  } catch (e) { console.warn('Tabla de dispersiones:', e.message); }
+})();
+
+const FORMAS_DISP = ['transferencia', 'cheque', 'efectivo'];
+const soloDigitos = (v) => String(v == null ? '' : v).replace(/[^0-9]/g, '');
+const limpio = (v) => String(v == null ? '' : v).trim();
+
+// ── CATALOGO: a quien le pagamos ──────────────────────────────
+router.get('/beneficiarios', permiso('beneficiarios', NIVEL.VER), async (req, res) => {
+  try {
+    const { cliente_id, buscar, incluir_inactivos } = req.query;
+    const params = [];
+    let where = incluir_inactivos === 'true' ? 'WHERE TRUE' : 'WHERE b.activo = TRUE';
+    if (cliente_id === 'sin') where += ' AND b.cliente_id IS NULL';
+    else if (cliente_id) { params.push(cliente_id); where += ` AND b.cliente_id = $${params.length}`; }
+    if (buscar) {
+      params.push(`%${buscar}%`);
+      where += ` AND (b.nombre_completo ILIKE $${params.length} OR b.rfc ILIKE $${params.length}
+                   OR b.concepto ILIKE $${params.length})`;
+    }
+    const r = await query(`
+      SELECT b.*,
+             COALESCE(NULLIF(TRIM(c.nombre_comercial),''), c.razon_social) AS cliente,
+             (SELECT COUNT(*)::int FROM fac_tes_dispersiones d WHERE d.beneficiario_id = b.id) AS pagos,
+             (SELECT COALESCE(SUM(d.monto),0) FROM fac_tes_dispersiones d WHERE d.beneficiario_id = b.id) AS pagado
+        FROM fac_bancos_beneficiarios b
+        LEFT JOIN fac_clientes c ON c.id = b.cliente_id
+        ${where}
+       ORDER BY b.activo DESC, c.razon_social NULLS LAST, b.nombre_completo`, params);
+    // Cuantos quedan sin cliente: son los que ya existian en Bancos.
+    const sin = await query(
+      `SELECT COUNT(*)::int AS n FROM fac_bancos_beneficiarios WHERE activo=TRUE AND cliente_id IS NULL`);
+    res.json({ beneficiarios: r.rows, sin_cliente: sin.rows[0].n });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/beneficiarios', permiso('beneficiarios', NIVEL.CAPTURAR), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const nombre = limpio(b.nombre_completo);
+    if (!nombre) return res.status(400).json({ error: 'El nombre es obligatorio.' });
+    const r = await query(`
+      INSERT INTO fac_bancos_beneficiarios
+        (nombre_completo, rfc, cliente_id, tipo, banco, clabe, numero_cuenta, concepto, notas, creado_por)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [nombre.toUpperCase(), limpio(b.rfc).toUpperCase() || null,
+       b.cliente_id || null, b.tipo === 'empresa' ? 'empresa' : 'persona',
+       limpio(b.banco) || null, soloDigitos(b.clabe) || null,
+       limpio(b.numero_cuenta) || null, limpio(b.concepto) || null,
+       limpio(b.notas) || null, req.usuario ? req.usuario.id : null]);
+    res.status(201).json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/beneficiarios/:id', permiso('beneficiarios', NIVEL.CAPTURAR), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const nombre = limpio(b.nombre_completo);
+    if (!nombre) return res.status(400).json({ error: 'El nombre es obligatorio.' });
+    await query(`
+      UPDATE fac_bancos_beneficiarios
+         SET nombre_completo=$1, rfc=$2, cliente_id=$3, tipo=$4, banco=$5, clabe=$6,
+             numero_cuenta=$7, concepto=$8, notas=$9, actualizado_en=NOW()
+       WHERE id=$10`,
+      [nombre.toUpperCase(), limpio(b.rfc).toUpperCase() || null,
+       b.cliente_id || null, b.tipo === 'empresa' ? 'empresa' : 'persona',
+       limpio(b.banco) || null, soloDigitos(b.clabe) || null,
+       limpio(b.numero_cuenta) || null, limpio(b.concepto) || null,
+       limpio(b.notas) || null, req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// No se borra: si ya se le pago, borrarlo dejaria los pagos sin destinatario.
+router.patch('/beneficiarios/:id/activo', permiso('beneficiarios', NIVEL.EDITAR), async (req, res) => {
+  try {
+    const activo = req.body && req.body.activo !== false;
+    const r = await query(
+      `UPDATE fac_bancos_beneficiarios SET activo=$1, actualizado_en=NOW()
+        WHERE id=$2 RETURNING nombre_completo`, [activo, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'No encontrado.' });
+    res.json({ ok: true, activo, nombre: r.rows[0].nombre_completo });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Historial de un beneficiario ──────────────────────────────
+router.get('/beneficiarios/:id/pagos', permiso('beneficiarios', NIVEL.VER), async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT d.*, TO_CHAR(d.fecha,'YYYY-MM-DD') AS fecha,
+             cu.alias AS cuenta, cu.banco AS cuenta_banco,
+             COALESCE(NULLIF(TRIM(c.nombre_comercial),''), c.razon_social) AS cliente
+        FROM fac_tes_dispersiones d
+        LEFT JOIN fac_bancos_cuentas cu ON cu.id = d.cuenta_bancaria_id
+        LEFT JOIN fac_clientes c ON c.id = d.cliente_id
+       WHERE d.beneficiario_id = $1
+       ORDER BY d.fecha DESC, d.id DESC LIMIT 300`, [req.params.id]);
+    res.json({ pagos: r.rows,
+               total: r.rows.reduce((a, x) => a + (parseFloat(x.monto) || 0), 0) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── MOVIMIENTOS ───────────────────────────────────────────────
+router.get('/dispersiones', permiso('beneficiarios', NIVEL.VER), async (req, res) => {
+  try {
+    const { desde, hasta, cliente_id, forma, beneficiario_id } = req.query;
+    const params = [];
+    let where = 'WHERE TRUE';
+    if (desde) { params.push(desde); where += ` AND d.fecha >= $${params.length}::date`; }
+    if (hasta) { params.push(hasta); where += ` AND d.fecha <= $${params.length}::date`; }
+    if (cliente_id) { params.push(cliente_id); where += ` AND d.cliente_id = $${params.length}`; }
+    if (forma) { params.push(forma); where += ` AND d.forma = $${params.length}`; }
+    if (beneficiario_id) { params.push(beneficiario_id); where += ` AND d.beneficiario_id = $${params.length}`; }
+
+    const r = await query(`
+      SELECT d.*, TO_CHAR(d.fecha,'YYYY-MM-DD') AS fecha,
+             b.nombre_completo AS beneficiario, b.rfc, b.banco, b.clabe,
+             cu.alias AS cuenta, cu.banco AS cuenta_banco,
+             COALESCE(NULLIF(TRIM(c.nombre_comercial),''), c.razon_social) AS cliente
+        FROM fac_tes_dispersiones d
+        JOIN fac_bancos_beneficiarios b ON b.id = d.beneficiario_id
+        LEFT JOIN fac_bancos_cuentas cu ON cu.id = d.cuenta_bancaria_id
+        LEFT JOIN fac_clientes c ON c.id = d.cliente_id
+        ${where}
+       ORDER BY d.fecha DESC, d.id DESC LIMIT 1000`, params);
+
+    const porForma = {};
+    r.rows.forEach(x => {
+      porForma[x.forma] = porForma[x.forma] || { n: 0, monto: 0 };
+      porForma[x.forma].n++;
+      porForma[x.forma].monto += parseFloat(x.monto) || 0;
+    });
+    res.json({
+      movimientos: r.rows,
+      resumen: {
+        n: r.rows.length,
+        total: +r.rows.reduce((a, x) => a + (parseFloat(x.monto) || 0), 0).toFixed(2),
+        por_forma: porForma,
+        afectan_saldo: r.rows.filter(x => x.afecta_saldo).length
+      }
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/dispersiones', permiso('beneficiarios', NIVEL.CAPTURAR), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const monto = parseFloat(b.monto);
+    if (!b.beneficiario_id) return res.status(400).json({ error: 'Elige a quién se le paga.' });
+    if (!b.fecha)           return res.status(400).json({ error: 'Falta la fecha.' });
+    if (!(monto > 0))       return res.status(400).json({ error: 'El monto debe ser mayor a 0.' });
+    const forma = FORMAS_DISP.indexOf(b.forma) >= 0 ? b.forma : 'transferencia';
+    // En efectivo no hay cuenta de origen; en las otras dos si hace falta aunque
+    // hoy no mueva saldos: sin ese dato, el dia que deban afectarlo habria que
+    // recapturar todo a mano.
+    if (forma !== 'efectivo' && !b.cuenta_bancaria_id)
+      return res.status(400).json({ error: 'Elige de qué cuenta sale el pago.' });
+
+    const ben = await query(
+      `SELECT cliente_id, activo FROM fac_bancos_beneficiarios WHERE id=$1`, [b.beneficiario_id]);
+    if (!ben.rows.length) return res.status(404).json({ error: 'Ese beneficiario no existe.' });
+    if (!ben.rows[0].activo)
+      return res.status(400).json({ error: 'Ese beneficiario está dado de baja.' });
+
+    const r = await query(`
+      INSERT INTO fac_tes_dispersiones
+        (beneficiario_id, cliente_id, forma, cuenta_bancaria_id, cheque_id, fecha, monto,
+         referencia, concepto, notas, creado_por, creado_por_nombre)
+      VALUES ($1,$2,$3,$4,$5,$6::date,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      [b.beneficiario_id,
+       // Se congela el cliente que tenia el beneficiario al momento del pago.
+       b.cliente_id || ben.rows[0].cliente_id || null,
+       forma, forma === 'efectivo' ? null : b.cuenta_bancaria_id,
+       b.cheque_id || null, b.fecha, monto,
+       limpio(b.referencia) || null, limpio(b.concepto) || null, limpio(b.notas) || null,
+       req.usuario ? req.usuario.id : null, req.usuario ? req.usuario.nombre : null]);
+    res.status(201).json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/dispersiones/:id', permiso('beneficiarios', NIVEL.EDITAR), async (req, res) => {
+  try {
+    const r = await query(`DELETE FROM fac_tes_dispersiones WHERE id=$1 RETURNING monto`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'No encontrado.' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
