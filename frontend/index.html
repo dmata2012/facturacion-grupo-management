@@ -469,6 +469,39 @@ tbody tr:hover td{background:#FAFBFF}
   .cli-form{padding:18px}
   .cli-ops{grid-template-columns:1fr}
 }
+/* ── Beneficiarios: la CLABE partida en sus cuatro pedazos ──────────
+   Son 18 digitos corridos que nadie puede revisar de un vistazo. Partidos
+   (banco, plaza, cuenta, verificador) el error de dedo salta a la vista. */
+/* Cada cuenta del beneficiario es una tarjeta: se ve de un golpe cuantas
+   tiene y cual es la principal, en vez de un monton de campos sueltos. */
+.bf-cta{border:1.5px solid var(--border);border-radius:13px;padding:13px 14px;
+  margin-bottom:10px;background:#fff;transition:.15s}
+.bf-cta.pri{border-color:var(--red-l);background:var(--red-xs)}
+.bf-cta-h{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.bf-cta-n{font-size:11.5px;font-weight:800;color:var(--dark);
+  text-transform:uppercase;letter-spacing:.7px}
+.bf-cta-badge{background:var(--red);color:#fff;border-radius:20px;
+  padding:2px 9px;font-size:10px;font-weight:800}
+.bf-cta-x{background:none;border:none;cursor:pointer;font-size:10.5px;
+  font-weight:700;color:var(--muted);padding:2px 6px;border-radius:6px}
+.bf-cta-x:hover{background:var(--red-xs);color:var(--red)}
+.bf-cta-x.del:hover{background:#fee2e2;color:var(--danger)}
+.bf-cta-add{width:100%;border:1.5px dashed var(--border);background:#fff;
+  border-radius:12px;padding:11px;cursor:pointer;font-size:12.5px;font-weight:700;
+  color:var(--muted);transition:.15s}
+.bf-cta-add:hover{border-color:var(--red-l);color:var(--red);background:var(--red-xs)}
+.bn-clabe-seg{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.bn-clabe-seg div{flex:1;min-width:52px;text-align:center}
+.bn-clabe-seg .d{font-family:ui-monospace,monospace;font-size:13px;font-weight:700;
+  color:#f1f3f9;letter-spacing:1px;background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.14);border-radius:7px;padding:5px 2px}
+.bn-clabe-seg .d.vacio{color:#5d6480;background:rgba(255,255,255,.03)}
+.bn-clabe-seg .k{font-size:8.5px;color:#9aa3bd;margin-top:3px;
+  text-transform:uppercase;letter-spacing:.6px}
+.bn-banco-pill{display:inline-flex;align-items:center;gap:6px;background:var(--red-xs);
+  border:1px solid var(--red-l);border-radius:20px;padding:3px 11px;
+  font-size:11px;font-weight:700;color:var(--red);margin-top:6px}
+
 .modal-sm{width:min(440px,95vw)}
 .modal h4{
   font-size:17px;font-weight:800;color:var(--dark);
@@ -880,6 +913,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-chequeras"><div class="modal" style="width:min(780px,96vw)" id="modal-chequeras-body"></div></div>
 <div class="overlay" id="modal-mov-banco"><div class="modal" style="width:min(720px,96vw)" id="modal-mov-banco-body"></div></div>
 <div class="overlay" id="modal-gasto"><div class="modal" style="width:min(680px,96vw)" id="modal-gasto-body"></div></div>
+<div class="overlay" id="modal-ben"><div class="modal" id="modal-ben-body"></div></div>
 <div class="overlay" id="modal-gt-cats"><div class="modal" style="width:min(720px,96vw)" id="modal-gt-cats-body"></div></div>
 <div class="overlay" id="modal-gt-pago"><div class="modal" style="width:min(560px,96vw)" id="modal-gt-pago-body"></div></div>
 <div class="overlay" id="modal-benef-bnc"><div class="modal" style="width:min(640px,96vw)" id="modal-benef-bnc-body"></div></div>
@@ -9274,6 +9308,23 @@ async function cargarBeneficiarios() {
   }
 }
 
+// Donde se le deposita. Si tiene varias cuentas se muestra la principal y
+// cuantas mas hay: la lista completa cabe en su ficha, no en el renglon.
+function benDestino(x) {
+  const cs = x.cuentas || [];
+  if (!cs.length) {
+    if (!x.clabe && !x.banco) return '<em>Solo efectivo</em>';
+    return `${x.banco || 'Banco'}<div style="font-family:ui-monospace,monospace;font-size:10.5px">${x.clabe || ''}</div>`;
+  }
+  const p = cs.find(c => c.principal) || cs[0];
+  const mas = cs.length - 1;
+  return `${p.banco || 'Banco'}${p.alias ? ' · ' + p.alias : ''}
+    <div style="font-family:ui-monospace,monospace;font-size:10.5px">
+      ${p.clabe ? bnClabeFmt(p.clabe) : (p.numero_cuenta || '')}</div>
+    ${mas > 0 ? `<div style="font-size:10px;color:var(--red);font-weight:700;margin-top:2px">
+       + ${mas} cuenta${mas != 1 ? 's' : ''} más</div>` : ''}`;
+}
+
 function renderBeneficiarios() {
   const d = _benData, lista = d.beneficiarios || [];
   const puede = puedeO('cajaChica', NIVEL.CAPTURAR, canWrite());
@@ -9313,10 +9364,7 @@ function renderBeneficiarios() {
           </td>
           <td style="font-size:11.5px">${x.cliente
             || '<span style="color:#b45309">Sin asignar</span>'}</td>
-          <td style="font-size:11.5px;color:var(--muted)">
-            ${x.clabe
-              ? `${x.banco || 'Banco'}<div style="font-family:ui-monospace,monospace;font-size:10.5px">${x.clabe}</div>`
-              : '<em>Solo efectivo</em>'}</td>
+          <td style="font-size:11.5px;color:var(--muted)">${benDestino(x)}</td>
           <td style="text-align:center;font-weight:700">${x.pagos || 0}</td>
           <td style="text-align:right;font-weight:700">${fmt(x.pagado || 0)}</td>
           <td style="white-space:nowrap;text-align:right">
@@ -9333,90 +9381,520 @@ function renderBeneficiarios() {
     </table></div>`;
 }
 
+// ── Catálogo de bancos de México ─────────────────────────────────
+// La clave de 3 dígitos es la que arranca la CLABE. Por eso los dos campos
+// se llenan solos entre ellos: con pegar la CLABE ya se sabe el banco, y al
+// revés, elegir el banco deja escrito el arranque de la CLABE. Ahí es donde
+// se iban la mayoría de los errores de dedo.
+const BANCOS_MX = [
+  ['002','Citibanamex'],      ['006','Bancomext'],        ['009','Banobras'],
+  ['012','BBVA México'],      ['014','Santander'],        ['019','Banjército'],
+  ['021','HSBC'],             ['030','Banco del Bajío'],  ['036','Inbursa'],
+  ['042','Mifel'],            ['044','Scotiabank'],       ['058','Banregio'],
+  ['059','Invex'],            ['060','Bansí'],            ['062','Afirme'],
+  ['072','Banorte'],          ['103','American Express'], ['106','Bank of America'],
+  ['108','MUFG'],             ['110','JP Morgan'],        ['112','BMonex'],
+  ['113','Ve por Más'],       ['127','Banco Azteca'],     ['128','Autofin'],
+  ['129','Barclays'],         ['130','Compartamos'],      ['132','Multiva'],
+  ['133','Actinver'],         ['136','Intercam'],         ['137','BanCoppel'],
+  ['140','Consubanco'],       ['141','Volkswagen Bank'],  ['143','CIBanco'],
+  ['145','BBase'],            ['147','Bankaool'],         ['148','PagaTodo'],
+  ['150','Inmobiliario Mexicano'], ['151','Dondé Banco'], ['152','Bancrea'],
+  ['155','ICBC'],             ['156','Banco Sabadell'],   ['166','Banco del Bienestar'],
+  ['168','Hipotecaria Federal'], ['600','Monex'],         ['638','Nu México'],
+  ['646','STP'],              ['652','Crediclub'],        ['653','Kuspit'],
+  ['661','Alternativos'],     ['670','Libertad'],         ['677','Caja Popular Mexicana'],
+  ['710','NVIO'],             ['722','Mercado Pago'],     ['723','Cuenca'],
+  ['728','Spin by OXXO'],
+];
+const BANCOS_USUALES = ['012','014','072','002','021','044','036','127','137','646'];
+
+const bancoPorClave = c => BANCOS_MX.find(b => b[0] === c);
+const claveDeBanco = nombre => {
+  const n = (nombre || '').trim().toLowerCase();
+  if (!n) return '';
+  const b = BANCOS_MX.find(x => x[1].toLowerCase() === n);
+  return b ? b[0] : '';
+};
+
+const bnDigitos = s => (s || '').replace(/[^0-9]/g, '');
+// 3 banco + 3 plaza + 11 cuenta + 1 verificador
+const bnPartes = d => [d.slice(0,3), d.slice(3,6), d.slice(6,17), d.slice(17,18)];
+const bnClabeFmt = d => bnPartes(d).filter(x => x).join(' ');
+
+// El dígito 18 se calcula de los otros 17. Si no cuadra, hay un número mal
+// capturado: lo atrapa aquí y no tres días después, cuando el banco rebota
+// la transferencia.
+function bnClabeCuadra(d) {
+  if (d.length !== 18) return false;
+  const peso = [3, 7, 1];
+  let s = 0;
+  for (let i = 0; i < 17; i++) s += (Number(d[i]) * peso[i % 3]) % 10;
+  return (10 - s % 10) % 10 === Number(d[17]);
+}
+
+let _bnModo = 'banco';      // 'banco' | 'efectivo'
+let _bnTipo = 'persona';
+
 function openBeneficiario(id) {
   const x = id ? (_benData.beneficiarios || []).find(b => b.id === id) : {};
   const sv = v => (v == null ? '' : String(v)).replace(/"/g, '&quot;');
-  $('modal-gt-cats-body').innerHTML = `
-    <div style="margin:-28px -28px 18px;padding:20px 26px;background:var(--grad-red);
-         color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
-      <div style="font-size:19px;font-weight:900">${id ? 'Editar' : 'Nuevo'} beneficiario</div>
-      <div style="font-size:11.5px;opacity:.9;margin-top:3px">
-        A quién se le paga por cuenta de un cliente.</div>
-    </div>
+  _bnTipo = x.tipo === 'empresa' ? 'empresa' : 'persona';
+  // Al editar a alguien que nunca tuvo datos de banco, se abre en efectivo.
+  _bnModo = (id && !x.clabe && !x.banco && !x.numero_cuenta) ? 'efectivo' : 'banco';
+
+  _bnCtas = bnCtasDesde(x);
+  if (_bnModo === 'banco' && !_bnCtas.length) _bnCtas = [bnCtaVacia(true)];
+
+  const sec = (n, titulo, sub) => `
+    <div class="cli-sec">
+      <span class="n">${n}</span>
+      <div><div class="t">${titulo}</div></div>
+      ${sub ? `<div style="margin-left:auto;font-size:11px;color:var(--muted)">${sub}</div>` : ''}
+    </div>`;
+
+  const m = $('modal-ben-body');
+  m.classList.add('cli-ancho');
+  m.innerHTML = `
+  <div class="cli-hero">
+    <div class="t">${id ? 'Editar beneficiario' : 'Nuevo beneficiario'}</div>
+    <div class="s">Solo el nombre es obligatorio. Los datos de banco se pueden completar después.</div>
+  </div>
+  <div class="cli-wrap">
+   <div class="cli-form">
     <div class="fg">
+
+      ${sec(1, '¿Quién es?')}
+      <div class="cli-ops">
+        <div class="cli-op ${_bnTipo === 'persona' ? 'sel' : ''}" id="bn-tp-persona"
+             onclick="bnTipo('persona')">
+          <div class="ic">👤</div><div class="tt">Persona</div>
+          <div class="dd">Un colaborador, un proveedor por honorarios.</div></div>
+        <div class="cli-op ${_bnTipo === 'empresa' ? 'sel' : ''}" id="bn-tp-empresa"
+             onclick="bnTipo('empresa')">
+          <div class="ic">🏢</div><div class="tt">Empresa</div>
+          <div class="dd">Una razón social que factura.</div></div>
+      </div>
       <div class="fi full"><label>Nombre o razón social *</label>
-        <input id="bn-nombre" value="${sv(x.nombre_completo)}" style="text-transform:uppercase"></div>
+        <input id="bn-nombre" value="${sv(x.nombre_completo)}" autocomplete="off"
+               placeholder="Como aparece en su identificación o constancia"
+               style="text-transform:uppercase;font-size:15px;font-weight:600"
+               oninput="bnPreview()"></div>
       <div class="fi"><label>RFC</label>
-        <input id="bn-rfc" value="${sv(x.rfc)}" style="text-transform:uppercase"></div>
-      <div class="fi"><label>Tipo</label>
-        <select id="bn-tipo">
-          <option value="persona" ${x.tipo !== 'empresa' ? 'selected' : ''}>👤 Persona</option>
-          <option value="empresa" ${x.tipo === 'empresa' ? 'selected' : ''}>🏢 Empresa</option>
-        </select></div>
-      <div class="fi full"><label>Cliente por cuenta de quien se le paga</label>
-        <select id="bn-cliente">
+        <input id="bn-rfc" value="${sv(x.rfc)}" maxlength="13" autocomplete="off" spellcheck="false"
+               placeholder="Opcional"
+               style="text-transform:uppercase;font-family:ui-monospace,monospace;letter-spacing:1px"
+               oninput="bnPreview()"></div>
+      <div class="fi"><label>Concepto o puesto</label>
+        <input id="bn-concepto" value="${sv(x.concepto)}" placeholder="Ej: Nómina quincenal"
+               oninput="bnPreview()"></div>
+
+      ${sec(2, '¿Por cuenta de qué cliente?')}
+      <div class="fi full"><label>Cliente</label>
+        <select id="bn-cliente" onchange="bnPreview()">
           <option value="">— Sin asignar —</option>
           ${_benClientes.map(c => `<option value="${c.id}" ${String(x.cliente_id) === String(c.id) ? 'selected' : ''}>
             ${(c.nombre_comercial && c.nombre_comercial.trim()) || c.razon_social}</option>`).join('')}
         </select>
-        <div class="cli-ayuda">Al dispersar, se filtra por este cliente.</div></div>
+        <div class="cli-ayuda">Es el cliente a quien se le carga este pago. Al dispersar, se filtra por él.</div></div>
 
-      <div class="fi"><label>Banco</label><input id="bn-banco" value="${sv(x.banco)}"></div>
-      <div class="fi"><label>CLABE</label>
-        <input id="bn-clabe" value="${sv(x.clabe)}" maxlength="25"
-               style="font-family:ui-monospace,monospace" oninput="bnRevisaClabe()">
-        <div class="cli-ayuda" id="bn-clabe-ayuda">Opcional: a quien solo cobra en efectivo no le hace falta.</div></div>
-      <div class="fi"><label>Número de cuenta</label><input id="bn-cuenta" value="${sv(x.numero_cuenta)}"></div>
-      <div class="fi"><label>Concepto o puesto</label>
-        <input id="bn-concepto" value="${sv(x.concepto)}" placeholder="Ej: Nómina quincenal"></div>
-      <div class="fi full"><label>Notas</label><textarea id="bn-notas" rows="2">${sv(x.notas)}</textarea></div>
+      ${sec(3, '¿Cómo se le paga?')}
+      <div class="cli-ops">
+        <div class="cli-op ${_bnModo === 'banco' ? 'sel' : ''}" id="bn-md-banco"
+             onclick="bnModo('banco')">
+          <div class="ic">🏦</div><div class="tt">Tiene cuenta</div>
+          <div class="dd">Transferencia o cheque. Se captura su CLABE.</div></div>
+        <div class="cli-op ${_bnModo === 'efectivo' ? 'sel' : ''}" id="bn-md-efectivo"
+             onclick="bnModo('efectivo')">
+          <div class="ic">💵</div><div class="tt">Solo efectivo</div>
+          <div class="dd">No hacen falta datos de banco.</div></div>
+      </div>
+
+      <div class="fi full" id="bn-caja-banco" style="display:${_bnModo === 'banco' ? '' : 'none'}">
+        <div id="bn-ctas"></div>
+        <button type="button" class="bf-cta-add" onclick="bnCtaAdd()">
+          ＋ Agregar otra cuenta</button>
+        <div class="cli-ayuda">Puede tener cuentas en bancos distintos. La principal
+          es la que se propone al dispersarle.</div>
+      </div>
+
+      <div class="fi full"><label>Notas</label>
+        <textarea id="bn-notas" rows="2" placeholder="Lo que haga falta recordar de esta persona"
+                  oninput="bnPreview()">${sv(x.notas)}</textarea></div>
     </div>
     <div class="form-actions">
-      <button class="btn bo" onclick="closeModal('modal-gt-cats')">Cancelar</button>
-      <button class="btn bs" onclick="guardarBeneficiario(${id || 'null'})">Guardar</button>
-    </div>`;
-  openModal('modal-gt-cats');
-  bnRevisaClabe();
+      <button class="btn bo" onclick="closeModal('modal-ben')">Cancelar</button>
+      <button class="btn bs" onclick="guardarBeneficiario(${id || 'null'})">
+        ${id ? 'Guardar cambios' : 'Dar de alta'}</button>
+    </div>
+   </div>
+   <aside class="cli-prev"><div class="cli-prev-in" id="bn-prev"></div></aside>
+  </div>`;
+  openModal('modal-ben');
+  bnCtasRender();
 }
 
-// La CLABE son 18 dígitos. No se obliga, pero una mal capturada rebota la
-// dispersión en el banco y eso se descubre tarde.
-function bnRevisaClabe() {
-  const e = $('bn-clabe'), a = $('bn-clabe-ayuda');
-  if (!e || !a) return;
-  const d = (e.value || '').replace(/[^0-9]/g, '');
-  if (!d) { a.textContent = 'Opcional: a quien solo cobra en efectivo no le hace falta.';
-            a.className = 'cli-ayuda'; return; }
-  const ok = d.length === 18;
-  a.textContent = ok ? 'CLABE completa (18 dígitos).'
-                     : `Van ${d.length} de 18 dígitos.`;
-  a.className = 'cli-ayuda ' + (ok ? 'ok' : 'mal');
+function bnTipo(t) {
+  _bnTipo = t;
+  $('bn-tp-persona').classList.toggle('sel', t === 'persona');
+  $('bn-tp-empresa').classList.toggle('sel', t === 'empresa');
+  bnPreview();
+}
+
+function bnModo(m) {
+  _bnModo = m;
+  $('bn-md-banco').classList.toggle('sel', m === 'banco');
+  $('bn-md-efectivo').classList.toggle('sel', m === 'efectivo');
+  $('bn-caja-banco').style.display = m === 'banco' ? '' : 'none';
+  if (m === 'banco' && !_bnCtas.length) _bnCtas = [bnCtaVacia(true)];
+  bnCtasRender();
+}
+
+// ── Las cuentas del beneficiario ─────────────────────────────────
+// Puede tener varias, en bancos distintos. Se editan como lista para que se
+// vea cuantas son; el renglon solo se vuelve a dibujar al agregar, quitar o
+// cambiar la principal, nunca al teclear, para no perder el cursor.
+let _bnCtas = [];
+
+const bnCtaVacia = (principal) => ({ id: null, alias: '', clave: '', otro: '',
+                                     clabe: '', numero_cuenta: '',
+                                     principal: !!principal, pagos: 0 });
+
+function bnCtasDesde(x) {
+  let lista = (x.cuentas || []).map(c => {
+    const clave = claveDeBanco(c.banco);
+    return { id: c.id, alias: c.alias || '',
+             clave: clave || (c.banco ? 'otro' : ''),
+             otro: clave ? '' : (c.banco || ''),
+             clabe: bnDigitos(c.clabe), numero_cuenta: c.numero_cuenta || '',
+             principal: !!c.principal, pagos: c.pagos || 0 };
+  });
+  // Un beneficiario capturado antes de que existieran las cuentas: sus datos
+  // siguen en las columnas viejas hasta que lo vuelvan a guardar.
+  if (!lista.length && (x.banco || x.clabe || x.numero_cuenta)) {
+    const clave = claveDeBanco(x.banco);
+    lista = [{ id: null, alias: '', clave: clave || (x.banco ? 'otro' : ''),
+               otro: clave ? '' : (x.banco || ''), clabe: bnDigitos(x.clabe),
+               numero_cuenta: x.numero_cuenta || '', principal: true, pagos: 0 }];
+  }
+  if (lista.length && !lista.some(c => c.principal)) lista[0].principal = true;
+  return lista;
+}
+
+function bnOpcionesBanco(clave) {
+  const op = c => {
+    const b = bancoPorClave(c);
+    return `<option value="${c}" ${clave === c ? 'selected' : ''}>${c} · ${b[1]}</option>`;
+  };
+  const usuales = BANCOS_USUALES.map(op).join('');
+  const resto = BANCOS_MX.filter(b => BANCOS_USUALES.indexOf(b[0]) < 0)
+    .slice().sort((a, b) => a[1].localeCompare(b[1], 'es'))
+    .map(b => op(b[0])).join('');
+  return `<option value="">— Elegir banco —</option>
+          <optgroup label="Los más usados">${usuales}</optgroup>
+          <optgroup label="Todos los demás">${resto}</optgroup>
+          <option value="otro" ${clave === 'otro' ? 'selected' : ''}>Otro · no está en la lista</option>`;
+}
+
+function bnCtasRender() {
+  const caja = $('bn-ctas');
+  if (!caja) return;
+  const sv = v => (v == null ? '' : String(v)).replace(/"/g, '&quot;');
+  const varias = _bnCtas.length > 1;
+  caja.innerHTML = _bnCtas.map((c, i) => `
+    <div class="bf-cta ${c.principal ? 'pri' : ''}">
+      <div class="bf-cta-h">
+        <span class="bf-cta-n">Cuenta ${i + 1}</span>
+        ${c.principal ? '<span class="bf-cta-badge">★ Principal</span>'
+          : `<button type="button" class="bf-cta-x" onclick="bnCtaPrincipal(${i})">
+               Hacer principal</button>`}
+        ${c.pagos ? `<span style="font-size:10.5px;color:var(--muted)">
+            ${c.pagos} pago${c.pagos != 1 ? 's' : ''} a esta cuenta</span>` : ''}
+        ${varias ? `<button type="button" class="bf-cta-x del" style="margin-left:auto"
+             onclick="bnCtaDel(${i})">🗑 Quitar</button>` : ''}
+      </div>
+      <div class="fg" style="margin:0">
+        <div class="fi"><label>Banco</label>
+          <select id="bn-c${i}-banco" onchange="bnCtaBanco(${i})">${bnOpcionesBanco(c.clave)}</select>
+          <div class="cli-ayuda" id="bn-c${i}-bayuda"></div></div>
+        <div class="fi"><label>Alias</label>
+          <input id="bn-c${i}-alias" value="${sv(c.alias)}" placeholder="Ej: Nómina, Ahorro"
+                 oninput="bnCtaSet(${i},'alias',this.value)">
+          <div class="cli-ayuda">Para distinguirla de sus otras cuentas.</div></div>
+        <div class="fi full" id="bn-c${i}-otrocaja" style="display:${c.clave === 'otro' ? '' : 'none'}">
+          <label>Nombre del banco</label>
+          <input id="bn-c${i}-otro" value="${sv(c.otro)}" oninput="bnCtaSet(${i},'otro',this.value)"></div>
+        <div class="fi full"><label>CLABE interbancaria</label>
+          <input id="bn-c${i}-clabe" value="${bnClabeFmt(c.clabe)}" maxlength="25"
+                 inputmode="numeric" autocomplete="off" placeholder="18 dígitos"
+                 style="font-family:ui-monospace,monospace;font-size:15px;letter-spacing:1.5px"
+                 oninput="bnCtaClabe(${i})">
+          <div class="cli-ayuda" id="bn-c${i}-ayuda"></div></div>
+        <div class="fi full"><label>Número de cuenta</label>
+          <input id="bn-c${i}-num" value="${sv(c.numero_cuenta)}" autocomplete="off"
+                 placeholder="Opcional, si lo tienes"
+                 oninput="bnCtaSet(${i},'numero_cuenta',this.value)"></div>
+      </div>
+    </div>`).join('');
+  bnPreview();
+}
+
+function bnCtaAdd() {
+  _bnCtas.push(bnCtaVacia(!_bnCtas.length));
+  bnCtasRender();
+  const e = $('bn-c' + (_bnCtas.length - 1) + '-banco');
+  if (e) e.focus();
+}
+
+async function bnCtaDel(i) {
+  const c = _bnCtas[i];
+  if (c.pagos && !await confirm2('A esta cuenta ya se le hicieron ' + c.pagos + ' pago(s).'
+      + String.fromCharCode(10) + String.fromCharCode(10)
+      + 'No se va a borrar el historial: la cuenta se guarda apagada para que los '
+      + 'pagos sigan diciendo a dónde fue el dinero, pero ya no te aparecerá al dispersar.'
+      + String.fromCharCode(10) + '¿Quitarla?')) return;
+  const eraPrincipal = c.principal;
+  _bnCtas.splice(i, 1);
+  if (eraPrincipal && _bnCtas.length) _bnCtas[0].principal = true;
+  bnCtasRender();
+}
+
+function bnCtaPrincipal(i) {
+  _bnCtas.forEach((c, j) => { c.principal = j === i; });
+  bnCtasRender();
+}
+
+function bnCtaSet(i, campo, valor) {
+  _bnCtas[i][campo] = valor;
+  bnPreview();
+}
+
+// Elegir banco deja escrito el arranque de la CLABE, pero solo si está vacía:
+// nunca pisa dígitos ya capturados.
+function bnCtaBanco(i) {
+  const v = $('bn-c' + i + '-banco').value;
+  _bnCtas[i].clave = v;
+  $('bn-c' + i + '-otrocaja').style.display = v === 'otro' ? '' : 'none';
+  const e = $('bn-c' + i + '-clabe');
+  if (v && v !== 'otro' && !bnDigitos(e.value)) {
+    e.value = v; _bnCtas[i].clabe = v; e.focus();
+  }
+  bnPreview();
+}
+
+function bnCtaClabe(i) {
+  const e = $('bn-c' + i + '-clabe');
+  const d = bnDigitos(e.value).slice(0, 18);
+  e.value = bnClabeFmt(d);
+  _bnCtas[i].clabe = d;
+  // Con tres dígitos ya se sabe el banco. Solo lo pone si no había elegido uno;
+  // si eligió otro distinto, se le avisa en vez de cambiárselo.
+  if (d.length >= 3 && !_bnCtas[i].clave) {
+    const b = bancoPorClave(d.slice(0, 3));
+    if (b) { _bnCtas[i].clave = b[0]; $('bn-c' + i + '-banco').value = b[0]; }
+  }
+  bnPreview();
+}
+
+// El nombre del banco de una cuenta, venga del catálogo o escrito a mano.
+function bnCtaBancoNom(c) {
+  return c.clave === 'otro' ? (c.otro || '').trim()
+       : c.clave ? bancoPorClave(c.clave)[1] : '';
+}
+
+// ── La ficha en vivo de la derecha ───────────────────────────────
+function bnPreview() {
+  const caja = $('bn-prev');
+  if (!caja) return;
+  const v = id => ($(id)?.value || '').trim();
+  const ayuda = (id, txt, clase) => {
+    const e = $(id); if (!e) return;
+    e.textContent = txt; e.className = 'cli-ayuda' + (clase ? ' ' + clase : '');
+  };
+
+  const nombre = v('bn-nombre').toUpperCase();
+  const rfc = v('bn-rfc').toUpperCase();
+  const selCli = $('bn-cliente');
+  const cliente = selCli && selCli.value ? selCli.options[selCli.selectedIndex].text.trim() : '';
+  const esBanco = _bnModo === 'banco';
+
+  // Dos renglones con la misma CLABE casi siempre son la misma cuenta
+  // capturada dos veces. Vale mas decirlo aqui que descubrirlo dispersando.
+  const repetidas = {};
+  if (esBanco) _bnCtas.forEach(c => {
+    if (c.clabe && c.clabe.length === 18) repetidas[c.clabe] = (repetidas[c.clabe] || 0) + 1;
+  });
+
+  if (esBanco) _bnCtas.forEach((c, i) => {
+    const d = c.clabe || '';
+    const aid = 'bn-c' + i + '-ayuda', bid = 'bn-c' + i + '-bayuda';
+    if (!d) ayuda(aid, 'Puedes dejarla vacía si solo tienes su número de cuenta.');
+    else if (d.length < 18) ayuda(aid, `Van ${d.length} de 18 dígitos.`, 'mal');
+    else if (!bnClabeCuadra(d))
+      ayuda(aid, 'Son 18 dígitos pero no cuadran entre sí: hay uno mal capturado. Revísala.', 'mal');
+    else if (repetidas[d] > 1)
+      ayuda(aid, 'Esta misma CLABE está capturada en otra de sus cuentas.', 'mal');
+    else ayuda(aid, 'CLABE válida: los 18 dígitos cuadran.', 'ok');
+
+    const delClabe = d.length >= 3 ? bancoPorClave(d.slice(0, 3)) : null;
+    if (delClabe && c.clave && c.clave !== 'otro' && c.clave !== delClabe[0])
+      ayuda(bid, `La CLABE empieza con ${delClabe[0]}, que es ${delClabe[1]}, y aquí elegiste otro banco.`, 'mal');
+    else if (d.length >= 3 && !delClabe)
+      ayuda(bid, `Ningún banco usa la clave ${d.slice(0, 3)}: revisa el inicio de la CLABE.`, 'mal');
+    else if (delClabe && c.clave === delClabe[0])
+      ayuda(bid, `La CLABE corresponde a ${delClabe[1]}.`, 'ok');
+    else ayuda(bid, '');
+  });
+
+  const iniciales = (nombre || '?').split(/\s+/).filter(Boolean).slice(0, 2)
+    .map(p => p[0]).join('').toUpperCase() || '?';
+
+  const usables = esBanco ? _bnCtas.filter(c => bnCtaBancoNom(c) || c.clabe || c.numero_cuenta) : [];
+  const campos = esBanco
+    ? [nombre, rfc, cliente, v('bn-concepto'), usables.length ? '1' : '']
+    : [nombre, rfc, cliente, v('bn-concepto')];
+  const pct = Math.round(campos.filter(Boolean).length / campos.length * 100);
+
+  const pri = usables.find(c => c.principal) || usables[0];
+  const partes = bnPartes(pri ? pri.clabe : '');
+  const seg = (txt, k, ancho) => `<div style="flex:${ancho}">
+      <div class="d ${txt ? '' : 'vacio'}">${txt || '•'.repeat(ancho === 11 ? 4 : 3)}</div>
+      <div class="k">${k}</div></div>`;
+
+  const dato = (k, val) => val
+    ? `<div class="cli-dato"><span class="k">${k}</span><span class="v">${val}</span></div>` : '';
+
+  // Las demas cuentas, en corto: lo que importa de un vistazo es en que banco
+  // esta cada una y si su CLABE ya quedo bien.
+  const otras = usables.filter(c => c !== pri).map(c => {
+    const ok = c.clabe.length === 18 && bnClabeCuadra(c.clabe);
+    return `<div style="margin-top:9px;padding-top:9px;border-top:1px solid rgba(255,255,255,.07)">
+      <div style="font-size:12px;font-weight:700;color:#f1f3f9">
+        ${bnCtaBancoNom(c) || 'Sin banco'}${c.alias ? ` · ${c.alias}` : ''}</div>
+      <div style="font-family:ui-monospace,monospace;font-size:10.5px;color:#9aa3bd;margin-top:2px">
+        ${c.clabe ? bnClabeFmt(c.clabe) : (c.numero_cuenta || 'Sin CLABE')}
+        ${c.clabe.length === 18 ? (ok ? ' ✓' : ' ✕') : ''}</div>
+    </div>`;
+  }).join('');
+
+  caja.innerHTML = `
+    <div style="display:flex;gap:12px;align-items:center">
+      <div class="cli-ava">${_bnTipo === 'empresa' ? '🏢' : iniciales}</div>
+      <div style="min-width:0">
+        <div style="font-size:14.5px;font-weight:800;color:#fff;line-height:1.25;word-break:break-word">
+          ${nombre || 'Sin nombre todavía'}</div>
+        <div style="font-size:11px;color:#9aa3bd;font-family:ui-monospace,monospace;letter-spacing:.5px;margin-top:2px">
+          ${rfc || 'Sin RFC'}</div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px">
+      <span class="cli-chip">${_bnTipo === 'empresa' ? '🏢 Empresa' : '👤 Persona'}</span>
+      ${cliente ? `<span class="cli-chip">🏷 ${cliente}</span>`
+                : '<span class="cli-chip">⚠ Sin cliente</span>'}
+      <span class="cli-chip">${!esBanco ? '💵 Solo efectivo'
+        : usables.length > 1 ? `🏦 ${usables.length} cuentas` : '🏦 Con cuenta'}</span>
+    </div>
+
+    ${esBanco ? `
+      <div style="margin-top:16px;font-size:10.5px;color:#9aa3bd;text-transform:uppercase;letter-spacing:.8px">
+        ${usables.length > 1 ? 'Cuenta principal' : 'Cómo se le transfiere'}</div>
+      ${pri && bnCtaBancoNom(pri)
+        ? `<div style="font-size:13px;font-weight:700;color:#f1f3f9;margin-top:5px">
+             ${bnCtaBancoNom(pri)}${pri.alias ? ` · ${pri.alias}` : ''}</div>`
+        : '<div style="font-size:12px;color:#5d6480;margin-top:5px">Falta elegir el banco</div>'}
+      <div class="bn-clabe-seg">
+        ${seg(partes[0], 'Banco', 3)}
+        ${seg(partes[1], 'Plaza', 3)}
+        ${seg(partes[2], 'Cuenta', 11)}
+        ${seg(partes[3], 'Dígito', 1)}
+      </div>
+      ${pri && pri.clabe.length === 18
+        ? (bnClabeCuadra(pri.clabe)
+            ? '<div style="font-size:11px;color:#4ade80;font-weight:700;margin-top:7px">✓ La CLABE cuadra</div>'
+            : '<div style="font-size:11px;color:#f87171;font-weight:700;margin-top:7px">✕ Hay un dígito mal</div>')
+        : `<div style="font-size:11px;color:#9aa3bd;margin-top:7px">${pri ? pri.clabe.length : 0} de 18 dígitos</div>`}
+      ${pri && pri.numero_cuenta ? dato('Cuenta', pri.numero_cuenta) : ''}
+      ${otras ? `<div style="margin-top:14px;font-size:10.5px;color:#9aa3bd;
+                   text-transform:uppercase;letter-spacing:.8px">Sus otras cuentas</div>${otras}` : ''}
+    ` : `
+      <div style="margin-top:16px;font-size:11.5px;color:#9aa3bd;line-height:1.5">
+        Se le entrega en efectivo. El efectivo no sale de ninguna caja del sistema,
+        se registra como entrega directa.</div>`}
+
+    <div style="margin-top:14px">
+      ${dato('Concepto', v('bn-concepto'))}
+      ${dato('Notas', v('bn-notas'))}
+    </div>
+
+    <div style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;font-size:10.5px;color:#9aa3bd;margin-bottom:5px">
+        <span>Ficha completa</span><span>${pct}%</span></div>
+      <div class="cli-barra"><i style="width:${pct}%"></i></div>
+    </div>`;
 }
 
 async function guardarBeneficiario(id) {
+  const n = String.fromCharCode(10);
+  const esBanco = _bnModo === 'banco';
+  const cuentas = !esBanco ? [] : _bnCtas
+    .map(c => ({ id: c.id, alias: c.alias.trim(), banco: bnCtaBancoNom(c),
+                 clabe: c.clabe, numero_cuenta: c.numero_cuenta.trim(),
+                 principal: c.principal }))
+    .filter(c => c.banco || c.clabe || c.numero_cuenta);
+  const pri = cuentas.find(c => c.principal) || cuentas[0] || {};
+
   const cuerpo = {
     nombre_completo: $('bn-nombre').value.trim(),
     rfc: $('bn-rfc').value.trim(),
     cliente_id: $('bn-cliente').value || null,
-    tipo: $('bn-tipo').value,
-    banco: $('bn-banco').value.trim(),
-    clabe: $('bn-clabe').value,
-    numero_cuenta: $('bn-cuenta').value.trim(),
+    tipo: _bnTipo,
+    // Las columnas viejas guardan la principal: de ahi las leen los cheques.
+    banco: pri.banco || '',
+    clabe: pri.clabe || '',
+    numero_cuenta: pri.numero_cuenta || '',
+    cuentas,
     concepto: $('bn-concepto').value.trim(),
     notas: $('bn-notas').value.trim(),
   };
   if (!cuerpo.nombre_completo) return toast('Falta el nombre.', 'err');
-  const d = (cuerpo.clabe || '').replace(/[^0-9]/g, '');
-  if (d && d.length !== 18 &&
-      !await confirm2(`La CLABE tiene ${d.length} dígitos y deben ser 18.`
-        + String.fromCharCode(10) + String.fromCharCode(10)
-        + 'Una CLABE incompleta rebota la transferencia en el banco.'
-        + String.fromCharCode(10) + '¿Guardar así de todos modos?')) return;
+
+  // Pasar a "solo efectivo" apaga lo que ya estaba capturado: que se vea antes.
+  if (id && !esBanco) {
+    const x = (_benData.beneficiarios || []).find(b => b.id === id) || {};
+    const tenia = (x.cuentas || []).length || x.clabe || x.banco || x.numero_cuenta;
+    if (tenia && !await confirm2('Lo dejaste en "solo efectivo", así que sus datos de banco '
+        + 'dejan de aparecer al dispersarle.' + n + n
+        + ((x.cuentas || []).map(c => '• ' + (c.banco || 'Sin banco')
+             + (c.clabe ? ' · ' + bnClabeFmt(c.clabe) : '')).join(n)
+           || '• ' + (x.banco || '') + (x.clabe ? ' · ' + bnClabeFmt(x.clabe) : ''))
+        + n + n + '¿Continuar?')) return;
+  }
+
+  // Los problemas de todas las cuentas juntos, en un solo aviso.
+  const quejas = [];
+  cuentas.forEach((c, i) => {
+    const d = bnDigitos(c.clabe);
+    const cual = `Cuenta ${i + 1}${c.banco ? ' (' + c.banco + ')' : ''}`;
+    if (d && d.length !== 18) quejas.push(`• ${cual}: la CLABE tiene ${d.length} dígitos y deben ser 18.`);
+    else if (d && !bnClabeCuadra(d))
+      quejas.push(`• ${cual}: los 18 dígitos no cuadran entre sí, hay uno mal capturado.`);
+    if (!c.banco && d) quejas.push(`• ${cual}: falta decir de qué banco es.`);
+  });
+  const repes = cuentas.filter(c => c.clabe).map(c => c.clabe)
+    .filter((x, i, a) => a.indexOf(x) !== i);
+  if (repes.length) quejas.push('• Hay dos cuentas con la misma CLABE.');
+
+  if (quejas.length && !await confirm2('Revisa esto antes de guardar:' + n + n
+      + quejas.join(n) + n + n
+      + 'Una CLABE mal capturada rebota la transferencia en el banco y se'
+      + ' descubre días después.' + n + '¿Guardar así de todos modos?')) return;
+
   try {
     if (id) await api(`/tesoreria/beneficiarios/${id}`, { method:'PUT', body: JSON.stringify(cuerpo) });
     else    await api('/tesoreria/beneficiarios', { method:'POST', body: JSON.stringify(cuerpo) });
     toast(id ? 'Beneficiario actualizado.' : 'Beneficiario registrado.');
-    closeModal('modal-gt-cats');
+    closeModal('modal-ben');
     cargarBeneficiarios();
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -9510,6 +9988,10 @@ function openPagoBen(beneficiarioId) {
           </option>`).join('')}
         </select>
         <div class="cli-ayuda">Hoy no descuenta el saldo, pero queda registrado para cuando sí.</div></div>
+      <div class="fi full" id="pb-destino-caja" style="display:none">
+        <label>A cuál de sus cuentas *</label>
+        <select id="pb-destino"></select>
+        <div class="cli-ayuda" id="pb-destino-ayuda"></div></div>
       <div class="fi"><label>Monto *</label>
         <input type="number" step="0.01" id="pb-monto" placeholder="0.00"
                style="text-align:right;font-weight:800;font-size:17px"></div>
@@ -9532,6 +10014,7 @@ function pbCambioForma() {
   const esEfectivo = $('pb-forma').value === 'efectivo';
   const caja = $('pb-cuenta-caja');
   if (caja) caja.style.display = esEfectivo ? 'none' : '';
+  pbDestinos();
 }
 
 function pbCambioBen() {
@@ -9543,6 +10026,34 @@ function pbCambioBen() {
     : cliente ? 'Se paga por cuenta de ' + cliente + '.'
               : 'Este beneficiario no tiene cliente asignado.';
   a.className = 'cli-ayuda' + (sel.value && !cliente ? ' mal' : '');
+  pbDestinos();
+}
+
+// A cual de SUS cuentas se le deposita. Con una sola no se pregunta; con
+// varias hay que elegir, porque si no el historico no sabria a donde fue.
+function pbDestinos() {
+  const caja = $('pb-destino-caja');
+  if (!caja) return;
+  const id = $('pb-ben').value;
+  const ben = (_benData && _benData.beneficiarios || []).find(x => String(x.id) === String(id));
+  const cuentas = ben ? (ben.cuentas || []) : [];
+  const esEfectivo = $('pb-forma').value === 'efectivo';
+
+  if (esEfectivo || cuentas.length < 2) {
+    caja.style.display = 'none';
+    $('pb-destino').innerHTML = cuentas.length === 1
+      ? `<option value="${cuentas[0].id}" selected></option>` : '';
+    return;
+  }
+  caja.style.display = '';
+  const pri = cuentas.find(c => c.principal) || cuentas[0];
+  $('pb-destino').innerHTML = cuentas.map(c => `
+    <option value="${c.id}" ${c.id === pri.id ? 'selected' : ''}>
+      ${c.banco || 'Sin banco'}${c.alias ? ' · ' + c.alias : ''}
+      ${c.clabe ? ' · ' + bnClabeFmt(c.clabe) : ''}${c.principal ? '  ★' : ''}
+    </option>`).join('');
+  $('pb-destino-ayuda').textContent =
+    `Tiene ${cuentas.length} cuentas. Viene marcada la principal.`;
 }
 
 async function guardarPagoBen() {
@@ -9551,6 +10062,7 @@ async function guardarPagoBen() {
     beneficiario_id: $('pb-ben').value || null,
     forma,
     cuenta_bancaria_id: forma === 'efectivo' ? null : ($('pb-cuenta').value || null),
+    cuenta_beneficiario_id: forma === 'efectivo' ? null : ($('pb-destino').value || null),
     fecha: $('pb-fecha').value,
     monto: $('pb-monto').value,
     referencia: $('pb-ref').value.trim(),

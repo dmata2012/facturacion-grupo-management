@@ -596,6 +596,45 @@ router.get('/kpi', async (req, res) => {
         creado_por_nombre TEXT,
         creado_en TIMESTAMP DEFAULT NOW()
       )`);
+
+    // Las cuentas del beneficiario. Antes eran tres columnas suyas, pero hay
+    // quien cobra en dos bancos distintos segun el concepto.
+    await query(`
+      CREATE TABLE IF NOT EXISTS fac_bancos_ben_cuentas (
+        id SERIAL PRIMARY KEY,
+        beneficiario_id INT NOT NULL REFERENCES fac_bancos_beneficiarios(id) ON DELETE CASCADE,
+        alias TEXT,
+        banco TEXT,
+        clabe TEXT,
+        numero_cuenta TEXT,
+        -- La que se propone por omision al dispersarle.
+        principal BOOLEAN NOT NULL DEFAULT FALSE,
+        -- No se borran las que ya recibieron un pago: se apagan, para que el
+        -- historico siga diciendo a donde fue el dinero.
+        activa BOOLEAN NOT NULL DEFAULT TRUE,
+        creado_en TIMESTAMP DEFAULT NOW()
+      )`);
+    await query(`CREATE INDEX IF NOT EXISTS ix_bencta_ben ON fac_bancos_ben_cuentas(beneficiario_id)`);
+    // A que cuenta del beneficiario se deposito. Sin esto, con dos cuentas no
+    // se puede saber despues a donde se le pago.
+    await query(`ALTER TABLE fac_tes_dispersiones ADD COLUMN IF NOT EXISTS
+                 cuenta_beneficiario_id INT REFERENCES fac_bancos_ben_cuentas(id) ON DELETE SET NULL`);
+
+    // Lo ya capturado en las columnas viejas pasa a ser su primera cuenta.
+    const yaPaso = await query(
+      `SELECT 1 FROM fac_migraciones_aplicadas WHERE clave=$1`, ['ben_cuentas_v1']);
+    if (!yaPaso.rows.length) {
+      await query(`
+        INSERT INTO fac_bancos_ben_cuentas(beneficiario_id, banco, clabe, numero_cuenta, principal)
+        SELECT b.id, b.banco, b.clabe, b.numero_cuenta, TRUE
+          FROM fac_bancos_beneficiarios b
+         WHERE (COALESCE(TRIM(b.banco),'') <> '' OR COALESCE(TRIM(b.clabe),'') <> ''
+                OR COALESCE(TRIM(b.numero_cuenta),'') <> '')
+           AND NOT EXISTS (SELECT 1 FROM fac_bancos_ben_cuentas c WHERE c.beneficiario_id = b.id)`);
+      await query(`INSERT INTO fac_migraciones_aplicadas(clave) VALUES($1)
+                   ON CONFLICT DO NOTHING`, ['ben_cuentas_v1']);
+      console.log('Cuentas de beneficiarios: migradas las que ya estaban capturadas.');
+    }
     await query(`CREATE INDEX IF NOT EXISTS ix_disp_fecha ON fac_tes_dispersiones(fecha DESC)`);
     await query(`CREATE INDEX IF NOT EXISTS ix_disp_benef ON fac_tes_dispersiones(beneficiario_id)`);
     await query(`CREATE INDEX IF NOT EXISTS ix_disp_cliente ON fac_tes_dispersiones(cliente_id)`);
@@ -623,7 +662,16 @@ router.get('/beneficiarios', permiso('beneficiarios', NIVEL.VER), async (req, re
       SELECT b.*,
              COALESCE(NULLIF(TRIM(c.nombre_comercial),''), c.razon_social) AS cliente,
              (SELECT COUNT(*)::int FROM fac_tes_dispersiones d WHERE d.beneficiario_id = b.id) AS pagos,
-             (SELECT COALESCE(SUM(d.monto),0) FROM fac_tes_dispersiones d WHERE d.beneficiario_id = b.id) AS pagado
+             (SELECT COALESCE(SUM(d.monto),0) FROM fac_tes_dispersiones d WHERE d.beneficiario_id = b.id) AS pagado,
+             COALESCE((SELECT json_agg(json_build_object(
+                         'id', cb.id, 'alias', cb.alias, 'banco', cb.banco,
+                         'clabe', cb.clabe, 'numero_cuenta', cb.numero_cuenta,
+                         'principal', cb.principal,
+                         'pagos', (SELECT COUNT(*)::int FROM fac_tes_dispersiones d2
+                                    WHERE d2.cuenta_beneficiario_id = cb.id))
+                         ORDER BY cb.principal DESC, cb.id)
+                        FROM fac_bancos_ben_cuentas cb
+                       WHERE cb.beneficiario_id = b.id AND cb.activa = TRUE), '[]'::json) AS cuentas
         FROM fac_bancos_beneficiarios b
         LEFT JOIN fac_clientes c ON c.id = b.cliente_id
         ${where}
@@ -634,6 +682,60 @@ router.get('/beneficiarios', permiso('beneficiarios', NIVEL.VER), async (req, re
     res.json({ beneficiarios: r.rows, sin_cliente: sin.rows[0].n });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// Guarda la lista de cuentas de un beneficiario y espeja la principal en las
+// columnas viejas de la tabla, que es de donde las leen los cheques.
+//
+// Las que el usuario quito no se borran si ya recibieron un pago: se apagan.
+// Borrarlas dejaria el historico sin decir a donde fue el dinero.
+async function guardarCuentasBen(id, lista) {
+  const cuentas = Array.isArray(lista) ? lista : [];
+  const limpias = cuentas
+    .map(c => ({
+      id: c.id || null,
+      alias: limpio(c.alias) || null,
+      banco: limpio(c.banco) || null,
+      clabe: soloDigitos(c.clabe) || null,
+      numero_cuenta: limpio(c.numero_cuenta) || null,
+      principal: !!c.principal,
+    }))
+    // Una cuenta sin ningun dato no es una cuenta.
+    .filter(c => c.banco || c.clabe || c.numero_cuenta);
+  if (limpias.length && !limpias.some(c => c.principal)) limpias[0].principal = true;
+
+  const previas = await query(
+    `SELECT id FROM fac_bancos_ben_cuentas WHERE beneficiario_id=$1 AND activa=TRUE`, [id]);
+  const quedan = new Set(limpias.filter(c => c.id).map(c => String(c.id)));
+
+  for (const p of previas.rows) {
+    if (quedan.has(String(p.id))) continue;
+    const uso = await query(
+      `SELECT COUNT(*)::int AS n FROM fac_tes_dispersiones WHERE cuenta_beneficiario_id=$1`, [p.id]);
+    if (uso.rows[0].n > 0)
+      await query(`UPDATE fac_bancos_ben_cuentas SET activa=FALSE, principal=FALSE WHERE id=$1`, [p.id]);
+    else
+      await query(`DELETE FROM fac_bancos_ben_cuentas WHERE id=$1`, [p.id]);
+  }
+
+  for (const c of limpias) {
+    if (c.id)
+      await query(`
+        UPDATE fac_bancos_ben_cuentas
+           SET alias=$1, banco=$2, clabe=$3, numero_cuenta=$4, principal=$5, activa=TRUE
+         WHERE id=$6 AND beneficiario_id=$7`,
+        [c.alias, c.banco, c.clabe, c.numero_cuenta, c.principal, c.id, id]);
+    else
+      await query(`
+        INSERT INTO fac_bancos_ben_cuentas(beneficiario_id, alias, banco, clabe, numero_cuenta, principal)
+        VALUES ($1,$2,$3,$4,$5,$6)`,
+        [id, c.alias, c.banco, c.clabe, c.numero_cuenta, c.principal]);
+  }
+
+  const pri = limpias.find(c => c.principal) || {};
+  await query(`
+    UPDATE fac_bancos_beneficiarios SET banco=$1, clabe=$2, numero_cuenta=$3 WHERE id=$4`,
+    [pri.banco || null, pri.clabe || null, pri.numero_cuenta || null, id]);
+}
 
 router.post('/beneficiarios', permiso('beneficiarios', NIVEL.CAPTURAR), async (req, res) => {
   try {
@@ -649,6 +751,7 @@ router.post('/beneficiarios', permiso('beneficiarios', NIVEL.CAPTURAR), async (r
        limpio(b.banco) || null, soloDigitos(b.clabe) || null,
        limpio(b.numero_cuenta) || null, limpio(b.concepto) || null,
        limpio(b.notas) || null, req.usuario ? req.usuario.id : null]);
+    if (b.cuentas) await guardarCuentasBen(r.rows[0].id, b.cuentas);
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -668,6 +771,7 @@ router.put('/beneficiarios/:id', permiso('beneficiarios', NIVEL.CAPTURAR), async
        limpio(b.banco) || null, soloDigitos(b.clabe) || null,
        limpio(b.numero_cuenta) || null, limpio(b.concepto) || null,
        limpio(b.notas) || null, req.params.id]);
+    if (b.cuentas) await guardarCuentasBen(req.params.id, b.cuentas);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -690,8 +794,10 @@ router.get('/beneficiarios/:id/pagos', permiso('beneficiarios', NIVEL.VER), asyn
     const r = await query(`
       SELECT d.*, TO_CHAR(d.fecha,'YYYY-MM-DD') AS fecha,
              cu.alias AS cuenta, cu.banco AS cuenta_banco,
+             cb.banco AS destino_banco, cb.clabe AS destino_clabe, cb.alias AS destino_alias,
              COALESCE(NULLIF(TRIM(c.nombre_comercial),''), c.razon_social) AS cliente
         FROM fac_tes_dispersiones d
+        LEFT JOIN fac_bancos_ben_cuentas cb ON cb.id = d.cuenta_beneficiario_id
         LEFT JOIN fac_bancos_cuentas cu ON cu.id = d.cuenta_bancaria_id
         LEFT JOIN fac_clientes c ON c.id = d.cliente_id
        WHERE d.beneficiario_id = $1
@@ -715,11 +821,14 @@ router.get('/dispersiones', permiso('beneficiarios', NIVEL.VER), async (req, res
 
     const r = await query(`
       SELECT d.*, TO_CHAR(d.fecha,'YYYY-MM-DD') AS fecha,
-             b.nombre_completo AS beneficiario, b.rfc, b.banco, b.clabe,
+             b.nombre_completo AS beneficiario, b.rfc,
+             COALESCE(cb.banco, b.banco) AS banco, COALESCE(cb.clabe, b.clabe) AS clabe,
+             cb.alias AS destino_alias,
              cu.alias AS cuenta, cu.banco AS cuenta_banco,
              COALESCE(NULLIF(TRIM(c.nombre_comercial),''), c.razon_social) AS cliente
         FROM fac_tes_dispersiones d
         JOIN fac_bancos_beneficiarios b ON b.id = d.beneficiario_id
+        LEFT JOIN fac_bancos_ben_cuentas cb ON cb.id = d.cuenta_beneficiario_id
         LEFT JOIN fac_bancos_cuentas cu ON cu.id = d.cuenta_bancaria_id
         LEFT JOIN fac_clientes c ON c.id = d.cliente_id
         ${where}
@@ -763,15 +872,38 @@ router.post('/dispersiones', permiso('beneficiarios', NIVEL.CAPTURAR), async (re
     if (!ben.rows[0].activo)
       return res.status(400).json({ error: 'Ese beneficiario está dado de baja.' });
 
+    // A que cuenta SUYA se le deposita. Si tiene varias hay que decirlo, si no
+    // el historico no sabria a cual fue. Se verifica que sea de el: mandar la
+    // cuenta de otro beneficiario dejaria el pago apuntando a quien no es.
+    let destino = null;
+    if (forma !== 'efectivo') {
+      const suyas = await query(
+        `SELECT id, principal FROM fac_bancos_ben_cuentas
+          WHERE beneficiario_id=$1 AND activa=TRUE ORDER BY principal DESC, id`, [b.beneficiario_id]);
+      if (b.cuenta_beneficiario_id) {
+        const elegida = suyas.rows.find(c => String(c.id) === String(b.cuenta_beneficiario_id));
+        if (!elegida)
+          return res.status(400).json({ error: 'Esa cuenta no es de este beneficiario.' });
+        destino = elegida.id;
+      } else if (suyas.rows.length > 1) {
+        return res.status(400).json({
+          error: 'Este beneficiario tiene ' + suyas.rows.length
+               + ' cuentas: elige a cuál se le deposita.' });
+      } else if (suyas.rows.length === 1) {
+        destino = suyas.rows[0].id;
+      }
+    }
+
     const r = await query(`
       INSERT INTO fac_tes_dispersiones
-        (beneficiario_id, cliente_id, forma, cuenta_bancaria_id, cheque_id, fecha, monto,
+        (beneficiario_id, cliente_id, forma, cuenta_bancaria_id, cuenta_beneficiario_id,
+         cheque_id, fecha, monto,
          referencia, concepto, notas, creado_por, creado_por_nombre)
-      VALUES ($1,$2,$3,$4,$5,$6::date,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      VALUES ($1,$2,$3,$4,$5,$6,$7::date,$8,$9,$10,$11,$12,$13) RETURNING id`,
       [b.beneficiario_id,
        // Se congela el cliente que tenia el beneficiario al momento del pago.
        b.cliente_id || ben.rows[0].cliente_id || null,
-       forma, forma === 'efectivo' ? null : b.cuenta_bancaria_id,
+       forma, forma === 'efectivo' ? null : b.cuenta_bancaria_id, destino,
        b.cheque_id || null, b.fecha, monto,
        limpio(b.referencia) || null, limpio(b.concepto) || null, limpio(b.notas) || null,
        req.usuario ? req.usuario.id : null, req.usuario ? req.usuario.nombre : null]);
