@@ -490,6 +490,12 @@ tbody tr:hover td{background:#FAFBFF}
   border-radius:12px;padding:11px;cursor:pointer;font-size:12.5px;font-weight:700;
   color:var(--muted);transition:.15s}
 .bf-cta-add:hover{border-color:var(--red-l);color:var(--red);background:var(--red-xs)}
+/* El renglón de un préstamo por cobrar se clickea entero para registrar la
+   devolución: el botón solo era muy chico para algo de uso diario. */
+.cc-cobrable:hover{background:#bfdbfe !important;box-shadow:inset 3px 0 0 #2563eb}
+.cc-cobrable:hover .cc-cobrar-pista{opacity:1}
+.cc-cobrar-pista{opacity:0;transition:.15s;font-size:9.5px;font-weight:800;color:#1d4ed8;
+  white-space:nowrap;margin-left:5px}
 .bn-clabe-seg{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
 .bn-clabe-seg div{flex:1;min-width:52px;text-align:center}
 .bn-clabe-seg .d{font-family:ui-monospace,monospace;font-size:13px;font-weight:700;
@@ -20714,17 +20720,22 @@ function renderDetalleFondoCC() {
         if (w) botones += '<button class="btn bg bsm" style="padding:6px 8px" onclick="openMovCC(\''+m.tipo+'\','+m.id+')" title="Editar movimiento">✏️</button> ';
         if (wBorrar) botones += '<button class="btn bd bsm" style="padding:6px 8px" onclick="eliminarMovCC('+m.id+')" title="Eliminar movimiento">🗑</button>';
         const vivo = pend && pend.estado !== 'liquidado';
-        const trStyle = vivo ? 'background:#dbeafe;font-weight:800;color:#1e40af' : '';
+        const cobrable = vivo && w;
+        const trStyle = (vivo ? 'background:#dbeafe;font-weight:800;color:#1e40af' : '')
+          + (cobrable ? ';cursor:pointer' : '');
         const conceptoStyle = vivo ? 'color:#1e3a8a;font-weight:800' : '';
-        return `<tr style="${trStyle}">
+        return `<tr style="${trStyle}" ${cobrable
+            ? `class="cc-cobrable" onclick="marcarDevueltoCC(${m.id})"
+               title="Clic para registrar la devolución de ${fmt(falta)}"` : ''}>
           <td>${fmtDate(m.fecha)}</td>
           <td><span style="display:inline-flex;align-items:center;gap:3px;background:${es?'#dcfce7':'#fee2e2'};color:${es?'#166534':'#991b1b'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">${es?'📥 Entrada':'📤 Salida'}</span></td>
           <td>${m.categoria||'—'}</td>
           <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${conceptoStyle}" title="${m.concepto||''}${m.tipo_gasto?' · '+m.tipo_gasto:''}">${pend?ccEtiquetaPend(pend):''}${m.concepto||''}</td>
-          <td>${m.beneficiario||'—'}</td>
+          <td>${m.beneficiario||'—'}${cobrable
+            ? '<span class="cc-cobrar-pista">💰 clic para cobrar</span>' : ''}</td>
           <td style="text-align:right;font-weight:800;color:${vivo?'#1e40af':(es?'#166534':'#991b1b')}">${es?'+':'−'}${fmt(m.monto)}</td>
           <td style="text-align:right;font-weight:800;color:${saldoAcum<0?'#dc2626':'var(--dark)'}">${fmt(saldoAcum)}</td>
-          <td style="white-space:nowrap">${botones}</td>
+          <td style="white-space:nowrap" onclick="event.stopPropagation()">${botones}</td>
         </tr>`;
       }).join('')}</tbody>
     </table></div>`:'<p class="empty">Sin movimientos registrados.</p>'}
