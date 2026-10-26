@@ -11,10 +11,31 @@ const { permiso, NIVEL } = require('../middleware/permiso');
 router.use(verificarToken);
 
 // Migración idempotente: columna tipo_gasto para marcar "Reembolso pendiente de caja"
+//
+// Y liquida_mov_id: la entrada con la que devuelven ese dinero apunta a la
+// salida que esta saldando. Puede haber varias, porque se puede devolver a
+// plazos. Lo que falta por cobrar se SUMA de ahi en vez de guardarse en un
+// estado aparte, que es lo que se desincronizaria del dinero real.
 (async () => {
-  try { await query(`ALTER TABLE fac_caja_chica_movimientos ADD COLUMN IF NOT EXISTS tipo_gasto TEXT`); }
-  catch (e) { console.warn('Migración tipo_gasto:', e.message); }
+  try {
+    await query(`ALTER TABLE fac_caja_chica_movimientos ADD COLUMN IF NOT EXISTS tipo_gasto TEXT`);
+    await query(`ALTER TABLE fac_caja_chica_movimientos ADD COLUMN IF NOT EXISTS liquida_mov_id INT`);
+    await query(`CREATE INDEX IF NOT EXISTS ix_ccmov_liquida
+                 ON fac_caja_chica_movimientos(liquida_mov_id)`);
+  } catch (e) { console.warn('Migración tipo_gasto:', e.message); }
 })();
+
+const PENDIENTE_CAJA = 'Reembolso pendiente de caja';
+
+// Cuanto falta por cobrar de una salida pendiente.
+async function saldoPendiente(correr, movId, monto) {
+  const r = await correr(
+    `SELECT COALESCE(SUM(monto),0) AS abonado
+       FROM fac_caja_chica_movimientos
+      WHERE liquida_mov_id=$1 AND tipo='entrada'`, [movId]);
+  const abonado = parseFloat(r.rows[0].abonado) || 0;
+  return { abonado, saldo: +(parseFloat(monto) - abonado).toFixed(2) };
+}
 
 // Hay dos formas de manejar efectivo y no son la misma:
 //
@@ -512,6 +533,104 @@ router.put('/movimientos/:id', permiso('cajaChica', NIVEL.EDITAR), async (req, r
     );
     if (comp) await guardarComprobante({ query }, req.params.id, comp, req.usuario.id);
     res.json({ ok: true, comprobante_reemplazado: !!comp });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── LIQUIDAR UN REEMBOLSO PENDIENTE ───────────────────────────
+// Una salida marcada "Reembolso pendiente de caja" es dinero que salio de la
+// caja pero que alguien debe devolver, por eso no se le pide a tesoreria. El
+// dia que lo devuelven hay que hacer DOS cosas a la vez: registrar la entrada
+// y bajar el pendiente. Separadas, el saldo sube y el pendiente sigue
+// restando completo, y el reembolso a pedir sale al doble de corto.
+//
+// Se puede devolver en partes: cada abono es una entrada mas.
+router.post('/movimientos/:id/liquidar', permiso('cajaChica', NIVEL.CAPTURAR), async (req, res) => {
+  try {
+    const { fecha, forma_pago, referencia, notas, clave } = req.body || {};
+    const r = await query(
+      `SELECT * FROM fac_caja_chica_movimientos WHERE id=$1`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Movimiento no encontrado.' });
+    const mov = r.rows[0];
+
+    if (mov.tipo !== 'salida' || mov.tipo_gasto !== PENDIENTE_CAJA)
+      return res.status(400).json({ error: 'Ese movimiento no es un reembolso pendiente.' });
+
+    if (!(await tienePermisoFondo(mov.fondo_id, req.usuario)))
+      return res.status(403).json({ error: 'No tienes acceso a esta caja chica.' });
+    const chk = await validarClaveFondo(mov.fondo_id, clave, req.usuario);
+    if (!chk.ok) return res.status(chk.code || 403).json({ error: chk.error });
+
+    const { abonado, saldo } = await saldoPendiente(query, mov.id, mov.monto);
+    if (saldo <= 0.001)
+      return res.status(400).json({ error: 'Ese reembolso ya está liquidado por completo.' });
+
+    // Sin monto se entiende que devolvieron todo lo que faltaba.
+    const abono = req.body.monto == null || req.body.monto === ''
+      ? saldo : parseFloat(req.body.monto);
+    if (!(abono > 0)) return res.status(400).json({ error: 'El monto debe ser mayor a 0.' });
+    // Cobrar de mas convertiria el sobrante en una entrada sin origen, que
+    // infla el saldo de la caja sin que nadie sepa de donde salio.
+    if (abono > saldo + 0.01)
+      return res.status(400).json({
+        error: `De este pendiente solo faltan $${saldo.toFixed(2)} por cobrar`
+             + (abonado > 0 ? ` (ya se abonaron $${abonado.toFixed(2)})` : '') + '.' });
+
+    // El comprobante se valida antes de tocar nada: un archivo invalido debe
+    // rechazar la liquidacion completa, no dejarla guardada sin el.
+    let comp = null;
+    if (req.body.archivo) {
+      comp = leerComprobante(req.body.archivo);
+      if (!comp.ok) return res.status(400).json({ error: comp.error });
+    }
+
+    const cuando = fecha || new Date().toISOString().slice(0, 10);
+    const esTotal = abono >= saldo - 0.01;
+    const client = await getClient();
+    let ent;
+    try {
+      await client.query('BEGIN');
+      // Categoria 'Devolucion', que es la que ya traen las devoluciones del
+      // historial: este dinero lo regresa un tercero, no es la reposicion del
+      // fondo por tesoreria.
+      ent = await client.query(
+        `INSERT INTO fac_caja_chica_movimientos(
+           fondo_id, fecha, tipo, categoria, concepto, monto,
+           beneficiario, forma_pago, referencia, notas, liquida_mov_id, creado_por
+         ) VALUES($1,$2,'entrada','Devolución',$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+        [mov.fondo_id, cuando,
+         (esTotal ? 'Devolución de: ' : 'Abono a: ')
+           + (mov.concepto || '').slice(0, 230),
+         abono, mov.beneficiario || null, forma_pago || 'efectivo',
+         referencia || null, notas || null, mov.id, req.usuario.id]);
+      if (comp) await guardarComprobante(client, ent.rows[0].id, comp, req.usuario.id);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally { client.release(); }
+
+    const despues = await saldoPendiente(query, mov.id, mov.monto);
+    res.status(201).json({ ok: true, entrada: ent.rows[0],
+                           abonado: despues.abonado, saldo: despues.saldo,
+                           liquidado: despues.saldo <= 0.01 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Deshacer un abono. Solo borra entradas que de verdad son liquidaciones: sin
+// ese candado, este seria un borrado de movimientos con un permiso mas bajo
+// del que el borrado normal exige.
+router.delete('/movimientos/:id/abono', permiso('cajaChica', NIVEL.EDITAR), async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT * FROM fac_caja_chica_movimientos WHERE id=$1`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Movimiento no encontrado.' });
+    const ent = r.rows[0];
+    if (ent.tipo !== 'entrada' || !ent.liquida_mov_id)
+      return res.status(400).json({ error: 'Ese movimiento no es el abono de un pendiente.' });
+    if (!(await tienePermisoFondo(ent.fondo_id, req.usuario)))
+      return res.status(403).json({ error: 'No tienes acceso a esta caja chica.' });
+    await query(`DELETE FROM fac_caja_chica_movimientos WHERE id=$1`, [ent.id]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

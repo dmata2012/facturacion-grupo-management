@@ -20438,6 +20438,60 @@ async function openDetalleFondoCC(id) {
   } catch(e) { $('modal-cc-detalle-body').innerHTML = `<p class="empty">${e.message}</p>`; }
 }
 
+// ── Reembolsos pendientes de caja ────────────────────────────────
+// Una salida marcada asi es dinero que salio de la caja pero que alguien debe
+// devolver, por eso no se le pide a tesoreria. Lo que se resta del reembolso
+// NO es el prestamo completo sino lo que FALTA por cobrar: en cuanto devuelven
+// una parte el saldo de la caja ya subio, y restar el monto entero lo estaria
+// descontando dos veces.
+//
+// Cada devolucion es una entrada con liquida_mov_id apuntando a la salida, asi
+// que el saldo se calcula del dinero mismo y no de un estado aparte que se
+// pueda desincronizar.
+const CC_PENDIENTE = 'Reembolso pendiente de caja';
+
+function ccPendientes(movimientos) {
+  const mov = movimientos || [];
+  const abonos = {};
+  mov.forEach(m => {
+    if (m.tipo === 'entrada' && m.liquida_mov_id)
+      abonos[m.liquida_mov_id] = (abonos[m.liquida_mov_id] || 0) + (parseFloat(m.monto) || 0);
+  });
+  return mov
+    .filter(m => m.tipo === 'salida' && m.tipo_gasto === CC_PENDIENTE)
+    .map(m => {
+      const monto = parseFloat(m.monto) || 0;
+      const abonado = abonos[m.id] || 0;
+      const saldo = Math.max(0, +(monto - abonado).toFixed(2));
+      return { mov: m, id: m.id, monto, abonado, saldo,
+               estado: saldo <= 0.01 ? 'liquidado' : abonado > 0.01 ? 'parcial' : 'pendiente' };
+    });
+}
+
+// Lo de un solo movimiento, para pintar su renglon.
+function ccPendienteDe(movimientos, id) {
+  return ccPendientes(movimientos).find(p => p.id === id) || null;
+}
+
+// La etiqueta del renglon dice en que va: pendiente completo, a medias o ya
+// cobrado. Un "parcial" que se viera igual que un pendiente escondería que
+// parte de ese dinero ya regreso.
+function ccEtiquetaPend(p) {
+  const caja = (bg, borde, color, txt, tit) =>
+    `<span style="display:inline-block;background:${bg};color:${color};border:1px solid ${borde};
+       padding:1px 6px;border-radius:10px;font-size:9.5px;font-weight:800;margin-right:4px;
+       vertical-align:middle" title="${tit}">${txt}</span>`;
+  if (p.estado === 'liquidado')
+    return caja('#dcfce7', '#86efac', '#166534', '✅ REEMBOLSADO',
+                'Ya se cobró completo: ' + fmt(p.monto));
+  if (p.estado === 'parcial')
+    return caja('#fed7aa', '#fb923c', '#9a3412',
+                '🟡 FALTAN ' + fmt(p.saldo),
+                'De ' + fmt(p.monto) + ' ya devolvieron ' + fmt(p.abonado));
+  return caja('#fef3c7', '#fbbf24', '#92400e', '💸 REEMB. PEND.',
+              'Reembolso pendiente de caja: ' + fmt(p.monto));
+}
+
 function renderDetalleFondoCC() {
   const f = window._ccFondoActual;
   if (!f) return;
@@ -20447,9 +20501,8 @@ function renderDetalleFondoCC() {
   const esEf     = esCajaEfectivo(f);
   const saldo    = parseFloat(k.saldo_actual)   || 0;
   const asignado = esEf ? 0 : (parseFloat(f.fondo_asignado) || 0);
-  const reembolsosPendientes = (f.movimientos||[])
-    .filter(m => m.tipo === 'salida' && m.tipo_gasto === 'Reembolso pendiente de caja')
-    .reduce((a,m) => a + parseFloat(m.monto||0), 0);
+  const pendientes = ccPendientes(f.movimientos);
+  const reembolsosPendientes = pendientes.reduce((a,p) => a + p.saldo, 0);
   const reembolsoBruto = Math.max(0, asignado - saldo);
   const reembolso = Math.max(0, reembolsoBruto - reembolsosPendientes);
   const pct = asignado > 0 ? Math.max(0, Math.min(100, (saldo/asignado)*100)) : 0;
@@ -20570,7 +20623,21 @@ function renderDetalleFondoCC() {
           ${reembolsosPendientes > 0 ? `
           <div style="font-size:10px;color:${estado.color};margin-top:4px;padding:4px 6px;background:rgba(255,255,255,.5);border-radius:6px;line-height:1.35">
             <div>Bruto: <strong>${fmt(reembolsoBruto)}</strong></div>
-            <div style="color:#92400e">− Reemb. pendientes: <strong>${fmt(reembolsosPendientes)}</strong></div>
+            <div style="color:#92400e">− Por cobrar: <strong>${fmt(reembolsosPendientes)}</strong></div>
+          </div>
+          <div style="margin-top:6px;padding:7px 8px;background:#fef3c7;border:1.5px solid #fbbf24;
+               border-radius:8px;text-align:left">
+            <div style="font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;
+                 color:#92400e;margin-bottom:3px">💸 Pendientes por cobrar</div>
+            ${pendientes.filter(p => p.saldo > 0.01).map(p => `
+              <div style="display:flex;justify-content:space-between;gap:6px;font-size:10.5px;
+                   color:#78350f;padding:2px 0;line-height:1.3">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                      title="${(p.mov.concepto||'').replace(/"/g,'&quot;')}">
+                  ${p.mov.beneficiario || p.mov.concepto || 'Sin concepto'}
+                  ${p.estado === 'parcial' ? `<span style="opacity:.75">(de ${fmt(p.monto)})</span>` : ''}</span>
+                <strong style="white-space:nowrap">${fmt(p.saldo)}</strong>
+              </div>`).join('')}
           </div>` : `
           <div style="font-size:10px;color:${estado.color};font-weight:700;margin-top:2px">Fondo Fijo − Saldo</div>`}
           ${reembolso > 0 && ccPuedeCapturar() ? `
@@ -20632,10 +20699,12 @@ function renderDetalleFondoCC() {
         const es = m.tipo==='entrada';
         const saldoAcum = saldosPorId[m.id] || 0;
         const esPendiente = /reembolso\s*pendiente/i.test(m.tipo_gasto||'');
+        const pend = esPendiente ? ccPendienteDe(f.movimientos, m.id) : null;
+        const falta = pend ? pend.saldo : 0;
         const w = ccPuedeEditar(), wBorrar = ccPuedeBorrar();
         let botones = '';
         if (esPendiente) botones += '<button class="btn bo bsm" style="padding:6px 8px" onclick="imprimirValeCC('+m.id+')" title="Imprimir vale de caja">🖨</button> ';
-        if (esPendiente && w) botones += '<button class="btn bo bsm" style="padding:6px 8px;background:#facc15;color:#78350f;border-color:#ca8a04;font-weight:900" onclick="marcarDevueltoCC('+m.id+')" title="Marcar como devuelto (registra entrada y limpia pendiente)">💰</button> ';
+        if (esPendiente && w && falta > 0.01) botones += '<button class="btn bo bsm" style="padding:6px 8px;background:#facc15;color:#78350f;border-color:#ca8a04;font-weight:900" onclick="marcarDevueltoCC('+m.id+')" title="Registrar devolución, total o por partes">💰</button> ';
         // Consultar no depende del rol: quien ve la caja puede abrir el detalle
         botones = '<button class="btn bo bsm" style="padding:6px 8px" onclick="verMovimientoCC('+m.id+')" title="Ver detalle del movimiento">🔍</button> '
           + (m.tiene_comprobante
@@ -20644,15 +20713,16 @@ function renderDetalleFondoCC() {
           + botones;
         if (w) botones += '<button class="btn bg bsm" style="padding:6px 8px" onclick="openMovCC(\''+m.tipo+'\','+m.id+')" title="Editar movimiento">✏️</button> ';
         if (wBorrar) botones += '<button class="btn bd bsm" style="padding:6px 8px" onclick="eliminarMovCC('+m.id+')" title="Eliminar movimiento">🗑</button>';
-        const trStyle = esPendiente ? 'background:#dbeafe;font-weight:800;color:#1e40af' : '';
-        const conceptoStyle = esPendiente ? 'color:#1e3a8a;font-weight:800' : '';
+        const vivo = pend && pend.estado !== 'liquidado';
+        const trStyle = vivo ? 'background:#dbeafe;font-weight:800;color:#1e40af' : '';
+        const conceptoStyle = vivo ? 'color:#1e3a8a;font-weight:800' : '';
         return `<tr style="${trStyle}">
           <td>${fmtDate(m.fecha)}</td>
           <td><span style="display:inline-flex;align-items:center;gap:3px;background:${es?'#dcfce7':'#fee2e2'};color:${es?'#166534':'#991b1b'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">${es?'📥 Entrada':'📤 Salida'}</span></td>
           <td>${m.categoria||'—'}</td>
-          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${conceptoStyle}" title="${m.concepto||''}${m.tipo_gasto?' · '+m.tipo_gasto:''}">${esPendiente?'<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fbbf24;padding:1px 6px;border-radius:10px;font-size:9.5px;font-weight:800;margin-right:4px;vertical-align:middle" title="Reembolso pendiente de caja">💸 REEMB. PEND.</span>':''}${m.concepto||''}</td>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${conceptoStyle}" title="${m.concepto||''}${m.tipo_gasto?' · '+m.tipo_gasto:''}">${pend?ccEtiquetaPend(pend):''}${m.concepto||''}</td>
           <td>${m.beneficiario||'—'}</td>
-          <td style="text-align:right;font-weight:800;color:${esPendiente?'#1e40af':(es?'#166534':'#991b1b')}">${es?'+':'−'}${fmt(m.monto)}</td>
+          <td style="text-align:right;font-weight:800;color:${vivo?'#1e40af':(es?'#166534':'#991b1b')}">${es?'+':'−'}${fmt(m.monto)}</td>
           <td style="text-align:right;font-weight:800;color:${saldoAcum<0?'#dc2626':'var(--dark)'}">${fmt(saldoAcum)}</td>
           <td style="white-space:nowrap">${botones}</td>
         </tr>`;
@@ -21236,9 +21306,7 @@ function regenerarInformeCC() {
   }
 
   // Cálculo del reembolso REAL = (Fondo Fijo - Saldo Actual) - Reembolsos pendientes de caja
-  const reembPend = (f.movimientos||[])
-    .filter(m => m.tipo === 'salida' && m.tipo_gasto === 'Reembolso pendiente de caja')
-    .reduce((a,m) => a + parseFloat(m.monto||0), 0);
+  const reembPend = ccPendientes(f.movimientos).reduce((a,p) => a + p.saldo, 0);
   const reembolsoBrutoInf = Math.max(0, asignado - saldoActual);
   const reembolsoReal = Math.max(0, reembolsoBrutoInf - reembPend);
 
@@ -21375,9 +21443,7 @@ function excelInformeCC() {
     parseFloat(m.monto)
   ]));
   // Cálculo del reembolso REAL = (Fondo Fijo - Saldo Actual) - Reembolsos pendientes de caja
-  const reembPendXls = (f.movimientos||[])
-    .filter(m => m.tipo === 'salida' && m.tipo_gasto === 'Reembolso pendiente de caja')
-    .reduce((a,m) => a + parseFloat(m.monto||0), 0);
+  const reembPendXls = ccPendientes(f.movimientos).reduce((a,p) => a + p.saldo, 0);
   const reembolsoBrutoXls = Math.max(0, asignado - saldoActual);
   const reembolsoReal = Math.max(0, reembolsoBrutoXls - reembPendXls);
 
@@ -21718,33 +21784,73 @@ function imprimirValeCC(id) {
 async function marcarDevueltoCC(id) {
   const f = window._ccFondoActual;
   if (!f) return;
-  const orig = (f.movimientos||[]).find(m => m.id === id);
-  if (!orig) return toast('Movimiento no encontrado.', 'err');
-  const montoOrig = parseFloat(orig.monto) || 0;
-  const hoy = new Date().toISOString().slice(0,10);
+  const p = ccPendienteDe(f.movimientos, id);
+  if (!p) return toast('Movimiento no encontrado.', 'err');
+  if (p.saldo <= 0.01) return toast('Ese reembolso ya está cobrado completo.', 'warn');
+
+  const hoy = new Date().toISOString().slice(0, 10);
   // Sin esto, el archivo de la devolucion anterior quedaria adjunto a esta
   window._devArchivo = null;
 
-  const modalHtml = `
-    <div style="margin:-28px -28px 20px;padding:20px 28px;background:linear-gradient(135deg,#d97706,#f59e0b);color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
-      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">Registrar devolución</div>
-      <div style="font-size:18px;font-weight:900;margin-top:4px">💸 Devolución de préstamo</div>
-      <div style="font-size:12px;opacity:.9;margin-top:4px">Préstamo original: <strong>${fmt(montoOrig)}</strong> · ${orig.concepto||''}</div>
+  // Los abonos que ya se le hicieron, para que no se capture dos veces lo mismo.
+  const abonos = (f.movimientos || []).filter(m => m.liquida_mov_id === id)
+    .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+
+  $('modal-cc-devuelto-body').innerHTML = `
+    <div style="margin:-28px -28px 20px;padding:20px 28px;background:linear-gradient(135deg,#d97706,#f59e0b);
+         color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">
+        Registrar devolución</div>
+      <div style="font-size:18px;font-weight:900;margin-top:4px">💸 ${p.mov.concepto || 'Reembolso pendiente'}</div>
+      <div style="font-size:12px;opacity:.9;margin-top:4px">
+        ${p.mov.beneficiario ? p.mov.beneficiario + ' · ' : ''}${fmtDate(p.mov.fecha)}</div>
     </div>
-    <div style="background:#fef3c7;border:1.5px solid #fbbf24;border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:#78350f;line-height:1.4">
-      Se creará una <strong>Entrada</strong> con categoría <strong>"Devolución"</strong> y se limpiará automáticamente el flag "Reembolso pendiente" del gasto original para que el monto a reembolsar cuadre.
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:14px">
+      ${[['Prestado', p.monto, '#475569', '#f1f5f9'],
+         ['Ya devuelto', p.abonado, '#166534', '#dcfce7'],
+         ['Falta', p.saldo, '#92400e', '#fef3c7']]
+        .map(([k, v, c, bg]) => `
+        <div style="background:${bg};border-radius:10px;padding:10px 12px;text-align:center">
+          <div style="font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:${c};opacity:.8">${k}</div>
+          <div style="font-size:17px;font-weight:900;color:${c};margin-top:2px">${fmt(v)}</div>
+        </div>`).join('')}
     </div>
+
+    ${abonos.length ? `
+    <div style="background:#f8fafc;border:1.5px solid var(--border);border-radius:10px;
+         padding:10px 12px;margin-bottom:14px">
+      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;
+           color:var(--muted);margin-bottom:6px">Lo que ya devolvió</div>
+      ${abonos.map(a => `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;
+             font-size:12px;padding:3px 0">
+          <span style="color:var(--muted)">${fmtDate(a.fecha)}${a.referencia ? ' · ' + a.referencia : ''}</span>
+          <span style="font-weight:800;color:#166534">${fmt(a.monto)}</span>
+          ${ccPuedeEditar() ? `<button class="btn bd bsm" style="padding:2px 6px;font-size:10px"
+             onclick="quitarAbonoCC(${a.id})" title="Deshacer este abono">🗑</button>` : ''}
+        </div>`).join('')}
+    </div>` : ''}
+
     <div class="fg" style="gap:12px">
       <div class="fi">
-        <label>Fecha de devolución <span style="color:var(--red)">*</span></label>
+        <label>Fecha de la devolución <span style="color:var(--red)">*</span></label>
         <input type="date" id="dev-fecha" value="${hoy}" max="${hoy}">
       </div>
       <div class="fi">
         <label>Monto devuelto <span style="color:var(--red)">*</span></label>
         <div style="position:relative">
-          <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#166534;font-weight:800;font-size:16px;pointer-events:none">$</span>
-          <input type="text" inputmode="decimal" id="dev-monto" value="${montoOrig.toFixed(2)}" oninput="ensureNum(this)"
+          <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);
+                color:#166534;font-weight:800;font-size:16px;pointer-events:none">$</span>
+          <input type="text" inputmode="decimal" id="dev-monto" value="${p.saldo.toFixed(2)}"
+            oninput="ensureNum(this);devValidar()"
             style="padding-left:24px;font-size:16px;font-weight:800;text-align:right;color:#166534">
+        </div>
+        <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+          <button type="button" class="btn bo bsm" style="font-size:10.5px;padding:3px 9px"
+            onclick="$('dev-monto').value='${p.saldo.toFixed(2)}';devValidar()">Devolvió todo</button>
+          <button type="button" class="btn bo bsm" style="font-size:10.5px;padding:3px 9px"
+            onclick="$('dev-monto').value='${(p.saldo / 2).toFixed(2)}';devValidar()">La mitad</button>
         </div>
       </div>
       <div class="fi full">
@@ -21759,100 +21865,89 @@ async function marcarDevueltoCC(id) {
         <div id="dev-archivo-info" style="font-size:11.5px;margin-top:6px;min-height:14px"></div>
       </div>
     </div>
-    <div id="dev-info" style="margin-top:12px;font-size:12px;color:#166534;font-weight:600"></div>
+    <div id="dev-info" style="margin-top:12px;font-size:12px;font-weight:600;line-height:1.5"></div>
     <div class="form-actions" style="margin-top:16px">
       <button class="btn bo" onclick="closeModal('modal-cc-devuelto')">Cancelar</button>
-      <button class="btn bsuc" id="dev-btn-save" onclick="confirmarDevueltoCC(${id})">✅ Confirmar devolución</button>
+      <button class="btn bsuc" id="dev-btn-save" onclick="confirmarDevueltoCC(${id})">✅ Registrar devolución</button>
     </div>`;
 
-  $('modal-cc-devuelto-body').innerHTML = modalHtml;
+  window._devPend = p;
   openModal('modal-cc-devuelto');
-  // Validación en vivo
-  const info = $('dev-info');
-  const btn  = $('dev-btn-save');
-  const validar = () => {
-    const m = parseFloat($('dev-monto').value)||0;
-    if (m <= 0) { info.innerHTML = '<span style="color:#dc2626">⚠ Monto debe ser mayor a 0</span>'; btn.disabled = true; btn.style.opacity='.5'; return; }
-    if (m < montoOrig) info.innerHTML = `⚠ Devolución parcial. Los <strong>${fmt(montoOrig - m)}</strong> restantes se convertirán en gasto real (dejarán de estar pendientes).`;
-    else if (m > montoOrig) info.innerHTML = `<span style="color:#0369a1">ℹ Devolución mayor al préstamo (posible intereses).</span>`;
-    else info.innerHTML = `✅ Devolución completa. El flag de reembolso pendiente se limpiará.`;
-    btn.disabled = false; btn.style.opacity = '';
-  };
-  $('dev-monto').addEventListener('input', validar);
-  $('dev-fecha').addEventListener('change', validar);
-  validar();
+  devValidar();
+}
+
+// Lo que importa que se entienda antes de guardar: si es parcial, el resto
+// SIGUE pendiente de cobro; no se convierte en gasto de la caja.
+function devValidar() {
+  const p = window._devPend;
+  const info = $('dev-info'), btn = $('dev-btn-save');
+  if (!p || !info || !btn) return;
+  const m = parseFloat($('dev-monto').value) || 0;
+  const bien = (c, t) => { info.innerHTML = `<span style="color:${c}">${t}</span>`;
+                           btn.disabled = false; btn.style.opacity = ''; };
+  const mal = (t) => { info.innerHTML = `<span style="color:#dc2626">⚠ ${t}</span>`;
+                       btn.disabled = true; btn.style.opacity = '.5'; };
+
+  if (m <= 0) return mal('El monto debe ser mayor a 0.');
+  if (m > p.saldo + 0.01)
+    return mal(`De este préstamo solo faltan ${fmt(p.saldo)} por cobrar.`
+             + (p.abonado > 0 ? ` Ya devolvió ${fmt(p.abonado)}.` : ''));
+  if (m < p.saldo - 0.01)
+    return bien('#9a3412', `🟡 Devolución parcial. Quedan <strong>${fmt(p.saldo - m)}</strong>`
+      + ' pendientes de cobro, que se siguen restando del reembolso a pedir.');
+  return bien('#166534', '✅ Queda saldado por completo.');
 }
 
 async function confirmarDevueltoCC(id) {
   const f = window._ccFondoActual;
   if (!f) return;
-  const orig = (f.movimientos||[]).find(m => m.id === id);
-  if (!orig) return toast('Movimiento no encontrado.', 'err');
-
   const fecha = $('dev-fecha').value;
   const monto = parseFloat($('dev-monto').value);
-  const ref   = ($('dev-ref')?.value||'').trim();
-
+  const ref = ($('dev-ref')?.value || '').trim();
   if (!fecha) return toast('Fecha requerida.', 'warn');
   if (!(monto > 0)) return toast('Monto inválido.', 'warn');
 
-  // Pedir clave una sola vez (se reusará en ambas operaciones)
   const clave = await pedirClaveFondoCC(f.id);
   if (clave == null) return;
 
   const btn = $('dev-btn-save');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Registrando...'; }
-
   try {
-    // 1) Crear la ENTRADA de devolución
-    await api('/tesoreria/movimientos', {
+    // Una sola llamada: la entrada y el enlace con el pendiente van juntos. Si
+    // fueran dos pasos y el segundo fallara, el dinero entraria a la caja sin
+    // bajar la deuda, y el reembolso a pedir saldria mal.
+    const r = await api(`/tesoreria/movimientos/${id}/liquidar`, {
       method: 'POST',
-      body: JSON.stringify({
-        fondo_id    : f.id,
-        fecha       : fecha,
-        tipo        : 'entrada',
-        categoria   : 'Devolución',
-        concepto    : `Devolución de: ${orig.concepto||'préstamo'}`,
-        monto       : monto,
-        beneficiario: orig.beneficiario||'',
-        forma_pago  : 'efectivo',
-        referencia  : ref || `Devolución de mov #${id}`,
-        clave       : clave,
-        archivo     : window._devArchivo || undefined
-      })
+      body: JSON.stringify({ fecha, monto, referencia: ref, forma_pago: 'efectivo',
+                             clave, archivo: window._devArchivo || undefined })
     });
-
-    // 2) Limpiar el flag tipo_gasto en el gasto original
-    await api(`/tesoreria/movimientos/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        fecha       : String(orig.fecha).slice(0,10),
-        categoria   : orig.categoria || null,
-        concepto    : orig.concepto,
-        monto       : parseFloat(orig.monto),
-        beneficiario: orig.beneficiario||'',
-        forma_pago  : orig.forma_pago||'efectivo',
-        referencia  : orig.referencia||'',
-        comprobante : orig.comprobante||'',
-        autorizado_por: orig.autorizado_por||'',
-        notas       : orig.notas||'',
-        periodo_pago: orig.periodo_pago||'',
-        tipo_gasto  : '',   // ← limpiar el flag
-        clave       : clave
-      })
-    });
-
     window._ccClaveCache[f.id] = clave;
-    toast('Devolución registrada y préstamo saldado.');
+    toast(r && r.liquidado ? 'Devolución registrada: queda saldado.'
+                           : `Abono registrado. Faltan ${fmt(r ? r.saldo : 0)}.`);
     closeModal('modal-cc-devuelto');
     openDetalleFondoCC(f.id);
     loadKpisCC();
     loadFondosCC();
-  } catch(e) {
-    if (/clave/i.test(e.message)) delete window._ccClaveCache[f.id];
+  } catch (e) {
     toast(e.message, 'err');
-    if (btn) { btn.disabled = false; btn.textContent = '✅ Confirmar devolución'; }
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Registrar devolución'; }
   }
+}
+
+async function quitarAbonoCC(abonoId) {
+  const f = window._ccFondoActual;
+  if (!f) return;
+  if (!await confirm2('Se va a borrar ese abono y el dinero vuelve a quedar como'
+      + ' pendiente de cobro.' + String.fromCharCode(10) + String.fromCharCode(10)
+      + '¿Continuar?')) return;
+  try {
+    await api(`/tesoreria/movimientos/${abonoId}/abono`, { method: 'DELETE' });
+    toast('Abono deshecho.');
+    closeModal('modal-cc-devuelto');
+    openDetalleFondoCC(f.id);
+    loadKpisCC();
+    loadFondosCC();
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 function openMovCC(tipo, id) {
