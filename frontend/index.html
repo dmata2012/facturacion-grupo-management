@@ -492,6 +492,11 @@ tbody tr:hover td{background:#FAFBFF}
 .bf-cta-add:hover{border-color:var(--red-l);color:var(--red);background:var(--red-xs)}
 /* El renglón de un préstamo por cobrar se clickea entero para registrar la
    devolución: el botón solo era muy chico para algo de uso diario. */
+/* La columna de botones no se va con el desplazamiento lateral: es la unica
+   forma de actuar sobre el renglon y quedaba cortada contra la orilla. */
+.cc-acciones{position:sticky;right:0;z-index:1;
+  box-shadow:-7px 0 9px -7px rgba(15,37,87,.22)}
+.cc-cobrable:hover .cc-acciones{background:#bfdbfe !important}
 .cc-cobrable:hover{background:#bfdbfe !important;box-shadow:inset 3px 0 0 #2563eb}
 .cc-cobrable:hover .cc-cobrar-pista{opacity:1}
 .cc-cobrar-pista{opacity:0;transition:.15s;font-size:9.5px;font-weight:800;color:#1d4ed8;
@@ -902,7 +907,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-vac-sol"><div class="modal" id="modal-vac-sol-body"></div></div>
 <div class="overlay" id="modal-vac-print"><div class="modal" style="width:min(800px,98vw);background:#fff" id="modal-vac-print-body"></div></div>
 <div class="overlay" id="modal-cc-fondo"><div class="modal modal-sm" id="modal-cc-fondo-body"></div></div>
-<div class="overlay" id="modal-cc-detalle"><div class="modal" style="width:min(960px,96vw);position:relative" id="modal-cc-detalle-body"></div></div>
+<div class="overlay" id="modal-cc-detalle"><div class="modal" style="width:min(1280px,98vw);max-height:95vh;position:relative" id="modal-cc-detalle-body"></div></div>
 <div class="overlay" id="modal-cc-mov"><div class="modal modal-sm" id="modal-cc-mov-body"></div></div>
 <div class="overlay" id="modal-cc-devuelto"><div class="modal modal-sm" id="modal-cc-devuelto-body"></div></div>
 <div class="overlay" id="modal-cc-informe"><div class="modal" style="width:min(1000px,96vw)" id="modal-cc-informe-body"></div></div>
@@ -20699,7 +20704,8 @@ function renderDetalleFondoCC() {
     <div class="tscroll"><table>
       <thead><tr>
         <th>Fecha</th><th>Tipo</th><th>Categoría</th><th>Concepto</th>
-        <th>Beneficiario</th><th>Monto</th><th>Saldo</th><th></th>
+        <th>Beneficiario</th><th>Monto</th><th>Saldo</th>
+        <th class="cc-acciones" style="background:#F7F8FA"></th>
       </tr></thead>
       <tbody>${f.movimientos.map(m=>{
         const es = m.tipo==='entrada';
@@ -20735,7 +20741,8 @@ function renderDetalleFondoCC() {
             ? '<span class="cc-cobrar-pista">💰 clic para cobrar</span>' : ''}</td>
           <td style="text-align:right;font-weight:800;color:${vivo?'#1e40af':(es?'#166534':'#991b1b')}">${es?'+':'−'}${fmt(m.monto)}</td>
           <td style="text-align:right;font-weight:800;color:${saldoAcum<0?'#dc2626':'var(--dark)'}">${fmt(saldoAcum)}</td>
-          <td style="white-space:nowrap" onclick="event.stopPropagation()">${botones}</td>
+          <td class="cc-acciones" onclick="event.stopPropagation()"
+              style="white-space:nowrap;background:${vivo?'#dbeafe':'#fff'}">${botones}</td>
         </tr>`;
       }).join('')}</tbody>
     </table></div>`:'<p class="empty">Sin movimientos registrados.</p>'}
