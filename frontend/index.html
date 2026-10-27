@@ -828,6 +828,7 @@ canvas{max-height:230px}
           <a href="#" onclick="nav('checador')"   id="nav-checador"><span class="ni"><svg><use href="#i-clock"/></svg></span> Reloj Checador</a>
           <a href="#" onclick="nav('asistencia')" id="nav-asistencia"><span class="ni"><svg><use href="#i-check-list"/></svg></span> Lista de Asistencia</a>
           <a href="#" onclick="nav('expedienteAsistencia')" id="nav-expedienteAsistencia"><span class="ni"><svg><use href="#i-user"/></svg></span> Expediente de Asistencia</a>
+          <a href="#" onclick="nav('incidenciasNomina')" id="nav-incidenciasNomina"><span class="ni"><svg><use href="#i-check-list"/></svg></span> Incidencias p/ Nómina</a>
           <a href="#" onclick="nav('bonoPuntualidad')" id="nav-bonoPuntualidad"><span class="ni"><svg><use href="#i-target"/></svg></span> Bono de Puntualidad</a>
         </div>
       </div>
@@ -925,6 +926,7 @@ canvas{max-height:230px}
 <div class="overlay" id="modal-mov-banco"><div class="modal" style="width:min(720px,96vw)" id="modal-mov-banco-body"></div></div>
 <div class="overlay" id="modal-gasto"><div class="modal" style="width:min(680px,96vw)" id="modal-gasto-body"></div></div>
 <div class="overlay" id="modal-ben"><div class="modal" id="modal-ben-body"></div></div>
+<div class="overlay" id="modal-inc"><div class="modal" style="width:min(860px,96vw)" id="modal-inc-body"></div></div>
 <div class="overlay" id="modal-gt-cats"><div class="modal" style="width:min(720px,96vw)" id="modal-gt-cats-body"></div></div>
 <div class="overlay" id="modal-gt-pago"><div class="modal" style="width:min(560px,96vw)" id="modal-gt-pago-body"></div></div>
 <div class="overlay" id="modal-benef-bnc"><div class="modal" style="width:min(640px,96vw)" id="modal-benef-bnc-body"></div></div>
@@ -1417,6 +1419,7 @@ function nav(page) {
     concentrado:'Concentrado Anual', otrosIngresos:'Otros Ingresos S/F',
     expedienteAsistencia:'Expediente de Asistencia',
     bonoPuntualidad:'Bono de Puntualidad',
+    incidenciasNomina:'Incidencias para Nómina',
     mensualDireccion:'Reporte Mensual',
     conciliacion:'Conciliación Microsip'
   };
@@ -1425,7 +1428,7 @@ function nav(page) {
   const pages = {
     dashboard, facturas, cobranza, estadoCuenta, clientes, receptoras, nomina, empleados, vacaciones, checador, cajaChica, reportes, estadisticas, usuarios, catalogo, bancos, gastos, misVacaciones, asistencia, concentrado, otrosIngresos,
     mensualDireccion, expedienteAsistencia, bonoPuntualidad, miAsistencia, conciliacion,
-    beneficiarios
+    beneficiarios, incidenciasNomina
   };
   if (pages[page]) pages[page]();
 }
@@ -12969,6 +12972,8 @@ async function checador() {
       <div class="tab" onclick="showTab(this,'ch-tab-hoy');cargarChecadorHoy()">📅 Registros de hoy</div>
       <div class="tab" onclick="showTab(this,'ch-tab-reporte');cargarChecadorReporte()">📊 Reporte por periodo</div>
       ${puede('asistencia', NIVEL.VER) !== false ? `<div class="tab" onclick="showTab(this,'ch-tab-asistencia');inicializarAsistencia()">📋 Lista de Asistencia</div>` : ''}
+      ${puede('incidenciasNomina', NIVEL.VER) !== false
+        ? `<div class="tab" onclick="showTab(this,'ch-tab-inc');inicializarIncidencias()">🧾 Incidencias p/ Nómina</div>` : ''}
       ${puede('bonoPuntualidad', NIVEL.VER) !== false
         ? `<div class="tab" onclick="showTab(this,'ch-tab-bono');inicializarBono()">🏅 Bono de puntualidad</div>` : ''}
       ${canAdmin()?`<div class="tab" onclick="showTab(this,'ch-tab-productividad');inicializarProductividad()">📊 Productividad</div>`:''}
@@ -13053,6 +13058,11 @@ async function checador() {
 
     <!-- PESTAÑA LISTA DE ASISTENCIA -->
     <div class="tab-panel" id="ch-tab-asistencia">${htmlPanelAsistencia()}</div>
+
+    <!-- PESTAÑA INCIDENCIAS PARA NÓMINA -->
+    <div class="tab-panel" id="ch-tab-inc"${puede('incidenciasNomina', NIVEL.VER) === false ? ' hidden' : ''}>
+      ${htmlPanelIncidencias()}
+    </div>
 
     <!-- PESTAÑA PRODUCTIVIDAD (Admin) -->
     <div class="tab-panel" id="ch-tab-productividad">
@@ -14322,6 +14332,7 @@ function htmlPanelAsistencia() {
           <span><span style="display:inline-block;width:22px;text-align:center;background:#ffedd5;color:#9a3412;font-weight:900;border-radius:4px;padding:2px 4px">FJ</span> Falta justificada</span>
           <span><span style="display:inline-block;width:22px;text-align:center;background:#dbeafe;color:#1e40af;font-weight:900;border-radius:4px;padding:2px 4px">V</span> Vacaciones</span>
           <span><span style="display:inline-block;width:32px;text-align:center;background:#fef3c7;color:#92400e;font-weight:900;border-radius:4px;padding:2px 4px">P/G</span> Permiso con goce</span>
+          <span title="Autorizado, pero sin pago: es el permiso que nómina sí descuenta."><span style="display:inline-block;width:32px;text-align:center;background:#fae8ff;color:#86198f;font-weight:900;border-radius:4px;padding:2px 4px">P/S</span> Permiso sin goce</span>
           <span><span style="display:inline-block;width:22px;text-align:center;background:#f3e8ff;color:#6b21a8;font-weight:900;border-radius:4px;padding:2px 4px">In</span> Incapacidad</span>
           <span><span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:#dc2626;color:#fff;font-weight:900;border-radius:50%;box-shadow:0 0 0 1.5px #b91c1c inset">D</span> Descanso</span>
         </div>
@@ -14404,6 +14415,7 @@ const ASIST_COLOR = {
   'FJ':  { bg:'#ffedd5', fg:'#9a3412' },
   'V':   { bg:'#dbeafe', fg:'#1e40af' },
   'P/G': { bg:'#fef3c7', fg:'#92400e' },
+  'P/S': { bg:'#fae8ff', fg:'#86198f' },   // Permiso sin goce: se descuenta
   'In':  { bg:'#f3e8ff', fg:'#6b21a8' },
   'D':   { bg:'#dc2626', fg:'#fff', circle:true }
 };
@@ -14427,7 +14439,8 @@ async function cargarAsistencia() {
 function _empleadosConIncidencias(empleados) {
   return empleados.filter(e => {
     const t = e.totales || {};
-    return (t.F||0) + (t.FJ||0) + (t.V||0) + (t['P/G']||0) + (t.In||0) + (t.R||0) > 0;
+    return (t.F||0) + (t.FJ||0) + (t.V||0) + (t['P/G']||0) + (t['P/S']||0)
+         + (t.In||0) + (t.R||0) > 0;
   });
 }
 
@@ -14469,6 +14482,7 @@ function renderAsistencia(d) {
         <th style="padding:6px 4px;background:#ffedd5;border-bottom:2px solid #ea580c;color:#9a3412;font-weight:900">FJ</th>
         <th style="padding:6px 4px;background:#dbeafe;border-bottom:2px solid #2563eb;color:#1e40af;font-weight:900">V</th>
         <th style="padding:6px 4px;background:#fef3c7;border-bottom:2px solid #d97706;color:#92400e;font-weight:900">P/G</th>
+        <th style="padding:6px 4px;background:#fae8ff;border-bottom:2px solid #a21caf;color:#86198f;font-weight:900" title="Permiso sin goce de sueldo">P/S</th>
         <th style="padding:6px 4px;background:#f3e8ff;border-bottom:2px solid #9333ea;color:#6b21a8;font-weight:900">In</th>
         <th style="padding:6px 4px;background:#f1f5f9;border-bottom:2px solid #64748b;color:#334155;font-weight:900">D</th>
       </tr>
@@ -14515,6 +14529,7 @@ function renderAsistencia(d) {
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#9a3412;background:#fff7ed">${e.totales.FJ||0}</td>`;
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#1e40af;background:#eff6ff">${e.totales.V}</td>`;
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#92400e;background:#fffbeb">${e.totales['P/G']}</td>`;
+    html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#86198f;background:#fdf4ff">${e.totales['P/S']||0}</td>`;
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#6b21a8;background:#faf5ff">${e.totales.In}</td>`;
     html += `<td style="padding:4px 6px;text-align:center;font-weight:900;color:#334155;background:#f8fafc">${e.totales.D}</td>`;
     html += `</tr>`;
@@ -14610,6 +14625,7 @@ function editarCeldaAsist(empId, fecha, codActual, notaActual, nombre) {
     { v:'FJ',   l:'📝 FJ — Falta justificada' },
     { v:'V',    l:'🌴 V — Vacaciones' },
     { v:'P/G',  l:'📄 P/G — Permiso con goce' },
+    { v:'P/S',  l:'📄 P/S — Permiso SIN goce (se descuenta)' },
     { v:'In',   l:'🏥 In — Incapacidad' },
     { v:'D',    l:'🔴 D — Descanso' }
   ];
@@ -14758,6 +14774,7 @@ function imprimirAsistencia() {
       <td class="tot" style="color:#9a3412">${e.totales.FJ||0}</td>
       <td class="tot" style="color:#1e40af">${e.totales.V}</td>
       <td class="tot" style="color:#92400e">${e.totales['P/G']}</td>
+      <td class="tot" style="color:#86198f">${e.totales['P/S']||0}</td>
       <td class="tot" style="color:#6b21a8">${e.totales.In}</td>
       <td class="tot" style="color:#334155">${e.totales.D}</td>
     </tr>`;
@@ -14857,6 +14874,7 @@ function imprimirAsistencia() {
     <span><span style="background:#ffedd5;color:#9a3412">FJ</span>Falta justificada</span>
     <span><span style="background:#dbeafe;color:#1e40af">V</span>Vacaciones</span>
     <span><span style="background:#fef3c7;color:#92400e">P/G</span>Permiso con goce</span>
+    <span><span style="background:#fae8ff;color:#86198f">P/S</span>Permiso sin goce</span>
     <span><span style="background:#f3e8ff;color:#6b21a8">In</span>Incapacidad</span>
     <span><span class="chip circle" style="background:#dc2626;color:#fff">D</span>Descanso</span>
   </div>
@@ -14870,6 +14888,7 @@ function imprimirAsistencia() {
       <th style="background:#ffedd5;color:#9a3412">FJ</th>
       <th style="background:#dbeafe;color:#1e40af">V</th>
       <th style="background:#fef3c7;color:#92400e">P/G</th>
+      <th style="background:#fae8ff;color:#86198f">P/S</th>
       <th style="background:#f3e8ff;color:#6b21a8">In</th>
       <th style="background:#f1f5f9;color:#334155">D</th>
     </tr></thead>
@@ -14901,12 +14920,12 @@ function exportarAsistenciaExcel() {
   aoa.push([`Rango: ${fmtDate(d.desde)} al ${fmtDate(d.hasta)}`]);
   aoa.push([`Generado: ${new Date().toLocaleString('es-MX')}`]);
   aoa.push([]);
-  aoa.push([`Códigos: A=Asistencia · R=Retardo (asistió tarde) · F=Falta · FJ=Falta justificada · V=Vacaciones · P/G=Permiso con Goce · In=Incapacidad · D=Descanso`]);
+  aoa.push([`Códigos: A=Asistencia · R=Retardo (asistió tarde) · F=Falta · FJ=Falta justificada · V=Vacaciones · P/G=Permiso con Goce · P/S=Permiso SIN goce · In=Incapacidad · D=Descanso`]);
   aoa.push([]);
   const header = ['#','Colaborador','Puesto','Departamento', ...d.dias.map(f => {
     const dt = new Date(f+'T12:00:00');
     return `${String(dt.getDate()).padStart(2,'0')}-${['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dt.getDay()]}`;
-  }), 'A','R','F','FJ','V','P/G','In','D'];
+  }), 'A','R','F','FJ','V','P/G','P/S','In','D'];
   aoa.push(header);
   const celVal = (v) => {
     if (typeof v === 'string') return v;
@@ -14920,7 +14939,8 @@ function exportarAsistenciaExcel() {
       e.puesto||'',
       e.departamento||'',
       ...d.dias.map(f => celVal(e.celdas[f])),
-      e.totales.A, e.totales.R||0, e.totales.F, e.totales.FJ||0, e.totales.V, e.totales['P/G'], e.totales.In, e.totales.D
+      e.totales.A, e.totales.R||0, e.totales.F, e.totales.FJ||0, e.totales.V,
+      e.totales['P/G'], e.totales['P/S']||0, e.totales.In, e.totales.D
     ]);
   });
   // Hoja de notas/justificaciones
@@ -14934,7 +14954,8 @@ function exportarAsistenciaExcel() {
     });
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{wch:6},{wch:32},{wch:20},{wch:16},...d.dias.map(()=>({wch:5})),{wch:5},{wch:5},{wch:5},{wch:5},{wch:6},{wch:5},{wch:5}];
+  ws['!cols'] = [{wch:6},{wch:32},{wch:20},{wch:16},...d.dias.map(()=>({wch:5})),
+                 {wch:5},{wch:5},{wch:5},{wch:5},{wch:5},{wch:6},{wch:6},{wch:5},{wch:5}];
   XLSX.utils.book_append_sheet(wb, ws, 'Asistencia');
   if (notasAoa.length > 1) {
     const wsN = XLSX.utils.aoa_to_sheet(notasAoa);
@@ -14942,6 +14963,918 @@ function exportarAsistenciaExcel() {
     XLSX.utils.book_append_sheet(wb, wsN, 'Notas');
   }
   XLSX.writeFile(wb, `Asistencia_${d.desde}_a_${d.hasta}.xlsx`);
+}
+
+// ══ INCIDENCIAS PARA NÓMINA ════════════════════════════════
+//
+// El documento que Recursos Humanos le entrega a Nóminas para procesar la
+// quincena. A diferencia de la Lista de Asistencia —que es la cuadrícula del
+// día a día— aquí va un renglón por persona con las cifras que se capturan,
+// y cada renglón tiene que cuadrar contra el calendario.
+
+const INC_BOLSA = {
+  paga:    { et:'La paga la empresa', corto:'Paga',     bg:'#dcfce7', fg:'#166534' },
+  no_paga: { et:'Se descuenta',       corto:'Descuenta', bg:'#fee2e2', fg:'#991b1b' },
+  imss:    { et:'La cubre el IMSS',   corto:'IMSS',     bg:'#f3e8ff', fg:'#6b21a8' }
+};
+const INC_CODS = ['A','F','FJ','V','P/G','P/S','In','D'];
+
+function htmlPanelIncidencias() {
+  return `
+    <div class="card">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d);display:block;margin-bottom:3px">PERIODO DE NÓMINA</label>
+          <select id="inc-quincena" onchange="incElegirQuincena()" style="min-width:230px">
+            <option value="">— Elegir del catálogo de quincenas —</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d);display:block;margin-bottom:3px">O POR FECHAS</label>
+          <div style="display:flex;gap:4px">
+            <button class="btn bo bsm" onclick="setIncPreset('q1')">1ª quincena</button>
+            <button class="btn bo bsm" onclick="setIncPreset('q2')">2ª quincena</button>
+            <button class="btn bo bsm" onclick="setIncPreset('q2ant')">Quincena anterior</button>
+          </div>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d);display:block;margin-bottom:3px">DESDE</label>
+          <input type="date" id="inc-desde" onchange="cargarIncidencias()">
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--gray-d);display:block;margin-bottom:3px">HASTA</label>
+          <input type="date" id="inc-hasta" onchange="cargarIncidencias()">
+        </div>
+        <div style="margin-left:auto;display:flex;gap:4px;flex-wrap:wrap">
+          <button class="btn bo bsm" onclick="openPoliticaInc()" title="Cómo trata nómina cada código">⚙ Política</button>
+          <button class="btn bo bsm" onclick="openEnviosInc()" title="Reportes ya enviados a Nóminas">📜 Envíos</button>
+          <button class="btn bs bsm" onclick="exportarIncidenciasExcel()">⬇ Excel</button>
+          <button class="btn bo bsm" onclick="imprimirIncidencias()">🖨 Imprimir</button>
+        </div>
+      </div>
+      <div id="inc-body"><p class="empty">Elige el periodo de nómina para generar el reporte.</p></div>
+    </div>`;
+}
+
+async function incidenciasNomina() {
+  $('content').innerHTML = `
+    <div class="page-header">
+      <div class="page-header-left">
+        <div class="page-title">🧾 Incidencias para Nómina</div>
+        <div class="page-sub">Lo que se le entrega al departamento de Nóminas para procesar la quincena</div>
+      </div>
+    </div>
+    ${htmlPanelIncidencias()}`;
+  inicializarIncidencias();
+}
+
+async function inicializarIncidencias() {
+  if (!$('inc-desde').value) setIncPreset('auto');
+  // El catálogo de quincenas es la forma preferida de elegir el periodo: si RH
+  // teclea "16 al 30" y Nóminas procesa "16 al 31", el reporte cuadra consigo
+  // mismo y de todos modos está mal.
+  try {
+    const qz = await api('/nomina/quincenas');
+    const sel = $('inc-quincena');
+    if (sel && Array.isArray(qz)) {
+      sel.innerHTML = '<option value="">— Elegir del catálogo de quincenas —</option>'
+        + qz.slice(0, 40).map(q =>
+            `<option value="${q.fecha_inicio}|${q.fecha_fin}">${q.quincena} · ${fmtDate(q.fecha_inicio)} al ${fmtDate(q.fecha_fin)}${
+              q.estatus === 'cerrada' ? ' (cerrada)' : ''}</option>`).join('');
+    }
+  } catch (e) { /* sin catálogo se sigue por fechas */ }
+  cargarIncidencias();
+}
+
+function incElegirQuincena() {
+  const v = $('inc-quincena').value;
+  if (!v) return;
+  const [a, b] = v.split('|');
+  $('inc-desde').value = a;
+  $('inc-hasta').value = b;
+  cargarIncidencias();
+}
+
+function setIncPreset(p) {
+  const hoy = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  let y = hoy.getFullYear(), m = hoy.getMonth(), d = hoy.getDate(), q = p;
+  // "auto" abre la quincena que se está por procesar: la que acaba de cerrar.
+  if (p === 'auto') q = d <= 15 ? 'q2ant' : 'q1';
+  if (q === 'q2ant') {
+    if (d <= 15) { const mA = m === 0 ? 11 : m - 1; const yA = m === 0 ? y - 1 : y;
+                   const fin = new Date(yA, mA + 1, 0).getDate();
+                   $('inc-desde').value = `${yA}-${pad(mA + 1)}-16`;
+                   $('inc-hasta').value = `${yA}-${pad(mA + 1)}-${pad(fin)}`; }
+    else { $('inc-desde').value = `${y}-${pad(m + 1)}-01`;
+           $('inc-hasta').value = `${y}-${pad(m + 1)}-15`; }
+  } else if (q === 'q1') {
+    $('inc-desde').value = `${y}-${pad(m + 1)}-01`;
+    $('inc-hasta').value = `${y}-${pad(m + 1)}-15`;
+  } else {
+    const fin = new Date(y, m + 1, 0).getDate();
+    $('inc-desde').value = `${y}-${pad(m + 1)}-16`;
+    $('inc-hasta').value = `${y}-${pad(m + 1)}-${pad(fin)}`;
+  }
+  if ($('inc-quincena')) $('inc-quincena').value = '';
+  cargarIncidencias();
+}
+
+async function cargarIncidencias() {
+  const desde = $('inc-desde')?.value, hasta = $('inc-hasta')?.value;
+  if (!desde || !hasta) return;
+  if (desde > hasta) return toast('"Desde" debe ser menor o igual a "hasta".', 'warn');
+  $('inc-body').innerHTML = '<p class="empty">Generando el reporte...</p>';
+  try {
+    const d = await api(`/checador/incidencias?desde=${desde}&hasta=${hasta}`);
+    window._incData = d;
+    renderIncidencias(d);
+  } catch (e) {
+    $('inc-body').innerHTML = `<p class="empty" style="color:var(--red)">Error: ${e.message}</p>`;
+  }
+}
+
+function incPuedeCerrar() { return puede('incidenciasNomina', NIVEL.EDITAR) !== false; }
+
+function renderIncidencias(d) {
+  if (!d) return;
+  const cont = $('inc-body');
+  if (!d.filas.length) {
+    cont.innerHTML = '<p class="empty">Sin colaboradores en este periodo.</p>';
+    return;
+  }
+  const pol = d.politica;
+  const bolsa = c => INC_BOLSA[pol.trato[c] || 'paga'];
+
+  // ── Semáforo. Va arriba de todo a propósito: es lo que hay que resolver
+  //    ANTES de mandar el reporte, no una nota al pie.
+  const cajaAlerta = (a, rojo) => `
+    <div style="border-left:4px solid ${rojo ? '#dc2626' : '#d97706'};background:${rojo ? '#fef2f2' : '#fffbeb'};
+         border-radius:0 8px 8px 0;padding:9px 13px;margin-bottom:7px">
+      <div style="font-size:12.5px;font-weight:800;color:${rojo ? '#991b1b' : '#92400e'}">
+        ${rojo ? '🔴' : '🟡'} ${a.titulo}</div>
+      <div style="font-size:11.5px;color:${rojo ? '#7f1d1d' : '#78350f'};margin-top:2px">${a.detalle}</div>
+      ${a.items && a.items.length ? `<ul style="margin:5px 0 0 16px;padding:0;font-size:11.5px;color:#374151;line-height:1.55">
+        ${a.items.slice(0, 12).map(x => `<li>${String(x).replace(/</g, '&lt;')}</li>`).join('')}
+        ${a.items.length > 12 ? `<li style="color:var(--muted)">y ${a.items.length - 12} más</li>` : ''}
+      </ul>` : ''}
+    </div>`;
+
+  const rojas = d.alertas.rojas, amarillas = d.alertas.amarillas;
+  let html = '';
+
+  if (d.envio) {
+    const hay = d.envio.cambios.length;
+    html += `
+      <div style="background:${hay ? '#fff7ed' : '#f0fdf4'};border:2px solid ${hay ? '#fb923c' : '#86efac'};
+           border-radius:10px;padding:12px 15px;margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-size:13px;font-weight:900;color:${hay ? '#9a3412' : '#166534'}">
+              ${hay ? '⚠ Este periodo ya se envió y después cambió' : '✅ Este periodo ya se envió a Nóminas'}</div>
+            <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
+              Folio <strong>${d.envio.folio}</strong> · ${d.envio.enviado_en}${
+                d.envio.enviado_por ? ' · ' + d.envio.enviado_por : ''}</div>
+          </div>
+          <button class="btn bo bsm" onclick="verEnvioInc('${d.envio.folio}')">Ver lo que se envió</button>
+        </div>
+        ${hay ? `
+          <div style="margin-top:9px;background:#fff;border-radius:8px;padding:8px 11px">
+            <div style="font-size:11px;font-weight:800;color:#9a3412;margin-bottom:4px">
+              ${hay} dato(s) cambiaron desde el envío. Esto va como complemento:</div>
+            <table style="width:100%;border-collapse:collapse;font-size:11.5px">
+              ${d.envio.cambios.slice(0, 15).map(c => `<tr style="border-bottom:1px solid #f1f5f9">
+                <td style="padding:2px 6px;font-weight:700">${c.nombre}</td>
+                <td style="padding:2px 6px;color:var(--muted)">${c.campo}</td>
+                <td style="padding:2px 6px;text-align:right">${c.antes} <span style="color:#9a3412">→</span>
+                  <strong>${c.ahora}</strong></td></tr>`).join('')}
+            </table>
+          </div>` : ''}
+      </div>`;
+  }
+
+  if (rojas.length || amarillas.length) {
+    html += `<div style="margin-bottom:14px">
+      ${rojas.length ? `<div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:1px;color:#991b1b;margin-bottom:6px">
+        No enviar — ${rojas.length} pendiente(s) de resolver</div>` : ''}
+      ${rojas.map(a => cajaAlerta(a, true)).join('')}
+      ${amarillas.length ? `<div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:1px;color:#92400e;margin:${rojas.length ? '10px' : '0'} 0 6px">
+        Revisar</div>` : ''}
+      ${amarillas.map(a => cajaAlerta(a, false)).join('')}
+    </div>`;
+  } else {
+    html += `<div class="ibox ok" style="margin-bottom:14px;font-size:13px">
+      ✅ <strong>Listo para enviar.</strong> No hay nada pendiente que pudiera cambiar las cifras.</div>`;
+  }
+
+  // ── Tarjetas de totales ──
+  const t = d.totales;
+  const tarjeta = (et, v, c, bg, nota) => `
+    <div style="background:${bg};border-radius:10px;padding:10px 13px;min-width:112px">
+      <div style="font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:${c};opacity:.85">${et}</div>
+      <div style="font-size:21px;font-weight:900;color:${c};line-height:1.15;margin-top:1px">${v}</div>
+      ${nota ? `<div style="font-size:9.5px;color:${c};opacity:.75">${nota}</div>` : ''}
+    </div>`;
+  html += `<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px">
+    ${tarjeta('Colaboradores', t.colaboradores, '#334155', '#f1f5f9', `${t.con_incidencias} con incidencias`)}
+    ${tarjeta('Días a pagar', t.dias_pagar, '#166534', '#dcfce7', 'incluye descansos')}
+    ${tarjeta('Días a descontar', t.dias_descontar, '#991b1b', '#fee2e2',
+       pol.retardos_por_falta ? 'faltas + retardos' : 'solo faltas')}
+    ${tarjeta('Días del IMSS', t.dias_imss, '#6b21a8', '#f3e8ff', 'no los paga la empresa')}
+    ${tarjeta('Retardos', t.retardos, '#92400e', '#fef3c7', `${t.minutos_retardo} min`)}
+    ${tarjeta('Ganan bono', t.ganan_bono, '#1e40af', '#dbeafe', `de ${t.colaboradores}`)}
+    ${tarjeta('Cuadran', `${t.cuadran}/${t.colaboradores}`,
+       t.cuadran === t.colaboradores ? '#166534' : '#991b1b',
+       t.cuadran === t.colaboradores ? '#dcfce7' : '#fee2e2', `${d.dias_periodo} días c/u`)}
+  </div>`;
+
+  // ── La tabla que Nóminas captura ──
+  const th = (txt, extra, tip) => `<th style="padding:6px 5px;text-align:center;background:#f8fafc;
+    border-bottom:2px solid #cbd5e1;font-weight:800;font-size:10.5px;white-space:nowrap;${extra || ''}"${
+    tip ? ` title="${tip}"` : ''}>${txt}</th>`;
+
+  html += `<div class="tscroll" style="max-height:62vh;overflow:auto">
+    <table style="border-collapse:collapse;font-size:12px;min-width:100%">
+    <thead style="position:sticky;top:0;z-index:2">
+      <tr>
+        <th style="text-align:left;padding:6px 8px;background:#f8fafc;border-bottom:2px solid #cbd5e1;
+            position:sticky;left:0;z-index:3;min-width:210px;font-size:10.5px;font-weight:800">Colaborador</th>
+        ${th('Días<br>per.', '', 'Días naturales del periodo')}
+        ${th('N/A', 'color:#64748b', 'Días fuera de la relación laboral: antes del ingreso o después de la baja')}
+        ${INC_CODS.map(c => {
+          const b = bolsa(c);
+          return th(c.replace('/', '/<wbr>'), `background:${b.bg};color:${b.fg}`,
+                    `${d.codigos[c]} — ${b.et}`);
+        }).join('')}
+        ${th('Ret.<br>(min)', 'color:#92400e', 'Días con retardo y minutos acumulados')}
+        ${th('DÍAS A<br>PAGAR', 'background:#dcfce7;color:#166534;border-left:3px double #64748b;font-size:11px')}
+        ${th('DÍAS A<br>DESCONTAR', 'background:#fee2e2;color:#991b1b;font-size:11px')}
+        ${th('DÍAS<br>IMSS', 'background:#f3e8ff;color:#6b21a8;font-size:11px')}
+        ${th('Bono', '', 'Bono de puntualidad y asistencia. El importe vive en su propio módulo.')}
+        ${th('✓', '', 'Que los días del renglón sumen el periodo')}
+      </tr>
+    </thead><tbody>`;
+
+  d.filas.forEach(f => {
+    const num = f.numero_colaborador
+      ? `#${f.numero_colaborador}`
+      : '<span style="color:#dc2626" title="Nóminas captura por número">sin número</span>';
+    const marca = f.alta_en_periodo ? `<span style="background:#dbeafe;color:#1e40af;font-size:9px;font-weight:800;padding:1px 4px;border-radius:3px;margin-left:3px">ALTA</span>` : '';
+    const marcaB = f.baja_en_periodo ? `<span style="background:#fee2e2;color:#991b1b;font-size:9px;font-weight:800;padding:1px 4px;border-radius:3px;margin-left:3px">BAJA</span>` : '';
+    const tdNum = (v, extra, tip) => `<td style="padding:4px 5px;text-align:center;font-weight:${v ? '900' : '400'};
+      color:${v ? 'inherit' : '#cbd5e1'};${extra || ''}"${tip ? ` title="${tip}"` : ''}>${v || '·'}</td>`;
+
+    html += `<tr style="border-bottom:1px solid #e5e7eb;${f.cuadra ? '' : 'background:#fef2f2'}">
+      <td style="padding:5px 8px;position:sticky;left:0;background:${f.cuadra ? '#fff' : '#fef2f2'};
+          z-index:1;border-right:2px solid #e5e7eb;cursor:pointer"
+          onclick="openDetalleInc(${f.empleado_id})" title="Ver el detalle de sus incidencias">
+        <div style="font-weight:800;font-size:12px">${f.nombre}${marca}${marcaB}</div>
+        <div style="font-size:10px;color:#64748b">${num}${f.puesto ? ' · ' + f.puesto : ''}</div>
+      </td>
+      ${tdNum(f.dias_periodo, 'color:#64748b;font-weight:400')}
+      ${tdNum(f.na, 'color:#64748b', f.na ? 'Días fuera de la relación laboral' : '')}
+      ${INC_CODS.map(c => {
+        const b = bolsa(c);
+        return tdNum(f.codigos[c], f.codigos[c] ? `background:${b.bg};color:${b.fg}` : '');
+      }).join('')}
+      <td style="padding:4px 5px;text-align:center;color:#92400e;font-weight:${f.retardos ? '900' : '400'}"${
+        f.retardos ? ` title="${f.minutos_retardo} minutos acumulados${
+          f.faltas_por_retardo ? ` · generan ${f.faltas_por_retardo} día(s) de descuento` : ''}"` : ''}>
+        ${f.retardos ? `${f.retardos}<span style="font-size:9.5px;font-weight:700"> (${f.minutos_retardo})</span>` : '·'}</td>
+      <td style="padding:4px 6px;text-align:center;font-weight:900;font-size:13px;color:#166534;
+          background:#f0fdf4;border-left:3px double #64748b">${f.dias_pagar}</td>
+      <td style="padding:4px 6px;text-align:center;font-weight:900;font-size:13px;
+          color:${f.dias_descontar ? '#991b1b' : '#cbd5e1'};background:#fef2f2"${
+        f.faltas_por_retardo ? ` title="${f.dias_no_pagar} por códigos + ${f.faltas_por_retardo} por retardos acumulados"` : ''}>
+        ${f.dias_descontar || '·'}</td>
+      <td style="padding:4px 6px;text-align:center;font-weight:900;font-size:13px;
+          color:${f.dias_imss ? '#6b21a8' : '#cbd5e1'};background:#faf5ff">${f.dias_imss || '·'}</td>
+      <td style="padding:4px 6px;text-align:center"${
+        f.bono_tumbado_por.length ? ` title="Lo pierde por: ${f.bono_tumbado_por.join(', ')}"` : ''}>
+        ${f.gana_bono ? '<span style="color:#166534;font-weight:900">SÍ</span>'
+                      : '<span style="color:#cbd5e1;font-weight:700">no</span>'}</td>
+      <td style="padding:4px 6px;text-align:center"${f.cuadra ? '' : ` title="${(f.avisos[0] || '')}"`}>
+        ${f.cuadra ? '<span style="color:#16a34a;font-weight:900">✓</span>'
+                   : '<span style="color:#dc2626;font-weight:900">✗</span>'}</td>
+    </tr>`;
+  });
+
+  html += `</tbody></table></div>`;
+
+  // ── Pie: qué significa cada columna y el botón de cierre ──
+  html += `<div style="margin-top:12px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;
+       padding:9px 12px;background:var(--bg-alt);border-radius:8px;font-size:11px">
+    ${INC_CODS.map(c => { const b = bolsa(c);
+      return `<span><span style="display:inline-block;min-width:26px;text-align:center;background:${b.bg};
+        color:${b.fg};font-weight:900;border-radius:4px;padding:1px 4px">${c}</span> ${d.codigos[c]}
+        <span style="color:var(--muted)">· ${b.corto}</span></span>`; }).join('')}
+  </div>
+  <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+    <div style="font-size:11.5px;color:var(--muted)">
+      Periodo <strong>${fmtDate(d.desde)}</strong> al <strong>${fmtDate(d.hasta)}</strong> ·
+      ${d.dias_periodo} días naturales${d.quincena ? ` · quincena <strong>${d.quincena.quincena}</strong>` : ''} ·
+      ${d.filas.length} colaboradores
+      <div style="margin-top:3px">Los descansos se pagan (séptimo día), por eso una quincena limpia da
+        ${d.dias_periodo} días a pagar y no solo los laborados.</div>
+    </div>
+    ${incPuedeCerrar() ? `<button class="btn ${rojas.length ? 'bo' : 'bsuc'}" onclick="openCerrarInc()">
+      🔒 ${d.envio ? 'Volver a enviar' : 'Cerrar y enviar a Nóminas'}</button>` : ''}
+  </div>`;
+
+  cont.innerHTML = html;
+}
+
+// Detalle de una persona: el respaldo de cada cifra de su renglón.
+function openDetalleInc(empId) {
+  const d = window._incData;
+  if (!d) return;
+  const f = d.filas.find(x => x.empleado_id === empId);
+  if (!f) return;
+  const pol = d.politica;
+  const bolsa = c => INC_BOLSA[pol.trato[c] || 'paga'];
+
+  $('modal-inc-body').innerHTML = `
+    <div style="margin:-28px -28px 20px;padding:20px 28px;background:linear-gradient(135deg,#0f766e,#14b8a6);
+         color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">
+        Detalle de incidencias · ${fmtDate(d.desde)} al ${fmtDate(d.hasta)}</div>
+      <div style="font-size:18px;font-weight:900;margin-top:4px">${f.nombre}</div>
+      <div style="font-size:12px;opacity:.9;margin-top:2px">
+        ${f.numero_colaborador ? '#' + f.numero_colaborador + ' · ' : ''}${f.puesto || ''}${
+          f.departamento ? ' · ' + f.departamento : ''}</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+      ${[['A pagar', f.dias_pagar, '#166534', '#dcfce7'],
+         ['A descontar', f.dias_descontar, '#991b1b', '#fee2e2'],
+         ['Del IMSS', f.dias_imss, '#6b21a8', '#f3e8ff'],
+         ['No aplican', f.na, '#475569', '#f1f5f9']].map(([k, v, c, bg]) => `
+        <div style="background:${bg};border-radius:9px;padding:9px 11px;text-align:center">
+          <div style="font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:${c};opacity:.8">${k}</div>
+          <div style="font-size:19px;font-weight:900;color:${c}">${v}</div>
+        </div>`).join('')}
+    </div>
+
+    <div style="background:${f.cuadra ? '#f0fdf4' : '#fef2f2'};border:1.5px solid ${f.cuadra ? '#86efac' : '#fca5a5'};
+         border-radius:9px;padding:9px 12px;margin-bottom:14px;font-size:12px;
+         color:${f.cuadra ? '#166534' : '#991b1b'};font-weight:700">
+      ${f.cuadra ? `✓ Cuadra: ${f.dias_pagar} + ${f.dias_no_pagar} + ${f.dias_imss} + ${f.na}${
+          f.futuros ? ' + ' + f.futuros : ''} = ${f.dias_periodo} días del periodo`
+        : `✗ ${f.avisos[0] || 'No cuadra'}`}
+      ${f.faltas_por_retardo ? `<div style="font-weight:400;margin-top:3px">Los ${f.dias_descontar} días a descontar
+        son ${f.dias_no_pagar} por incidencia + ${f.faltas_por_retardo} por acumular retardos
+        (${pol.retardos_por_falta} retardos = 1 día).</div>` : ''}
+    </div>
+
+    ${f.avisos.length ? `<div style="background:#fffbeb;border-left:4px solid #d97706;border-radius:0 8px 8px 0;
+      padding:8px 12px;margin-bottom:14px;font-size:11.5px;color:#78350f">
+      ${f.avisos.map(a => `<div>⚠ ${a}</div>`).join('')}</div>` : ''}
+
+    ${f.eventos.length ? `
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;
+           color:var(--muted);margin-bottom:6px">Los ${f.eventos.length} eventos del periodo</div>
+      <div class="tscroll" style="max-height:44vh;overflow:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:11.5px">
+        <thead><tr style="background:#f8fafc;border-bottom:1.5px solid #cbd5e1">
+          <th style="text-align:left;padding:5px 7px;font-weight:800">Fecha</th>
+          <th style="text-align:center;padding:5px 7px;font-weight:800">Incidencia</th>
+          <th style="text-align:center;padding:5px 7px;font-weight:800">Nómina</th>
+          <th style="text-align:left;padding:5px 7px;font-weight:800">Justificación / nota</th>
+        </tr></thead>
+        <tbody>${f.eventos.map(ev => {
+          const b = ev.bolsa ? INC_BOLSA[ev.bolsa] : null;
+          const etiqueta = ev.codigo === 'A' && ev.minutos_retardo
+            ? `<span style="background:#fef3c7;color:#92400e;font-weight:900;padding:1px 5px;border-radius:4px">R</span>
+               <span style="font-size:10px;color:#92400e">${ev.minutos_retardo} min</span>`
+            : `<span style="background:${(ASIST_COLOR[ev.codigo] || {}).bg || '#f1f5f9'};
+                 color:${(ASIST_COLOR[ev.codigo] || {}).fg || '#334155'};font-weight:900;
+                 padding:1px 5px;border-radius:4px">${ev.codigo}</span>
+               <span style="font-size:10px;color:var(--muted)"> ${ev.codigo_nombre}</span>`;
+          return `<tr style="border-bottom:1px solid #f1f5f9">
+            <td style="padding:4px 7px;white-space:nowrap">${fmtDate(ev.fecha)}</td>
+            <td style="padding:4px 7px;text-align:center;white-space:nowrap">${etiqueta}
+              ${ev.sin_salida ? '<span style="font-size:9.5px;color:#92400e;font-weight:800"> · sin salida</span>' : ''}</td>
+            <td style="padding:4px 7px;text-align:center;white-space:nowrap">${
+              b ? `<span style="background:${b.bg};color:${b.fg};font-size:9.5px;font-weight:800;
+                     padding:1px 5px;border-radius:4px">${b.corto}</span>` : '<span style="color:#cbd5e1">—</span>'}</td>
+            <td style="padding:4px 7px">${
+              ev.nota ? String(ev.nota).replace(/</g, '&lt;')
+                      : (ev.codigo === 'F' ? '<span style="color:#dc2626;font-weight:700">sin justificación capturada</span>'
+                                           : '<span style="color:#cbd5e1">—</span>')}
+              ${ev.codigo_antes && ev.codigo_antes !== ev.codigo
+                ? `<div style="font-size:9.5px;color:#94a3b8;margin-top:1px">corregido de ${ev.codigo_antes}${
+                    ev.lo_cambio ? ' por ' + ev.lo_cambio : ''}</div>` : ''}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`
+      : `<div class="ibox ok" style="font-size:12.5px">✅ Quincena limpia: ni una incidencia en el periodo.</div>`}
+
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn bo" onclick="closeModal('modal-inc')">Cerrar</button>
+    </div>`;
+  openModal('modal-inc');
+}
+
+// ── La política ──
+// Qué se paga y qué se descuenta es decisión de la empresa, no del sistema. Por
+// eso se edita aquí y no en el código: cuando cambie, el reporte se recalcula.
+async function openPoliticaInc() {
+  const soloVer = !incPuedeCerrar();
+  try {
+    const r = await api('/checador/incidencias/politica');
+    const pol = r.politica, noms = r.codigos;
+    $('modal-inc-body').innerHTML = `
+      <div style="margin:-28px -28px 20px;padding:20px 28px;background:linear-gradient(135deg,#1e3a8a,#3b82f6);
+           color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">
+          Política de nómina</div>
+        <div style="font-size:18px;font-weight:900;margin-top:4px">⚙ Cómo se trata cada incidencia</div>
+        <div style="font-size:12px;opacity:.9;margin-top:4px">
+          El reporte no decide esto por su cuenta: lo lee de aquí. Al cambiarlo, todos los
+          periodos se recalculan solos.</div>
+      </div>
+
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:16px">
+        <thead><tr style="background:#f8fafc;border-bottom:1.5px solid #cbd5e1">
+          <th style="text-align:left;padding:6px 9px;font-weight:800">Incidencia</th>
+          <th style="text-align:left;padding:6px 9px;font-weight:800;width:230px">Tratamiento</th>
+        </tr></thead>
+        <tbody>
+        ${INC_CODS.map(c => `
+          <tr style="border-bottom:1px solid #f1f5f9">
+            <td style="padding:6px 9px">
+              <span style="display:inline-block;min-width:28px;text-align:center;
+                background:${(ASIST_COLOR[c] || {}).bg || '#f1f5f9'};color:${(ASIST_COLOR[c] || {}).fg || '#334155'};
+                font-weight:900;border-radius:4px;padding:2px 5px">${c}</span>
+              <strong style="margin-left:6px">${noms[c]}</strong>
+              ${c === 'D' ? '<div style="font-size:10.5px;color:var(--muted);margin-left:40px">El séptimo día de la LFT. Si se deja en "la paga la empresa", una quincena limpia da los 15 o 16 días completos.</div>' : ''}
+              ${c === 'FJ' ? '<div style="font-size:10.5px;color:var(--muted);margin-left:40px">Justificada no es lo mismo que pagada: para pagarla existe el permiso con goce.</div>' : ''}
+              ${c === 'In' ? '<div style="font-size:10.5px;color:var(--muted);margin-left:40px">Normalmente la cubre el IMSS y la empresa no paga esos días.</div>' : ''}
+            </td>
+            <td style="padding:6px 9px">
+              <select id="pol-${c.replace('/', '')}" ${soloVer ? 'disabled' : ''} style="width:100%">
+                ${Object.entries(INC_BOLSA).map(([k, v]) =>
+                  `<option value="${k}" ${pol.trato[c] === k ? 'selected' : ''}>${v.et}</option>`).join('')}
+              </select>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+
+      <div class="fg" style="gap:12px">
+        <div class="fi">
+          <label>¿Cuántos retardos hacen una falta?</label>
+          <input type="number" min="0" max="99" id="pol-ret" value="${pol.retardos_por_falta}" ${soloVer ? 'disabled' : ''}>
+          <div style="font-size:10.5px;color:var(--muted);margin-top:3px">
+            0 = los retardos solo se informan y no generan descuento.</div>
+        </div>
+        <div class="fi">
+          <label>¿A quién se le manda el reporte?</label>
+          <select id="pol-plantilla" ${soloVer ? 'disabled' : ''}>
+            <option value="1" ${pol.toda_plantilla ? 'selected' : ''}>Toda la plantilla (recomendado)</option>
+            <option value="0" ${pol.toda_plantilla ? '' : 'selected'}>Solo a quien tuvo incidencias</option>
+          </select>
+          <div style="font-size:10.5px;color:var(--muted);margin-top:3px">
+            Si solo van las incidencias, Nóminas no tiene cómo saber si se omitió a alguien.</div>
+        </div>
+      </div>
+
+      <div class="form-actions" style="margin-top:16px">
+        <button class="btn bo" onclick="closeModal('modal-inc')">${soloVer ? 'Cerrar' : 'Cancelar'}</button>
+        ${soloVer ? '' : '<button class="btn bs" onclick="guardarPoliticaInc()">💾 Guardar política</button>'}
+      </div>`;
+    openModal('modal-inc');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function guardarPoliticaInc() {
+  const trato = {};
+  INC_CODS.forEach(c => { trato[c] = $('pol-' + c.replace('/', '')).value; });
+  try {
+    await api('/checador/incidencias/politica', {
+      method: 'PUT',
+      body: JSON.stringify({ trato,
+        retardos_por_falta: parseInt($('pol-ret').value) || 0,
+        toda_plantilla: $('pol-plantilla').value === '1' })
+    });
+    toast('Política guardada. El reporte se recalculó.');
+    closeModal('modal-inc');
+    cargarIncidencias();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ── El cierre ──
+// Congelar lo que se envió es el punto de todo esto: si el documento pudiera
+// cambiar solo, no serviría para acreditar nada ante Nóminas.
+function openCerrarInc() {
+  const d = window._incData;
+  if (!d) return;
+  const rojas = d.alertas.rojas;
+  $('modal-inc-body').innerHTML = `
+    <div style="margin:-28px -28px 20px;padding:20px 28px;background:linear-gradient(135deg,${
+      rojas.length ? '#b91c1c,#ef4444' : '#15803d,#22c55e'});color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">
+        Enviar a Nóminas</div>
+      <div style="font-size:18px;font-weight:900;margin-top:4px">🔒 ${fmtDate(d.desde)} al ${fmtDate(d.hasta)}</div>
+      <div style="font-size:12px;opacity:.9;margin-top:4px">
+        Se le asigna folio y se guarda una copia exacta. Si después se corrige una celda,
+        lo enviado no cambia: sale como complemento.</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:14px">
+      ${[['Colaboradores', d.totales.colaboradores, '#334155', '#f1f5f9'],
+         ['Días a pagar', d.totales.dias_pagar, '#166534', '#dcfce7'],
+         ['Días a descontar', d.totales.dias_descontar, '#991b1b', '#fee2e2']].map(([k, v, c, bg]) => `
+        <div style="background:${bg};border-radius:9px;padding:10px;text-align:center">
+          <div style="font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:${c};opacity:.8">${k}</div>
+          <div style="font-size:19px;font-weight:900;color:${c}">${v}</div>
+        </div>`).join('')}
+    </div>
+
+    ${d.envio ? `<div class="ibox warn" style="font-size:12px;margin-bottom:12px">
+      Este periodo ya se envió con folio <strong>${d.envio.folio}</strong>. Al enviarlo otra vez se
+      genera un folio nuevo; el anterior se conserva como estaba.</div>` : ''}
+
+    ${rojas.length ? `
+      <div style="background:#fef2f2;border:2px solid #fca5a5;border-radius:10px;padding:12px 14px;margin-bottom:14px">
+        <div style="font-size:12.5px;font-weight:900;color:#991b1b;margin-bottom:6px">
+          🔴 Hay ${rojas.length} pendiente(s) que cambiarían las cifras</div>
+        <ul style="margin:0 0 9px 16px;padding:0;font-size:11.5px;color:#7f1d1d;line-height:1.55">
+          ${rojas.map(a => `<li>${a.titulo}</li>`).join('')}
+        </ul>
+        <div class="fi full">
+          <label style="color:#991b1b">Si de todos modos hay que enviarlo, explica por qué *</label>
+          <textarea id="inc-motivo" rows="2" oninput="incValidarCierre()"
+            placeholder="Ej: Nóminas cierra hoy a las 14:00; las vacaciones de Pedro se mandan por complemento."></textarea>
+          <div style="font-size:10.5px;color:var(--muted);margin-top:3px">
+            Queda guardado junto al folio. Mínimo 10 caracteres.</div>
+        </div>
+      </div>` : ''}
+
+    <div class="fi full">
+      <label>Nota para Nóminas <span style="font-weight:400;color:var(--muted);font-size:10.5px">(opcional)</span></label>
+      <input id="inc-notas" placeholder="Ej: Incluye los 3 días de incapacidad de Jorge Lara.">
+    </div>
+
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn bo" onclick="closeModal('modal-inc')">Cancelar</button>
+      <button class="btn ${rojas.length ? 'bd' : 'bsuc'}" id="inc-btn-cerrar" onclick="confirmarCerrarInc()">
+        🔒 ${rojas.length ? 'Enviar con pendientes' : 'Cerrar y enviar'}</button>
+    </div>`;
+  openModal('modal-inc');
+  incValidarCierre();
+}
+
+function incValidarCierre() {
+  const rojas = (window._incData?.alertas?.rojas || []).length;
+  const btn = $('inc-btn-cerrar');
+  if (!btn) return;
+  const falta = rojas && ($('inc-motivo')?.value || '').trim().length < 10;
+  btn.disabled = !!falta;
+  btn.style.opacity = falta ? '.5' : '';
+}
+
+async function confirmarCerrarInc() {
+  const d = window._incData;
+  if (!d) return;
+  const rojas = d.alertas.rojas.length;
+  const motivo = ($('inc-motivo')?.value || '').trim();
+  if (rojas && motivo.length < 10) return toast('Explica por qué se envía con pendientes.', 'warn');
+
+  const btn = $('inc-btn-cerrar');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Enviando...'; }
+  try {
+    const r = await api('/checador/incidencias/cerrar', {
+      method: 'POST',
+      body: JSON.stringify({ desde: d.desde, hasta: d.hasta,
+        notas: ($('inc-notas')?.value || '').trim(),
+        forzar: !!rojas, motivo_forzado: motivo })
+    });
+    toast(`Enviado con folio ${r.folio}.`);
+    closeModal('modal-inc');
+    cargarIncidencias();
+  } catch (e) {
+    toast(e.message, 'err');
+    if (btn) { btn.disabled = false; btn.textContent = '🔒 Cerrar y enviar'; }
+  }
+}
+
+async function openEnviosInc() {
+  try {
+    const envios = await api('/checador/incidencias/envios');
+    $('modal-inc-body').innerHTML = `
+      <div style="margin:-28px -28px 20px;padding:20px 28px;background:linear-gradient(135deg,#334155,#64748b);
+           color:#fff;border-radius:var(--r-lg) var(--r-lg) 0 0">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;opacity:.9">
+          Historial</div>
+        <div style="font-size:18px;font-weight:900;margin-top:4px">📜 Reportes enviados a Nóminas</div>
+      </div>
+      ${envios.length ? `
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:#f8fafc;border-bottom:1.5px solid #cbd5e1">
+          <th style="text-align:left;padding:6px 8px;font-weight:800">Folio</th>
+          <th style="text-align:left;padding:6px 8px;font-weight:800">Periodo</th>
+          <th style="text-align:center;padding:6px 8px;font-weight:800">Pagar</th>
+          <th style="text-align:center;padding:6px 8px;font-weight:800">Descontar</th>
+          <th style="text-align:left;padding:6px 8px;font-weight:800">Lo envió</th>
+          <th></th>
+        </tr></thead>
+        <tbody>${envios.map(e => `
+          <tr style="border-bottom:1px solid #f1f5f9">
+            <td style="padding:5px 8px;font-weight:800">${e.folio}
+              ${e.forzado ? `<span style="background:#fee2e2;color:#991b1b;font-size:9px;font-weight:800;
+                padding:1px 4px;border-radius:3px;margin-left:3px"
+                title="${(e.motivo_forzado || '').replace(/"/g, '&quot;')}">CON PENDIENTES</span>` : ''}</td>
+            <td style="padding:5px 8px">${fmtDate(e.desde)} al ${fmtDate(e.hasta)}
+              ${e.quincena ? `<span style="color:var(--muted)"> · ${e.quincena}</span>` : ''}</td>
+            <td style="padding:5px 8px;text-align:center;font-weight:800;color:#166534">${e.totales?.dias_pagar ?? '—'}</td>
+            <td style="padding:5px 8px;text-align:center;font-weight:800;color:#991b1b">${e.totales?.dias_descontar ?? '—'}</td>
+            <td style="padding:5px 8px;font-size:11px">${e.enviado_por_nombre || '—'}
+              <div style="color:var(--muted);font-size:10px">${e.enviado_en}</div></td>
+            <td style="padding:5px 8px;text-align:right">
+              <button class="btn bo bsm" onclick="verEnvioInc('${e.folio}')">Ver</button></td>
+          </tr>`).join('')}</tbody>
+      </table>` : '<p class="empty">Todavía no se ha enviado ningún reporte.</p>'}
+      <div class="form-actions" style="margin-top:16px">
+        <button class="btn bo" onclick="closeModal('modal-inc')">Cerrar</button>
+      </div>`;
+    openModal('modal-inc');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// Abrir un folio ya enviado: se muestra EXACTAMENTE lo que se mandó, no lo que
+// dirían los datos de hoy.
+async function verEnvioInc(folio) {
+  try {
+    const e = await api(`/checador/incidencias/envios/${encodeURIComponent(folio)}`);
+    const snap = e.snapshot || {};
+    window._incData = { ...snap, envio: null, _congelado: folio };
+    closeModal('modal-inc');
+    renderIncidencias(window._incData);
+    $('inc-body').insertAdjacentHTML('afterbegin', `
+      <div style="background:#1e293b;color:#fff;border-radius:10px;padding:11px 14px;margin-bottom:12px;
+           display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:13px;font-weight:900">🔒 Estás viendo el folio ${e.folio}, tal como se envió</div>
+          <div style="font-size:11.5px;opacity:.85;margin-top:2px">
+            ${e.enviado_en}${e.enviado_por_nombre ? ' · ' + e.enviado_por_nombre : ''}${
+              e.notas ? ' · ' + String(e.notas).replace(/</g, '&lt;') : ''}${
+              e.forzado ? ' · enviado con pendientes: ' + String(e.motivo_forzado || '').replace(/</g, '&lt;') : ''}</div>
+        </div>
+        <button class="btn bo bsm" onclick="cargarIncidencias()">Volver a los datos de hoy</button>
+      </div>`);
+    toast(`Mostrando el folio ${e.folio} congelado.`);
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+// ── Excel de 3 hojas: lo que se captura, el respaldo y el control ──
+function exportarIncidenciasExcel() {
+  const d = window._incData;
+  if (!d) return toast('Primero genera el reporte.', 'warn');
+  if (typeof XLSX === 'undefined') return toast('Librería XLSX no disponible.', 'err');
+  const pol = d.politica;
+  const bolsa = c => INC_BOLSA[pol.trato[c] || 'paga'];
+  const wb = XLSX.utils.book_new();
+
+  // HOJA 1 — Resumen: es la que Nóminas captura
+  const a1 = [];
+  a1.push(['INCIDENCIAS PARA NÓMINA — GRUPO MANAGEMENT']);
+  a1.push([`Periodo: ${fmtDate(d.desde)} al ${fmtDate(d.hasta)} · ${d.dias_periodo} días naturales${
+    d.quincena ? ' · Quincena ' + d.quincena.quincena : ''}`]);
+  a1.push([`Generado: ${new Date().toLocaleString('es-MX')}${
+    d._congelado ? ' · COPIA DEL FOLIO ' + d._congelado : ''}`]);
+  a1.push([`Política: ${INC_CODS.map(c => `${c}=${bolsa(c).corto}`).join(' · ')}${
+    pol.retardos_por_falta ? ` · ${pol.retardos_por_falta} retardos = 1 día de descuento` : ' · los retardos no descuentan'}`]);
+  a1.push(['Los descansos (D) se pagan: es el séptimo día de la LFT.']);
+  a1.push([]);
+  a1.push(['#', 'Colaborador', 'Puesto', 'Departamento', 'Ingreso', 'Baja',
+           'Días per.', 'No aplican', ...INC_CODS, 'Retardos', 'Min. retardo',
+           'DÍAS A PAGAR', 'DÍAS A DESCONTAR', 'DÍAS IMSS', 'Gana bono', 'Cuadra']);
+  d.filas.forEach(f => a1.push([
+    f.numero_colaborador || '', f.nombre, f.puesto || '', f.departamento || '',
+    f.fecha_ingreso || '', f.fecha_baja || '',
+    f.dias_periodo, f.na, ...INC_CODS.map(c => f.codigos[c]),
+    f.retardos, f.minutos_retardo,
+    f.dias_pagar, f.dias_descontar, f.dias_imss,
+    f.gana_bono ? 'SÍ' : 'no', f.cuadra ? 'OK' : 'REVISAR']));
+  a1.push([]);
+  a1.push(['', 'TOTALES', '', '', '', '', '', d.filas.reduce((a, f) => a + f.na, 0),
+    ...INC_CODS.map(c => d.totales[c]),
+    d.totales.retardos, d.totales.minutos_retardo,
+    d.totales.dias_pagar, d.totales.dias_descontar, d.totales.dias_imss,
+    d.totales.ganan_bono, `${d.totales.cuadran}/${d.totales.colaboradores}`]);
+  const ws1 = XLSX.utils.aoa_to_sheet(a1);
+  ws1['!cols'] = [{wch:7},{wch:30},{wch:18},{wch:15},{wch:11},{wch:11},{wch:9},{wch:10},
+                  ...INC_CODS.map(() => ({wch:5})),{wch:9},{wch:11},
+                  {wch:13},{wch:16},{wch:10},{wch:10},{wch:9}];
+  XLSX.utils.book_append_sheet(wb, ws1, 'Resumen');
+
+  // HOJA 2 — Detalle: el respaldo de cada cifra
+  const a2 = [['Colaborador', '#', 'Fecha', 'Día', 'Código', 'Incidencia', 'Trato en nómina',
+               'Min. retardo', 'Sin salida', 'Justificación / nota', 'Corregido de', 'Lo cambió', 'Cuándo']];
+  const dows = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  d.filas.forEach(f => f.eventos.forEach(ev => a2.push([
+    f.nombre, f.numero_colaborador || '', fmtDate(ev.fecha),
+    dows[new Date(ev.fecha + 'T12:00:00').getDay()],
+    // Un día de asistencia solo llega al detalle si trae retardo o falta la
+    // salida. Dejarlo como "A — Asistencia" lo haría parecer un renglón de más.
+    ...(ev.codigo === 'A' && ev.minutos_retardo ? ['R', 'Retardo'] : [ev.codigo, ev.codigo_nombre]),
+    ev.bolsa ? INC_BOLSA[ev.bolsa].et : '',
+    ev.minutos_retardo || '', ev.sin_salida ? 'SÍ' : '',
+    ev.nota || (ev.codigo === 'F' ? 'SIN JUSTIFICACIÓN' : ''),
+    ev.codigo_antes && ev.codigo_antes !== ev.codigo ? ev.codigo_antes : '',
+    ev.lo_cambio || '', ev.cambiado_en ? new Date(ev.cambiado_en).toLocaleString('es-MX') : ''])));
+  const ws2 = XLSX.utils.aoa_to_sheet(a2);
+  ws2['!cols'] = [{wch:30},{wch:7},{wch:12},{wch:6},{wch:7},{wch:20},{wch:19},
+                  {wch:11},{wch:10},{wch:52},{wch:12},{wch:22},{wch:19}];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Detalle');
+
+  // HOJA 3 — Control: lo que hay que resolver y de dónde salió cada número
+  const a3 = [];
+  a3.push(['CONTROL DEL REPORTE']);
+  a3.push([]);
+  a3.push(['El amarre', '']);
+  a3.push(['Cada colaborador debe sumar los días del periodo entre las cuatro bolsas:', '']);
+  a3.push(['días del periodo = días a pagar + días a descontar + días del IMSS + días que no aplican', '']);
+  a3.push(['Colaboradores que cuadran', `${d.totales.cuadran} de ${d.totales.colaboradores}`]);
+  a3.push([]);
+  a3.push(['Política aplicada', '']);
+  INC_CODS.forEach(c => a3.push([`${c} — ${d.codigos[c]}`, bolsa(c).et]));
+  a3.push(['Retardos para hacer una falta', pol.retardos_por_falta || 'no descuentan']);
+  a3.push([]);
+  if (d.alertas.rojas.length) {
+    a3.push(['PENDIENTES DE RESOLVER (no debería enviarse así)', '']);
+    d.alertas.rojas.forEach(x => {
+      a3.push([x.titulo, x.detalle]);
+      (x.items || []).forEach(i => a3.push(['', i]));
+    });
+    a3.push([]);
+  }
+  if (d.alertas.amarillas.length) {
+    a3.push(['A REVISAR', '']);
+    d.alertas.amarillas.forEach(x => {
+      a3.push([x.titulo, x.detalle]);
+      (x.items || []).forEach(i => a3.push(['', i]));
+    });
+    a3.push([]);
+  }
+  if (!d.alertas.rojas.length && !d.alertas.amarillas.length)
+    a3.push(['Sin pendientes', 'No hay nada que pudiera cambiar las cifras.']);
+  const ws3 = XLSX.utils.aoa_to_sheet(a3);
+  ws3['!cols'] = [{wch:52},{wch:72}];
+  XLSX.utils.book_append_sheet(wb, ws3, 'Control');
+
+  XLSX.writeFile(wb, `Incidencias_nomina_${d.desde}_a_${d.hasta}${
+    d._congelado ? '_' + d._congelado : ''}.xlsx`);
+}
+
+// ── Impresión: el documento con firmas que se archiva ──
+function imprimirIncidencias() {
+  const d = window._incData;
+  if (!d) return toast('Primero genera el reporte.', 'warn');
+  const pol = d.politica;
+  const bolsa = c => INC_BOLSA[pol.trato[c] || 'paga'];
+
+  const filas = d.filas.map(f => `<tr${f.cuadra ? '' : ' class="mal"'}>
+    <td class="izq"><strong>${f.nombre}</strong>
+      <div class="chico">${f.numero_colaborador ? '#' + f.numero_colaborador : 'sin número'}${
+        f.puesto ? ' · ' + f.puesto : ''}${f.alta_en_periodo ? ' · ALTA' : ''}${
+        f.baja_en_periodo ? ' · BAJA' : ''}</div></td>
+    <td>${f.dias_periodo}</td>
+    <td>${f.na || ''}</td>
+    ${INC_CODS.map(c => `<td>${f.codigos[c] || ''}</td>`).join('')}
+    <td>${f.retardos ? f.retardos + ' (' + f.minutos_retardo + ')' : ''}</td>
+    <td class="pagar">${f.dias_pagar}</td>
+    <td class="desc">${f.dias_descontar || ''}</td>
+    <td class="imss">${f.dias_imss || ''}</td>
+    <td>${f.gana_bono ? 'SÍ' : ''}</td>
+  </tr>`).join('');
+
+  const eventos = [];
+  d.filas.forEach(f => f.eventos.forEach(ev => eventos.push({ ...ev, nombre: f.nombre })));
+  eventos.sort((a, b) => a.fecha.localeCompare(b.fecha) || a.nombre.localeCompare(b.nombre));
+
+  const w = window.open('', '_blank');
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8">
+  <title>Incidencias para Nómina — ${d.desde} al ${d.hasta}</title>
+  <style>
+    @page { size: letter landscape; margin: 9mm; }
+    * { box-sizing:border-box }
+    body { font-family:'Segoe UI',Arial,sans-serif; font-size:8px; color:#111; margin:0 }
+    .enc { display:flex; justify-content:space-between; align-items:flex-start;
+           border-bottom:2.5px solid #111; padding-bottom:6px; margin-bottom:8px }
+    .t1 { font-size:14px; font-weight:900; letter-spacing:.3px }
+    .t2 { font-size:9px; color:#444; margin-top:2px }
+    .folio { text-align:right; font-size:8px; color:#444 }
+    .folio b { font-size:11px; color:#111; display:block }
+    table.m { width:100%; border-collapse:collapse; margin-bottom:10px }
+    table.m th { background:#f1f5f9; border:.5px solid #94a3b8; padding:2.5px 1px;
+                 font-size:7px; font-weight:800; text-align:center }
+    table.m td { border:.5px solid #cbd5e1; padding:2.5px 1px; text-align:center; font-size:7.5px }
+    table.m td.izq { text-align:left; padding-left:3px; width:150px }
+    .chico { font-size:6px; color:#666 }
+    td.pagar { background:#f0fdf4; font-weight:900; font-size:8.5px }
+    td.desc  { background:#fef2f2; font-weight:900; font-size:8.5px; color:#991b1b }
+    td.imss  { background:#faf5ff; font-weight:900; font-size:8.5px; color:#6b21a8 }
+    tr.mal td { background:#fff1f2 }
+    tr.tot td { background:#e2e8f0; font-weight:900; font-size:8.5px }
+    .pol { font-size:7px; color:#444; margin-bottom:8px; line-height:1.5 }
+    .sec { font-size:9px; font-weight:900; text-transform:uppercase; letter-spacing:.8px;
+           border-top:1.5px solid #111; padding-top:5px; margin:10px 0 5px }
+    table.d { width:100%; border-collapse:collapse; font-size:7px }
+    table.d th { background:#f8fafc; border-bottom:1px solid #94a3b8; padding:3px;
+                 text-align:left; font-weight:800 }
+    table.d td { border-bottom:.5px solid #e5e7eb; padding:2.5px 3px; vertical-align:top }
+    .alertas { border:1px solid #991b1b; background:#fef2f2; padding:5px 7px;
+               margin-bottom:8px; font-size:7.5px; border-radius:3px }
+    .firmas { display:flex; gap:24px; margin-top:26px; page-break-inside:avoid }
+    .firma { flex:1; text-align:center; font-size:7.5px }
+    .linea { border-top:1px solid #111; margin-bottom:3px; height:34px }
+    .nota-pie { font-size:6.5px; color:#666; text-align:center; margin-top:14px;
+                border-top:.5px solid #ccc; padding-top:4px }
+  </style></head><body>
+  <div class="enc">
+    <div>
+      <div class="t1">REPORTE DE INCIDENCIAS PARA NÓMINA</div>
+      <div class="t2">Grupo Management · Periodo del ${fmtDate(d.desde)} al ${fmtDate(d.hasta)}
+        · ${d.dias_periodo} días naturales${d.quincena ? ' · Quincena ' + d.quincena.quincena : ''}</div>
+    </div>
+    <div class="folio">
+      ${d._congelado ? `<b>${d._congelado}</b>` : '<b>SIN FOLIO</b>'}
+      ${d._congelado ? 'Copia del reporte enviado' : 'Borrador — no se ha enviado'}<br>
+      Impreso: ${new Date().toLocaleString('es-MX')}<br>
+      ${d.filas.length} colaboradores
+    </div>
+  </div>
+
+  <div class="pol"><strong>Cómo se trata cada incidencia:</strong>
+    ${INC_CODS.map(c => `${c} (${d.codigos[c]}) = ${bolsa(c).et}`).join(' · ')}.
+    ${pol.retardos_por_falta ? `${pol.retardos_por_falta} retardos equivalen a 1 día de descuento.`
+                             : 'Los retardos se informan pero no generan descuento.'}
+    Los descansos se pagan: es el séptimo día de la LFT.</div>
+
+  ${d.alertas.rojas.length ? `<div class="alertas">
+    <strong>⚠ Este reporte se emite con ${d.alertas.rojas.length} pendiente(s):</strong>
+    ${d.alertas.rojas.map(a => a.titulo).join(' · ')}</div>` : ''}
+
+  <table class="m">
+    <thead><tr>
+      <th class="izq" style="text-align:left">Colaborador</th>
+      <th>Días<br>per.</th><th>No<br>aplic.</th>
+      ${INC_CODS.map(c => `<th>${c}</th>`).join('')}
+      <th>Ret.<br>(min)</th>
+      <th>DÍAS A<br>PAGAR</th><th>DÍAS A<br>DESCONT.</th><th>DÍAS<br>IMSS</th><th>Bono</th>
+    </tr></thead>
+    <tbody>${filas}
+      <tr class="tot">
+        <td class="izq">TOTALES — ${d.filas.length} colaboradores</td>
+        <td>${d.dias_periodo}</td>
+        <td>${d.filas.reduce((a, f) => a + f.na, 0) || ''}</td>
+        ${INC_CODS.map(c => `<td>${d.totales[c] || ''}</td>`).join('')}
+        <td>${d.totales.retardos || ''}</td>
+        <td>${d.totales.dias_pagar}</td>
+        <td>${d.totales.dias_descontar || ''}</td>
+        <td>${d.totales.dias_imss || ''}</td>
+        <td>${d.totales.ganan_bono || ''}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  ${eventos.length ? `
+    <div class="sec">Detalle de incidencias (${eventos.length})</div>
+    <table class="d">
+      <thead><tr><th>Fecha</th><th>Colaborador</th><th>Incidencia</th><th>Nómina</th>
+        <th>Justificación / nota</th></tr></thead>
+      <tbody>${eventos.map(ev => `<tr>
+        <td>${fmtDate(ev.fecha)}</td>
+        <td>${ev.nombre}</td>
+        <td>${ev.codigo === 'A' && ev.minutos_retardo
+              ? `Retardo de ${ev.minutos_retardo} min`
+              : `${ev.codigo} — ${ev.codigo_nombre}`}${ev.sin_salida ? ' · sin salida' : ''}</td>
+        <td>${ev.bolsa ? INC_BOLSA[ev.bolsa].corto : '—'}</td>
+        <td>${(ev.nota || (ev.codigo === 'F' ? 'SIN JUSTIFICACIÓN CAPTURADA' : '—')).replace(/</g, '&lt;')}${
+          ev.codigo_antes && ev.codigo_antes !== ev.codigo
+            ? ` <span style="color:#666">(corregido de ${ev.codigo_antes}${
+                ev.lo_cambio ? ' por ' + ev.lo_cambio : ''})</span>` : ''}</td>
+      </tr>`).join('')}</tbody>
+    </table>` : ''}
+
+  <div class="firmas">
+    <div class="firma"><div class="linea"></div>
+      <strong>ELABORÓ</strong><br>Recursos Humanos</div>
+    <div class="firma"><div class="linea"></div>
+      <strong>REVISÓ</strong><br>Jefatura de Recursos Humanos</div>
+    <div class="firma"><div class="linea"></div>
+      <strong>RECIBIÓ</strong><br>Departamento de Nóminas</div>
+  </div>
+  <div class="nota-pie">
+    Cada colaborador suma los ${d.dias_periodo} días del periodo entre días pagados, días a descontar,
+    días a cargo del IMSS y días que no aplican. ${d.totales.cuadran} de ${d.totales.colaboradores} cuadran.
+    · Sistema de Facturación · Grupo Management
+  </div>
+  <script>window.onload=()=>{window.print()}<\/script>
+  </body></html>`);
+  w.document.close();
 }
 
 // ══ PRODUCTIVIDAD (Admin) ══════════════════════════════
@@ -19588,6 +20521,7 @@ async function openSolicitudVac(empIdPredef) {
           <select id="vs-tipo" onchange="cambiarTipoSolicitud()">
             <option value="vacaciones">🌴 Vacaciones (descuenta de días acumulados)</option>
             <option value="permiso_goce">📝 Permiso con goce de sueldo (no descuenta días)</option>
+            <option value="permiso_sin_goce">📋 Permiso SIN goce de sueldo (nómina lo descuenta)</option>
             <option value="incapacidad">🏥 Incapacidad (no descuenta días)</option>
           </select>
         </div>
@@ -19596,6 +20530,19 @@ async function openSolicitudVac(empIdPredef) {
             <option value="">— Seleccionar —</option>
             ${emps.map(e=>`<option value="${e.id}" ${empIdPredef==e.id?'selected':''}>${e.nombre} (${e.puesto||'sin puesto'}) — Pendientes: ${parseFloat(e.dias_pendientes).toFixed(1)}</option>`).join('')}
           </select>
+        </div>
+        <div class="fi full" id="vs-imss" style="display:none;background:#faf5ff;border:1.5px solid #e9d5ff;border-radius:10px;padding:11px 13px">
+          <label style="color:#6b21a8"><strong>🏥 Datos del IMSS</strong>
+            <span style="font-weight:400;color:var(--muted);font-size:10.5px">Nómina los necesita para el trámite. Si todavía no te entregan el papel, déjalos vacíos y captúralos después.</span></label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:6px">
+            <input id="vs-folio-imss" placeholder="Folio de la incapacidad">
+            <select id="vs-ramo-imss">
+              <option value="">— Ramo de seguro —</option>
+              <option value="enfermedad_general">Enfermedad general</option>
+              <option value="riesgo_trabajo">Riesgo de trabajo</option>
+              <option value="maternidad">Maternidad</option>
+            </select>
+          </div>
         </div>
         <div class="fi"><label>Fecha solicitud</label><input type="date" id="vs-solicitud" value="${today}"></div>
         <div class="fi"><label>Fecha inicio *</label><input type="date" id="vs-ini" onchange="recalcDiasSol()"></div>
@@ -19720,6 +20667,9 @@ function cambiarTipoSolicitud() {
   // Panel de distribucion solo aplica a vacaciones
   const paneles = document.querySelectorAll('#modal-vac-sol-body .fi.full > div[style*="eff6ff"]');
   paneles.forEach(p => { p.style.display = esVac ? '' : 'none'; });
+  // Los datos del IMSS solo aplican a la incapacidad
+  const imss = $('vs-imss');
+  if (imss) imss.style.display = tipo === 'incapacidad' ? '' : 'none';
 }
 
 async function renderDistribucionManual() {
@@ -19881,6 +20831,10 @@ async function guardarSolicitudVac() {
     observaciones   : $('vs-obs').value,
     estatus         : $('vs-est').value
   };
+  if (tipo === 'incapacidad') {
+    body.folio_imss       = $('vs-folio-imss')?.value || '';
+    body.ramo_incapacidad = $('vs-ramo-imss')?.value || '';
+  }
   // Si el modo es manual Y son vacaciones, incluir la distribución explícita
   if (modo === 'manual' && tipo === 'vacaciones') {
     const distribucion = [];

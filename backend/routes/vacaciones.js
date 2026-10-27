@@ -51,6 +51,12 @@ router.use(verificarToken);
 (async () => {
   try { await query(`ALTER TABLE fac_vacaciones_solicitudes ADD COLUMN IF NOT EXISTS tipo TEXT DEFAULT 'vacaciones'`); }
   catch (e) { console.warn('Migración tipo solicitudes:', e.message); }
+  // Datos de la incapacidad. Nómina los necesita para el trámite ante el IMSS, y
+  // el reporte de incidencias no deja cerrar la quincena si falta el folio.
+  for (const col of ['folio_imss TEXT', 'ramo_incapacidad TEXT', 'dias_imss NUMERIC(6,2)']) {
+    try { await query(`ALTER TABLE fac_vacaciones_solicitudes ADD COLUMN IF NOT EXISTS ${col}`); }
+    catch (e) { console.warn('Migración datos de incapacidad:', e.message); }
+  }
   // Rastro de la autorización. Sin esto la solicitud cambia de estatus sin que
   // quede quien lo decidió, y el formato impreso no puede acreditar nada.
   for (const col of ['autorizado_por INT',
@@ -713,12 +719,38 @@ router.put('/empleados/:id/periodos', requireRol('admin', 'capturista'), async (
 router.post('/solicitudes', permiso('vacaciones', NIVEL.CAPTURAR),
             (req, res) => crearSolicitud(req, res));
 
+// PATCH /solicitudes/:id/imss — capturar el folio cuando por fin lo entregan.
+// La incapacidad se registra el dia que falta la persona; el papel del IMSS
+// suele llegar despues, y sin esta ruta habria que borrar y recapturar.
+router.patch('/solicitudes/:id/imss', permiso('vacaciones', NIVEL.CAPTURAR), async (req, res) => {
+  try {
+    const folio = String(req.body.folio_imss || '').trim() || null;
+    const ramo  = ['enfermedad_general','riesgo_trabajo','maternidad']
+                    .includes(req.body.ramo_incapacidad) ? req.body.ramo_incapacidad : null;
+    const r = await query(
+      `UPDATE fac_vacaciones_solicitudes
+          SET folio_imss = $1, ramo_incapacidad = $2
+        WHERE id = $3 AND COALESCE(tipo,'vacaciones') = 'incapacidad'
+        RETURNING id, folio_imss, ramo_incapacidad`,
+      [folio, ramo, req.params.id]);
+    if (!r.rows.length)
+      return res.status(404).json({ error: 'Esa solicitud no existe o no es una incapacidad.' });
+    res.json({ ok: true, ...r.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 async function crearSolicitud(req, res) {
   const client = await getClient();
   try {
     await client.query('BEGIN');
     const { empleado_id, fecha_solicitud, fecha_inicio, fecha_fin, dias_solicitados,
             fecha_regreso, observaciones, estatus, distribucion, tipo } = req.body;
+    // Datos del IMSS. Solo tienen sentido en una incapacidad: en cualquier otro
+    // tipo se descartan, para que no quede un folio colgado donde no aplica.
+    const esIncap = tipo === 'incapacidad';
+    const folioImss = esIncap ? (String(req.body.folio_imss || '').trim() || null) : null;
+    const ramoImss  = esIncap && ['enfermedad_general','riesgo_trabajo','maternidad']
+                        .includes(req.body.ramo_incapacidad) ? req.body.ramo_incapacidad : null;
     if (!empleado_id || !fecha_inicio || !fecha_fin)
       return res.status(400).json({ error: 'Empleado y fechas son requeridas.' });
     const dias = parseFloat(dias_solicitados) || 0;
@@ -728,7 +760,8 @@ async function crearSolicitud(req, res) {
     }
 
     // Tipo de solicitud: vacaciones (default) | permiso_goce | incapacidad
-    const tipoSol = ['vacaciones','permiso_goce','incapacidad'].includes(tipo) ? tipo : 'vacaciones';
+    const tipoSol = ['vacaciones','permiso_goce','permiso_sin_goce','incapacidad']
+                      .includes(tipo) ? tipo : 'vacaciones';
     const esVacaciones = tipoSol === 'vacaciones';
 
     // Distribuir días — manual si viene distribucion, o FIFO automática
@@ -784,14 +817,19 @@ async function crearSolicitud(req, res) {
     }
 
     // Insertar solicitud
-    const resumenFinal = esVacaciones ? resumen : (tipoSol === 'permiso_goce' ? 'Permiso con goce de sueldo' : 'Incapacidad');
+    const ETIQUETA_TIPO = { permiso_goce: 'Permiso con goce de sueldo',
+                            permiso_sin_goce: 'Permiso SIN goce de sueldo',
+                            incapacidad: 'Incapacidad' };
+    const resumenFinal = esVacaciones ? resumen : (ETIQUETA_TIPO[tipoSol] || 'Incapacidad');
     const r = await client.query(
       `INSERT INTO fac_vacaciones_solicitudes(
          empleado_id, fecha_solicitud, fecha_inicio, fecha_fin, dias_solicitados,
-         fecha_regreso, periodos_aplicados, observaciones, estatus, tipo, creado_por
-       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+         fecha_regreso, periodos_aplicados, observaciones, estatus, tipo, creado_por,
+         folio_imss, ramo_incapacidad
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [empleado_id, fecha_solicitud || new Date(), fecha_inicio, fecha_fin, dias,
-       fecha_regreso || null, resumenFinal, observaciones || null, est, tipoSol, req.usuario.id]
+       fecha_regreso || null, resumenFinal, observaciones || null, est, tipoSol, req.usuario.id,
+       folioImss, ramoImss]
     );
     const solId = r.rows[0].id;
 

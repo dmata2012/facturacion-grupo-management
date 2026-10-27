@@ -36,6 +36,9 @@ router.use(verificarToken);
     // La llave es el dia (0=domingo). null significa descanso. Un dia ausente cae
     // al horario general de siempre, para no obligar a reconfigurar a nadie.
     await query(`ALTER TABLE fac_empleados ADD COLUMN IF NOT EXISTS horario_semanal JSONB`);
+    // Fecha de baja. Los dias posteriores no son falta ni descanso pagado:
+    // simplemente no aplican, y el reporte de nomina tiene que poder decirlo.
+    await query(`ALTER TABLE fac_empleados ADD COLUMN IF NOT EXISTS fecha_baja DATE`);
   } catch (e) { console.warn('Migración tolerancia_min:', e.message); }
 })();
 
@@ -120,6 +123,15 @@ function horarioDelDia(emp, dow) {
     entrada: emp?.hora_entrada_esperada || null,
     salida:  emp?.hora_salida_esperada  || null
   };
+}
+
+// Dias en los que no habia relacion laboral. Se compara como texto porque las
+// fechas ya vienen normalizadas a 'YYYY-MM-DD', que ordena igual que la fecha.
+function fueraDeRelacion(emp, fechaISO) {
+  if (!emp) return false;
+  if (emp.fecha_ingreso && fechaISO < emp.fecha_ingreso) return true;
+  if (emp.fecha_baja    && fechaISO > emp.fecha_baja)    return true;
+  return false;
 }
 
 // Minutos desde medianoche, tolerando '09:00' y '09:00:00'
@@ -689,7 +701,9 @@ async function construirMatriz({ desde, hasta, empleado_id, incluir_inactivos })
     }
     const empleados = await query(
       `SELECT id, nombre, numero_colaborador, puesto, departamento, dias_descanso, horario_semanal,
+              activo, hora_entrada_esperada, hora_salida_esperada,
               TO_CHAR(fecha_ingreso,'YYYY-MM-DD') AS fecha_ingreso,
+              TO_CHAR(fecha_baja,'YYYY-MM-DD')    AS fecha_baja,
               COALESCE(bono_puntualidad, 0) AS bono_puntualidad
        FROM fac_empleados ${whereE} ORDER BY nombre`,
       paramsE
@@ -784,10 +798,16 @@ async function construirMatriz({ desde, hasta, empleado_id, incluir_inactivos })
     const ajusByEmpDia = {};
     ajus.rows.forEach(a => {
       if (!ajusByEmpDia[a.empleado_id]) ajusByEmpDia[a.empleado_id] = {};
-      ajusByEmpDia[a.empleado_id][a.fecha] = { codigo: a.codigo, notas: a.notas };
+      // Se guarda la fila completa: aquí se quedaban fuera codigo_antes,
+      // hecho_por_nombre y cambiado_en, que es justo para lo que la consulta
+      // hace el LATERAL contra el historial. Las celdas los leían como
+      // undefined, así que las columnas "Lo cambió / Cuándo" del Excel de
+      // asistencia salían siempre vacías.
+      ajusByEmpDia[a.empleado_id][a.fecha] = a;
     });
 
-    const codigoTipoSolicitud = { vacaciones:'V', permiso_goce:'P/G', incapacidad:'In' };
+    const codigoTipoSolicitud = { vacaciones:'V', permiso_goce:'P/G',
+                                  permiso_sin_goce:'P/S', incapacidad:'In' };
 
     // Fecha de hoy (server) para no marcar F en fechas futuras
     const hoyISO = new Date().toISOString().slice(0,10);
@@ -797,7 +817,7 @@ async function construirMatriz({ desde, hasta, empleado_id, incluir_inactivos })
       // El descanso ya no es una lista fija: cada dia se pregunta por separado,
       // porque el horario semanal puede marcar descanso solo en algunos.
       const celdas = {};
-      const totales = { A:0, F:0, FJ:0, V:0, 'P/G':0, In:0, D:0, R:0 };
+      const totales = { A:0, F:0, FJ:0, V:0, 'P/G':0, 'P/S':0, In:0, D:0, R:0 };
       let minutosRetardoTotal = 0;
       dias.forEach(fecha => {
         const dow = new Date(fecha+'T12:00:00').getDay(); // 0=Dom .. 6=Sab
@@ -810,6 +830,7 @@ async function construirMatriz({ desde, hasta, empleado_id, incluir_inactivos })
         // depender del historial: así también aplica a los ajustes viejos.
         let codAuto;
         if (reg && reg.hora_entrada) codAuto = 'A';
+        else if (fueraDeRelacion(e, fecha)) codAuto = '';  // antes del ingreso o despues de la baja
         else if (sol) codAuto = codigoTipoSolicitud[sol] || 'V';
         else if (horarioDelDia(e, dow).descansa) codAuto = 'D';
         else if (esFutura) codAuto = '';   // fecha futura sin registro: no es falta
@@ -826,6 +847,9 @@ async function construirMatriz({ desde, hasta, empleado_id, incluir_inactivos })
 
         celdas[fecha] = { c: cod, n: aj?.notas || null };
         if (conRetardo) { celdas[fecha].r = minRet; }   // minutos de retardo del día
+        // Checo entrada pero nunca salida: no se sabe si completo la jornada.
+        // Nomina necesita verlo antes de pagar el dia como normal.
+        if (reg && reg.hora_entrada && !reg.hora_salida) celdas[fecha].ss = 1;
         // Rastro del cambio manual. "Cómo estaba" es el código que el sistema
         // había calculado, no la etiqueta "automático": es lo que hace falta
         // para entender de qué se corrigió la celda. Se prefiere el del
@@ -846,6 +870,9 @@ async function construirMatriz({ desde, hasta, empleado_id, incluir_inactivos })
         puesto: e.puesto,
         departamento: e.departamento,
         fecha_ingreso: e.fecha_ingreso,
+        fecha_baja: e.fecha_baja,
+        activo: e.activo,
+        sin_horario: !e.horario_semanal && !e.hora_entrada_esperada,
         bono_puntualidad: e.bono_puntualidad,
         celdas,
         totales,
@@ -922,7 +949,8 @@ const CODIGOS_QUE_TUMBAN = {
   'FJ' : 'falta justificada',
   'V'  : 'vacaciones',
   'In' : 'incapacidad',
-  'P/G': 'permiso con goce'
+  'P/G': 'permiso con goce',
+  'P/S': 'permiso sin goce'
 };
 
 // ══ PUNTOS DE PUNTUALIDAD · BONO EXTRA SEMANAL ════════════════
@@ -1313,6 +1341,532 @@ router.put('/bono-masivo', permiso('bonoPuntualidad', NIVEL.EDITAR), async (req,
     res.json({ ok: true, actualizados: ids.length, bono_puntualidad: monto });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ══ INCIDENCIAS PARA NÓMINA ══════════════════════════════════
+//
+// Lo que Recursos Humanos le entrega al departamento de Nóminas para procesar
+// la quincena. No es la cuadrícula de asistencia: es un renglón por persona con
+// las cifras que se capturan en el sistema de nómina.
+//
+// La única garantía de que esas cifras están bien es que CUADREN contra el
+// calendario. Cada día del periodo cae en exactamente una bolsa:
+//
+//   días del periodo = no aplicables + futuros + pagados + no pagados + IMSS
+//
+// Si un renglón no cuadra, el reporte lo marca y no se deja cerrar. Sin ese
+// amarre el reporte es una sugerencia; con él es un documento que se puede
+// auditar meses después.
+
+const COD_INC = ['A', 'F', 'FJ', 'V', 'P/G', 'P/S', 'In', 'D'];
+
+const COD_NOMBRE = {
+  A:'Asistencia', F:'Falta', FJ:'Falta justificada', V:'Vacaciones',
+  'P/G':'Permiso con goce', 'P/S':'Permiso sin goce',
+  In:'Incapacidad', D:'Descanso'
+};
+
+// Cómo trata nómina cada código. Vive en configuración y no aquí dentro porque
+// es política de la empresa, no una regla del sistema: cuando cambie se cambia
+// en pantalla y el reporte se recalcula, sin tocar el código.
+//
+//   paga     la empresa lo paga. Incluye el descanso: es el séptimo día, y por
+//            eso una quincena limpia da 16 días a pagar y no 14.
+//   no_paga  se descuenta del sueldo
+//   imss     lo cubre el IMSS; la empresa no paga esos días
+const POLITICA_INC_DEF = {
+  trato: { A:'paga', D:'paga', V:'paga', 'P/G':'paga',
+           FJ:'no_paga', 'P/S':'no_paga', F:'no_paga', In:'imss' },
+  retardos_por_falta: 0,   // 0 = los retardos solo se informan, no descuentan
+  toda_plantilla: true     // se manda a todos: si solo van las incidencias,
+                           // Nóminas no tiene cómo saber si se omitió a alguien
+};
+
+async function politicaInc() {
+  const pol = { trato: { ...POLITICA_INC_DEF.trato },
+                retardos_por_falta: POLITICA_INC_DEF.retardos_por_falta,
+                toda_plantilla: POLITICA_INC_DEF.toda_plantilla };
+  try {
+    const r = await query(`SELECT valor FROM fac_config WHERE clave='incidencias_politica'`);
+    if (!r.rows.length) return pol;
+    const g = JSON.parse(r.rows[0].valor || '{}');
+    COD_INC.forEach(c => {
+      if (['paga', 'no_paga', 'imss'].includes(g?.trato?.[c])) pol.trato[c] = g.trato[c];
+    });
+    pol.retardos_por_falta = Math.max(0, Math.min(99, parseInt(g.retardos_por_falta) || 0));
+    pol.toda_plantilla = g.toda_plantilla !== false;
+  } catch (e) { /* configuración ilegible: se usa la de siempre */ }
+  return pol;
+}
+
+// Consultas de apoyo que dependen de columnas agregadas por otra migración. Si
+// el deploy va a medias devuelven vacío en lugar de tumbar todo el reporte.
+async function pendientesDeAutorizar(desde, hasta) {
+  try {
+    const r = await query(`
+      SELECT s.id, e.nombre, COALESCE(s.tipo,'vacaciones') AS tipo, s.estatus,
+             TO_CHAR(s.fecha_inicio,'YYYY-MM-DD') AS fecha_inicio,
+             TO_CHAR(s.fecha_fin,'YYYY-MM-DD')    AS fecha_fin
+        FROM fac_vacaciones_solicitudes s
+        JOIN fac_empleados e ON e.id = s.empleado_id
+       WHERE s.estatus IN ('pendiente','vo_bo')
+         AND daterange(s.fecha_inicio, s.fecha_fin, '[]') && daterange($1::date, $2::date, '[]')
+       ORDER BY s.fecha_inicio, e.nombre`, [desde, hasta]);
+    return r.rows;
+  } catch (e) { return []; }
+}
+
+async function incapacidadesSinFolio(desde, hasta) {
+  try {
+    const r = await query(`
+      SELECT s.id, e.nombre,
+             TO_CHAR(s.fecha_inicio,'YYYY-MM-DD') AS fecha_inicio,
+             TO_CHAR(s.fecha_fin,'YYYY-MM-DD')    AS fecha_fin
+        FROM fac_vacaciones_solicitudes s
+        JOIN fac_empleados e ON e.id = s.empleado_id
+       WHERE s.estatus = 'aprobada'
+         AND COALESCE(s.tipo,'vacaciones') = 'incapacidad'
+         AND NULLIF(TRIM(COALESCE(s.folio_imss,'')),'') IS NULL
+         AND daterange(s.fecha_inicio, s.fecha_fin, '[]') && daterange($1::date, $2::date, '[]')
+       ORDER BY s.fecha_inicio, e.nombre`, [desde, hasta]);
+    return r.rows;
+  } catch (e) { return []; }
+}
+
+async function armarIncidencias({ desde, hasta }) {
+  const pol = await politicaInc();
+  // Se pide la plantilla completa, inactivos incluidos: a quien se dio de baja a
+  // media quincena hay que pagarle los días que trabajó, y si no aparece en el
+  // reporte, Nóminas no se lo paga.
+  const m = await construirMatriz({ desde, hasta, incluir_inactivos: 'true' });
+  const hoyISO = new Date().toISOString().slice(0, 10);
+  const diasPeriodo = m.dias.length;
+
+  // De los inactivos solo interesan los que tuvieron algo que ver con el
+  // periodo. Quien lleva meses fuera no debe engordar el reporte.
+  const tocaElPeriodo = (e) => {
+    if (e.activo) return true;
+    if (e.fecha_baja && e.fecha_baja >= desde) return true;
+    return m.dias.some(f => {
+      const c = e.celdas[f];
+      return c && (c.c === 'A' || c.r);
+    });
+  };
+
+  const bolsaDe = (cod) => pol.trato[cod] || 'paga';
+
+  const filas = m.empleados.filter(tocaElPeriodo).map(e => {
+    const cod = {};
+    COD_INC.forEach(c => { cod[c] = 0; });
+    let na = 0, futuros = 0, otros = 0, retardos = 0, minutosRetardo = 0, sinSalida = 0;
+    const otrosCodigos = new Set();
+    const eventos = [];
+
+    m.dias.forEach(f => {
+      const c = e.celdas[f] || {};
+      const k = c.c || '';
+      if (c.ss) sinSalida++;
+
+      if (!k) {
+        if (fueraDeRelacion(e, f)) na++;
+        else futuros++;          // el periodo todavía no termina
+        return;
+      }
+      if (COD_INC.includes(k)) cod[k]++;
+      else { otros++; otrosCodigos.add(k); }
+
+      if (k === 'A' && c.r) { retardos++; minutosRetardo += c.r; }
+
+      // El detalle solo lleva lo que Nóminas tiene que revisar: un día de
+      // asistencia normal no es una incidencia.
+      const esIncidencia = k !== 'D' && k !== 'A';
+      if (esIncidencia || c.r || c.ss) {
+        eventos.push({
+          fecha: f,
+          codigo: k,
+          codigo_nombre: COD_NOMBRE[k] || k,
+          minutos_retardo: c.r || 0,
+          sin_salida: !!c.ss,
+          nota: c.n || null,
+          codigo_antes: c.a || null,
+          lo_cambio: c.qp || null,
+          cambiado_en: c.cf || null,
+          bolsa: esIncidencia ? bolsaDe(k) : null
+        });
+      }
+    });
+
+    let diasPagar = 0, diasNoPagar = 0, diasImss = 0;
+    COD_INC.forEach(c => {
+      const b = bolsaDe(c);
+      if (b === 'paga')         diasPagar   += cod[c];
+      else if (b === 'no_paga') diasNoPagar += cod[c];
+      else                      diasImss    += cod[c];
+    });
+
+    const faltasPorRetardo = pol.retardos_por_falta > 0
+      ? Math.floor(retardos / pol.retardos_por_falta) : 0;
+
+    const suma = COD_INC.reduce((a, c) => a + cod[c], 0) + na + futuros + otros;
+    const cuadra = suma === diasPeriodo && otros === 0;
+
+    // El bono se dice solo como SÍ/NO. El importe es dato de sueldo y vive en su
+    // propio módulo con su propio permiso: aquí no tiene por qué aparecer.
+    const tumban = COD_INC.filter(c => CODIGOS_QUE_TUMBAN[c] && cod[c] > 0);
+    const ganaBono = cod.A > 0 && retardos === 0 && tumban.length === 0;
+
+    const avisos = [];
+    if (!cuadra) avisos.push(otros
+      ? `Tiene códigos que el reporte no sabe tratar: ${[...otrosCodigos].join(', ')}`
+      : `Los días no suman el periodo (${suma} de ${diasPeriodo})`);
+    const faltasSinNota = eventos.filter(x => x.codigo === 'F' && !x.nota).length;
+    if (faltasSinNota) avisos.push(`${faltasSinNota} falta(s) sin justificación capturada`);
+    if (sinSalida) avisos.push(`${sinSalida} día(s) con entrada pero sin salida`);
+    if (!e.numero_colaborador) avisos.push('Sin número de colaborador');
+    if (e.sin_horario) avisos.push('Sin horario configurado: sus descansos y faltas son suposición');
+    if (!e.activo && !e.fecha_baja) avisos.push('Inactivo sin fecha de baja capturada');
+
+    return {
+      empleado_id: e.empleado_id,
+      numero_colaborador: e.numero_colaborador,
+      nombre: e.nombre,
+      puesto: e.puesto,
+      departamento: e.departamento,
+      fecha_ingreso: e.fecha_ingreso,
+      fecha_baja: e.fecha_baja,
+      activo: !!e.activo,
+      alta_en_periodo: !!(e.fecha_ingreso && e.fecha_ingreso >= desde && e.fecha_ingreso <= hasta),
+      baja_en_periodo: !!(e.fecha_baja && e.fecha_baja >= desde && e.fecha_baja <= hasta),
+      dias_periodo: diasPeriodo,
+      codigos: cod,
+      na, futuros, otros,
+      retardos, minutos_retardo: minutosRetardo, faltas_por_retardo: faltasPorRetardo,
+      sin_salida: sinSalida,
+      dias_pagar: diasPagar,
+      dias_no_pagar: diasNoPagar,
+      dias_imss: diasImss,
+      dias_descontar: diasNoPagar + faltasPorRetardo,
+      gana_bono: ganaBono,
+      bono_tumbado_por: tumban.map(c => COD_NOMBRE[c]),
+      suma, cuadra,
+      avisos,
+      eventos
+    };
+  });
+
+  // ── El semáforo ──
+  // Rojo es "no lo mandes": son cosas que cambiarían las cifras ya capturadas.
+  // Amarillo es "revísalo": no invalida el reporte, pero hay que saberlo.
+  const rojas = [], amarillas = [];
+
+  const pend = await pendientesDeAutorizar(desde, hasta);
+  if (pend.length) rojas.push({
+    clave: 'solicitudes_sin_autorizar',
+    titulo: `${pend.length} solicitud(es) de este periodo siguen sin autorizar`,
+    detalle: 'Si se aprueban después, los días que Nóminas ya capturó quedan mal.',
+    items: pend.map(s => `${s.nombre} · ${s.tipo.replace(/_/g, ' ')} · ${s.fecha_inicio} a ${s.fecha_fin} (${s.estatus === 'vo_bo' ? 'espera a RH' : 'espera al jefe'})`)
+  });
+
+  const sinFolio = await incapacidadesSinFolio(desde, hasta);
+  if (sinFolio.length) rojas.push({
+    clave: 'incapacidad_sin_folio',
+    titulo: `${sinFolio.length} incapacidad(es) sin folio del IMSS`,
+    detalle: 'Nóminas necesita el folio y el ramo para el trámite ante el IMSS.',
+    items: sinFolio.map(s => `${s.nombre} · ${s.fecha_inicio} a ${s.fecha_fin}`)
+  });
+
+  const noCuadran = filas.filter(f => !f.cuadra);
+  if (noCuadran.length) rojas.push({
+    clave: 'no_cuadra',
+    titulo: `${noCuadran.length} colaborador(es) con días que no cuadran`,
+    detalle: `Cada quien debe sumar ${diasPeriodo} días entre pagados, no pagados, IMSS y no aplicables.`,
+    items: noCuadran.map(f => `${f.nombre} · ${f.avisos[0] || 'revisar'}`)
+  });
+
+  const conFaltasSinNota = filas.filter(f => f.eventos.some(x => x.codigo === 'F' && !x.nota));
+  if (conFaltasSinNota.length) rojas.push({
+    clave: 'faltas_sin_nota',
+    titulo: `${conFaltasSinNota.reduce((a, f) => a + f.eventos.filter(x => x.codigo === 'F' && !x.nota).length, 0)} falta(s) sin justificación capturada`,
+    detalle: 'Son días que se van a descontar. Conviene que quede escrito por qué.',
+    items: conFaltasSinNota.map(f => `${f.nombre} · ${f.eventos.filter(x => x.codigo === 'F' && !x.nota).map(x => x.fecha).join(', ')}`)
+  });
+
+  const conFuturos = filas.filter(f => f.futuros > 0);
+  if (conFuturos.length) amarillas.push({
+    clave: 'periodo_abierto',
+    titulo: 'El periodo todavía no termina',
+    detalle: `Hay días posteriores a hoy (${hoyISO}) sin registro. No cuentan como falta, pero las cifras van a cambiar.`,
+    items: []
+  });
+
+  const conSinSalida = filas.filter(f => f.sin_salida > 0);
+  if (conSinSalida.length) amarillas.push({
+    clave: 'sin_salida',
+    titulo: `${conSinSalida.reduce((a, f) => a + f.sin_salida, 0)} día(s) con entrada pero sin salida`,
+    detalle: 'No se sabe si completó la jornada.',
+    items: conSinSalida.map(f => `${f.nombre} · ${f.sin_salida} día(s)`)
+  });
+
+  const sinHorario = filas.filter(f => f.avisos.some(a => a.startsWith('Sin horario')));
+  if (sinHorario.length) amarillas.push({
+    clave: 'sin_horario',
+    titulo: `${sinHorario.length} colaborador(es) sin horario configurado`,
+    detalle: 'Sin horario, lo que el sistema llama descanso o falta es una suposición.',
+    items: sinHorario.map(f => f.nombre)
+  });
+
+  const movimientos = filas.filter(f => f.alta_en_periodo || f.baja_en_periodo);
+  if (movimientos.length) amarillas.push({
+    clave: 'altas_bajas',
+    titulo: `${movimientos.length} alta(s) o baja(s) dentro del periodo`,
+    detalle: 'Se les pagan días proporcionales; los días fuera de la relación laboral van como "no aplica".',
+    items: movimientos.map(f => `${f.nombre} · ${f.alta_en_periodo ? 'alta ' + f.fecha_ingreso : ''}${f.alta_en_periodo && f.baja_en_periodo ? ' · ' : ''}${f.baja_en_periodo ? 'baja ' + f.fecha_baja : ''} · ${f.na} día(s) no aplicables`)
+  });
+
+  const sinNumero = filas.filter(f => !f.numero_colaborador);
+  if (sinNumero.length) amarillas.push({
+    clave: 'sin_numero',
+    titulo: `${sinNumero.length} colaborador(es) sin número`,
+    detalle: 'Nóminas captura por número de colaborador; sin él tiene que buscarlo por nombre.',
+    items: sinNumero.map(f => f.nombre)
+  });
+
+  const inactivosSinBaja = filas.filter(f => !f.activo && !f.fecha_baja);
+  if (inactivosSinBaja.length) amarillas.push({
+    clave: 'inactivo_sin_baja',
+    titulo: `${inactivosSinBaja.length} inactivo(s) sin fecha de baja`,
+    detalle: 'Sin fecha de baja, el sistema no sabe desde cuándo dejar de contarle días.',
+    items: inactivosSinBaja.map(f => f.nombre)
+  });
+
+  // ── Qué quincena de nómina es este periodo ──
+  let quincena = null;
+  try {
+    const q = await query(`
+      SELECT quincena, estatus, notas FROM fac_nomina_quincenas
+       WHERE fecha_inicio = $1::date AND fecha_fin = $2::date LIMIT 1`, [desde, hasta]);
+    quincena = q.rows[0] || null;
+  } catch (e) { quincena = null; }
+
+  const totales = {
+    colaboradores: filas.length,
+    dias_periodo: diasPeriodo,
+    con_incidencias: filas.filter(f =>
+      f.codigos.F || f.codigos.FJ || f.codigos.V || f.codigos['P/G'] ||
+      f.codigos['P/S'] || f.codigos.In || f.retardos).length,
+    dias_pagar:    filas.reduce((a, f) => a + f.dias_pagar, 0),
+    dias_descontar: filas.reduce((a, f) => a + f.dias_descontar, 0),
+    dias_imss:     filas.reduce((a, f) => a + f.dias_imss, 0),
+    retardos:      filas.reduce((a, f) => a + f.retardos, 0),
+    minutos_retardo: filas.reduce((a, f) => a + f.minutos_retardo, 0),
+    ganan_bono:    filas.filter(f => f.gana_bono).length,
+    cuadran:       filas.filter(f => f.cuadra).length
+  };
+  COD_INC.forEach(c => { totales[c] = filas.reduce((a, f) => a + f.codigos[c], 0); });
+
+  return {
+    desde, hasta, dias: m.dias, dias_periodo: diasPeriodo, generado_en: new Date().toISOString(),
+    quincena, politica: pol, codigos: COD_NOMBRE,
+    filas, totales,
+    alertas: { rojas, amarillas, puede_cerrar: rojas.length === 0 },
+    incidencias_nomina: m.incidencias_nomina || []
+  };
+}
+
+// Qué cambió respecto a lo que ya se le mandó a Nóminas. Es la razón de ser del
+// folio: si alguien corrige una celda después del envío, aquí sale el
+// complemento en lugar de que las dos áreas discutan números distintos.
+function diferenciasContraEnvio(filas, snapshot) {
+  const antes = new Map((snapshot?.filas || []).map(f => [f.empleado_id, f]));
+  const cambios = [];
+  filas.forEach(f => {
+    const a = antes.get(f.empleado_id);
+    if (!a) { cambios.push({ nombre: f.nombre, campo: 'Alta en el reporte', antes: '—', ahora: 'aparece ahora' }); return; }
+    [['dias_pagar', 'Días a pagar'], ['dias_descontar', 'Días a descontar'],
+     ['dias_imss', 'Días IMSS'], ['retardos', 'Retardos']].forEach(([k, et]) => {
+      if (Number(a[k]) !== Number(f[k]))
+        cambios.push({ nombre: f.nombre, campo: et, antes: a[k], ahora: f[k] });
+    });
+  });
+  antes.forEach((a, id) => {
+    if (!filas.some(f => f.empleado_id === id))
+      cambios.push({ nombre: a.nombre, campo: 'Salió del reporte', antes: 'aparecía', ahora: '—' });
+  });
+  return cambios;
+}
+
+const verIncidencias   = permiso('incidenciasNomina', NIVEL.VER);
+const cerrarIncidencias = permiso('incidenciasNomina', NIVEL.EDITAR);
+
+router.get('/incidencias', verIncidencias, async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    if (!desde || !hasta) return res.status(400).json({ error: 'Se requieren desde y hasta (YYYY-MM-DD).' });
+    if (desde > hasta) return res.status(400).json({ error: '"Desde" debe ser menor o igual a "hasta".' });
+
+    const d = await armarIncidencias({ desde, hasta });
+
+    // ¿Ya se envió este periodo?
+    try {
+      const e = await query(`
+        SELECT folio, TO_CHAR(enviado_en,'YYYY-MM-DD HH24:MI') AS enviado_en,
+               enviado_por_nombre, notas, snapshot
+          FROM fac_incidencias_envios
+         WHERE desde = $1::date AND hasta = $2::date
+         ORDER BY enviado_en DESC LIMIT 1`, [desde, hasta]);
+      if (e.rows.length) {
+        const env = e.rows[0];
+        d.envio = {
+          folio: env.folio, enviado_en: env.enviado_en,
+          enviado_por: env.enviado_por_nombre, notas: env.notas,
+          cambios: diferenciasContraEnvio(d.filas, env.snapshot)
+        };
+      } else d.envio = null;
+    } catch (e) { d.envio = null; }
+
+    res.json(d);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/incidencias/politica', verIncidencias, async (req, res) => {
+  try {
+    res.json({ politica: await politicaInc(), codigos: COD_NOMBRE,
+               default: POLITICA_INC_DEF });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/incidencias/politica', cerrarIncidencias, async (req, res) => {
+  try {
+    const trato = {};
+    COD_INC.forEach(c => {
+      const v = req.body?.trato?.[c];
+      trato[c] = ['paga', 'no_paga', 'imss'].includes(v) ? v : POLITICA_INC_DEF.trato[c];
+    });
+    const pol = {
+      trato,
+      retardos_por_falta: Math.max(0, Math.min(99, parseInt(req.body.retardos_por_falta) || 0)),
+      toda_plantilla: req.body.toda_plantilla !== false
+    };
+    await query(`
+      INSERT INTO fac_config(clave, valor, actualizado_por_nombre, actualizado_en)
+      VALUES('incidencias_politica', $1, $2, NOW())
+      ON CONFLICT (clave) DO UPDATE
+        SET valor = $1, actualizado_por_nombre = $2, actualizado_en = NOW()`,
+      [JSON.stringify(pol), req.usuario?.nombre || null]);
+    res.json({ ok: true, politica: pol });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Cierre del periodo. Congela el reporte tal como se envió y le pone folio: a
+// partir de aquí, lo que Nóminas recibió ya no cambia aunque alguien corrija
+// una celda. Ese es el punto; si el documento pudiera cambiar solo, no serviría
+// para acreditar nada.
+router.post('/incidencias/cerrar', cerrarIncidencias, async (req, res) => {
+  try {
+    const { desde, hasta } = req.body;
+    if (!desde || !hasta) return res.status(400).json({ error: 'Se requieren desde y hasta.' });
+
+    const d = await armarIncidencias({ desde, hasta });
+    const motivo = (req.body.motivo_forzado || '').trim();
+    if (d.alertas.rojas.length) {
+      // Se puede forzar, pero no a la ligera: hay que escribir por qué, y eso
+      // queda guardado junto al folio.
+      if (!req.body.forzar)
+        return res.status(400).json({
+          error: 'Hay pendientes que cambiarían las cifras. Resuélvelos o indica por qué se envía así.',
+          rojas: d.alertas.rojas
+        });
+      if (motivo.length < 10)
+        return res.status(400).json({ error: 'Para enviarlo con pendientes hay que explicar por qué (mínimo 10 caracteres).' });
+    }
+
+    const anio = String(desde).slice(0, 4);
+    const notas = (req.body.notas || '').trim() || null;
+    const quien = req.usuario?.nombre || null;
+    const payload = { ...d };
+    delete payload.envio;
+
+    // El folio se arma dentro de un reintento porque dos personas podrían
+    // cerrar al mismo tiempo y pelearse el consecutivo.
+    let fila = null, intento = 0;
+    while (!fila && intento++ < 25) {
+      const n = await query(
+        `SELECT COUNT(*)::int AS n FROM fac_incidencias_envios WHERE folio LIKE $1`,
+        [`INC-${anio}-%`]);
+      const folio = `INC-${anio}-${String(n.rows[0].n + intento).padStart(3, '0')}`;
+      try {
+        const r = await query(`
+          INSERT INTO fac_incidencias_envios
+            (folio, desde, hasta, quincena, snapshot, politica, totales,
+             forzado, motivo_forzado, notas, enviado_por, enviado_por_nombre)
+          VALUES ($1,$2::date,$3::date,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+          RETURNING folio, TO_CHAR(enviado_en,'YYYY-MM-DD HH24:MI') AS enviado_en`,
+          [folio, desde, hasta, d.quincena?.quincena || null,
+           JSON.stringify(payload), JSON.stringify(d.politica), JSON.stringify(d.totales),
+           !!d.alertas.rojas.length, motivo || null, notas,
+           req.usuario?.id || null, quien]);
+        fila = r.rows[0];
+      } catch (e) {
+        if (!/duplicate key|unique/i.test(e.message)) throw e;
+      }
+    }
+    if (!fila) return res.status(500).json({ error: 'No se pudo asignar folio. Intenta de nuevo.' });
+
+    res.status(201).json({ ok: true, folio: fila.folio, enviado_en: fila.enviado_en,
+                           con_pendientes: !!d.alertas.rojas.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/incidencias/envios', verIncidencias, async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT folio, TO_CHAR(desde,'YYYY-MM-DD') AS desde, TO_CHAR(hasta,'YYYY-MM-DD') AS hasta,
+             quincena, forzado, motivo_forzado, notas, enviado_por_nombre,
+             TO_CHAR(enviado_en,'YYYY-MM-DD HH24:MI') AS enviado_en,
+             totales
+        FROM fac_incidencias_envios
+       ORDER BY enviado_en DESC LIMIT 60`);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/incidencias/envios/:folio', verIncidencias, async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT folio, TO_CHAR(desde,'YYYY-MM-DD') AS desde, TO_CHAR(hasta,'YYYY-MM-DD') AS hasta,
+             quincena, forzado, motivo_forzado, notas, enviado_por_nombre,
+             TO_CHAR(enviado_en,'YYYY-MM-DD HH24:MI') AS enviado_en, snapshot
+        FROM fac_incidencias_envios WHERE folio = $1`, [req.params.folio]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Folio no encontrado.' });
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Envíos del reporte de incidencias a Nómina. Guarda el reporte completo tal
+// como se mandó: es un documento que salió del área, y tiene que poder
+// reconstruirse igual meses después aunque las celdas hayan cambiado.
+(async () => {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS fac_incidencias_envios (
+        id SERIAL PRIMARY KEY,
+        folio TEXT UNIQUE NOT NULL,
+        desde DATE NOT NULL,
+        hasta DATE NOT NULL,
+        quincena TEXT,
+        snapshot JSONB,
+        politica JSONB,
+        totales JSONB,
+        forzado BOOLEAN DEFAULT FALSE,
+        motivo_forzado TEXT,
+        notas TEXT,
+        enviado_por INT,
+        enviado_por_nombre TEXT,
+        enviado_en TIMESTAMP DEFAULT NOW()
+      )`);
+    await query(`CREATE INDEX IF NOT EXISTS ix_inc_envios_periodo
+                   ON fac_incidencias_envios(desde, hasta)`);
+  } catch (e) { console.warn('Migración envíos de incidencias:', e.message); }
+})();
 
 // GET /api/checador/productividad — resumen por colaborador
 // Calcula: dias laborables, horas esperadas, horas laboradas, retardos, incidencias, % productividad
