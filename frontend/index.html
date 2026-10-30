@@ -19598,6 +19598,31 @@ function badgeSolicitudVac(s) {
     <div style="font-size:10px;color:#166534;margin-top:2px">firmó ${s.vobo_nombre || 'su jefe'}</div>`;
 }
 
+// Ya tiene el visto bueno y solo falta la autorización en firme.
+function vacPorAutorizar(s) {
+  return !!s && ['pendiente', 'vo_bo'].includes(s.estatus) && !vacEsperaFirma(s);
+}
+
+// Autorizar sin salir del expediente. Es donde se acaba mirando cuando una
+// solicitud no avanza, y tener que ir a buscar la bandeja hace pensar que no
+// aparece. El backend sigue decidiendo: nunca la propia, y hace falta nivel
+// Editar en Vacaciones.
+async function autorizarDesdeExpediente(id, empId) {
+  const e = window._vacEmp || {};
+  const s = (e.solicitudes || []).find(x => x.id === id) || {};
+  if (!await confirm2(
+      `¿Autorizar las vacaciones de ${e.nombre || 'este colaborador'}?`
+      + String.fromCharCode(10) + String.fromCharCode(10)
+      + `${fmtDate(s.fecha_inicio)} al ${fmtDate(s.fecha_fin)} · ${s.dias_solicitados} días`
+      + String.fromCharCode(10) + String.fromCharCode(10)
+      + 'A partir de aquí la asistencia dejará de contarle falta en esos días.')) return;
+  try {
+    await api(`/vacaciones/solicitudes/${id}/autorizar`, { method: 'PATCH', body: JSON.stringify({}) });
+    toast('Solicitud autorizada.');
+    openVacEmpleado(empId);
+  } catch (err) { toast(err.message, 'err'); }
+}
+
 // Desatorar desde el expediente. El backend decide si quien lo pide puede:
 // el jefe directo siempre, y Recursos Humanos con nivel Administrar.
 async function firmarDesdeExpediente(id, empId) {
@@ -20434,6 +20459,10 @@ function renderVacEmpleado() {
           ${vacEsperaFirma(s) ? `<button class="btn bs bsm" style="font-size:10.5px"
              onclick="firmarDesdeExpediente(${s.id},${e.id})"
              title="Dar el visto bueno para que pase a autorización">✓ Visto bueno</button>` : ''}
+          ${vacPorAutorizar(s) && puede('vacaciones', NIVEL.EDITAR) !== false ? `
+            <button class="btn bsuc bsm" style="font-size:10.5px"
+             onclick="autorizarDesdeExpediente(${s.id},${e.id})"
+             title="Autorizar en firme. A partir de aquí la asistencia deja de contarle falta esos días.">✓ Autorizar</button>` : ''}
           <button class="btn bg bsm" onclick="imprimirSolicitudVac(${s.id})" title="Imprimir">🖨</button>
           ${canAdmin()?`<button class="btn bd bsm" onclick="eliminarSolicitudVac(${s.id},${e.id})" title="Eliminar">🗑</button>`:''}
         </td>
