@@ -178,14 +178,22 @@ router.get('/mi-info', async (req, res) => {
          FROM fac_vacaciones_periodos WHERE empleado_id=$1 ORDER BY num_periodo`, [empId]);
 
     const solicitudes = await query(
-      `SELECT id, tipo, estatus,
-              TO_CHAR(fecha_solicitud,'YYYY-MM-DD') AS fecha_solicitud,
-              TO_CHAR(fecha_inicio,'YYYY-MM-DD')    AS fecha_inicio,
-              TO_CHAR(fecha_fin,'YYYY-MM-DD')       AS fecha_fin,
-              TO_CHAR(fecha_regreso,'YYYY-MM-DD')   AS fecha_regreso,
-              dias_solicitados, observaciones
-         FROM fac_vacaciones_solicitudes
-        WHERE empleado_id=$1 ORDER BY fecha_inicio DESC, id DESC LIMIT 100`, [empId]);
+      `SELECT s.id, s.tipo, s.estatus,
+              TO_CHAR(s.fecha_solicitud,'YYYY-MM-DD') AS fecha_solicitud,
+              TO_CHAR(s.fecha_inicio,'YYYY-MM-DD')    AS fecha_inicio,
+              TO_CHAR(s.fecha_fin,'YYYY-MM-DD')       AS fecha_fin,
+              TO_CHAR(s.fecha_regreso,'YYYY-MM-DD')   AS fecha_regreso,
+              s.dias_solicitados, s.observaciones, s.nota_autorizacion,
+              -- Sin esto la pantalla etiqueta por estatus a secas y dice "con
+              -- visto bueno" de algo que nadie firmo.
+              (s.vobo_por IS NOT NULL) AS tiene_vobo,
+              vb.nombre AS vobo_nombre,
+              j.nombre  AS jefe_nombre
+         FROM fac_vacaciones_solicitudes s
+         JOIN fac_empleados e ON e.id = s.empleado_id
+         LEFT JOIN fac_usuarios  vb ON vb.id = s.vobo_por
+         LEFT JOIN fac_empleados j  ON j.id = e.jefe_id
+        WHERE s.empleado_id=$1 ORDER BY s.fecha_inicio DESC, s.id DESC LIMIT 100`, [empId]);
 
     const disponibles = periodos.rows.reduce((a, p) => a + parseFloat(p.pendientes || 0), 0);
     // Una solicitud pendiente ya descontó sus días del periodo. Hay que decirlo
@@ -897,7 +905,29 @@ router.get('/solicitudes-pendientes', autorizaVacaciones, async (req, res) => {
     const propias = mi ? await query(
       `SELECT COUNT(*)::int AS n FROM fac_vacaciones_solicitudes
         WHERE estatus IN ('pendiente','vo_bo') AND empleado_id=$1`, [mi]) : { rows: [{ n: 0 }] };
-    res.json({ solicitudes: r.rows, propias_en_espera: propias.rows[0].n });
+
+    // Lo que esta esperando a un jefe y por eso NO sale arriba. Se devuelve
+    // para que la pantalla lo diga: una bandeja vacia sin explicacion parece
+    // una falla, y lo que hay detras es un visto bueno que nadie ha dado.
+    // Incluye las que estan en 'vo_bo' sin firma: nacieron asi cuando el
+    // colaborador todavia no tenia jefe, y de lejos se ven ya autorizadas.
+    const esperando = await query(`
+      SELECT s.id, e.nombre, COALESCE(j.nombre, '—') AS jefe,
+             (j.id IS NULL) AS sin_jefe,
+             (s.estatus = 'vo_bo') AS parece_firmada,
+             s.dias_solicitados,
+             TO_CHAR(s.fecha_inicio,'YYYY-MM-DD') AS fecha_inicio,
+             TO_CHAR(s.fecha_fin,'YYYY-MM-DD')    AS fecha_fin
+        FROM fac_vacaciones_solicitudes s
+        JOIN fac_empleados e ON e.id = s.empleado_id
+        LEFT JOIN fac_empleados j ON j.id = e.jefe_id
+       WHERE s.estatus IN ('pendiente','vo_bo')
+         AND s.vobo_por IS NULL AND e.jefe_id IS NOT NULL
+         AND ($1::int IS NULL OR s.empleado_id <> $1::int)
+       ORDER BY j.nombre, s.fecha_inicio`, [mi]);
+
+    res.json({ solicitudes: r.rows, propias_en_espera: propias.rows[0].n,
+               esperan_jefe: esperando.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

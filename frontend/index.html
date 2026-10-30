@@ -19396,7 +19396,7 @@ async function misVacaciones() {
     ${d.solicitudes.length ? `<div class="mv-grid">
       ${d.solicitudes.map(x => {
         const futura = x.fecha_inicio > new Date().toISOString().slice(0,10);
-        const et = etiquetaEstatusVac(x.estatus);
+        const et = etiquetaEstatusVac(x.estatus, x);
         const ap = /aprob/i.test(x.estatus || '');
         return `<div class="mv-s">
           <div>
@@ -19407,7 +19407,12 @@ async function misVacaciones() {
           </div>
           <div><span class="gt-pill ${ap?'vig':/rechaz/i.test(x.estatus)?'can':'sin'}"
                      title="${et.ayuda}">${et.texto}</span></div>
-          ${x.nota_autorizacion && /rechaz/i.test(x.estatus||'')
+          ${!ap && !/rechaz/i.test(x.estatus||'') && x.tiene_vobo === false ? `
+            <div style="font-size:11.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;
+                 border-radius:8px;padding:6px 9px;line-height:1.45">
+              ⏳ Le toca firmarla a <strong>${x.jefe_nombre || 'tu jefe directo'}</strong>.
+              Hasta entonces no llega a Recursos Humanos.</div>` : ''}
+          ${x.nota_autorizacion && /rechaz/i.test(x.estatus || '')
             ? `<div style="font-size:11.5px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;
                  padding:6px 9px;color:#991b1b;line-height:1.45">${x.nota_autorizacion}</div>` : ''}
           <div class="mv-s-a">
@@ -19473,13 +19478,24 @@ function mvVerAgotados() {
 // 'vo_bo' es la clave que guarda la base, no algo que se le pueda enseñar a
 // nadie. Cada estatus se traduce a lo que el colaborador necesita entender:
 // de quién depende su solicitud ahora mismo.
-function etiquetaEstatusVac(e) {
+// El estatus por si solo no alcanza: hay solicitudes en 'vo_bo' que nadie
+// firmo. Nacen asi cuando el colaborador todavia no tiene jefe asignado, y la
+// migracion que rescato las pendientes viejas las dejo igual. Decirles "con
+// visto bueno" es justo lo que hace que nadie entienda por que no le llegan a
+// Recursos Humanos: su bandeja si mira la firma, y sin firma no las muestra.
+function etiquetaEstatusVac(e, s) {
   const v = String(e || 'pendiente');
+  const firmada = !s || s.tiene_vobo !== false;   // sin el dato, se cree al estatus
   if (/aprob/i.test(v))  return { texto: 'aprobada',  ayuda: 'Autorizada en firme.' };
   if (/rechaz/i.test(v)) return { texto: 'rechazada', ayuda: 'No fue autorizada. Revisa el motivo.' };
-  if (v === 'vo_bo')     return { texto: 'con visto bueno',
-                                  ayuda: 'Tu jefe ya dio el visto bueno. Falta la autorización de Recursos Humanos.' };
-  return { texto: 'pendiente', ayuda: 'Esperando el visto bueno de tu jefe directo.' };
+  if (v === 'vo_bo' && firmada)
+    return { texto: 'con visto bueno',
+             ayuda: (s && s.vobo_nombre ? s.vobo_nombre + ' ya dio' : 'Tu jefe ya dio')
+                    + ' el visto bueno. Falta la autorización de Recursos Humanos.' };
+  const quien = s && s.jefe_nombre ? s.jefe_nombre : 'tu jefe directo';
+  return { texto: 'esperando visto bueno',
+           ayuda: `Todavía no la firma nadie. Le toca a ${quien};`
+                  + ' hasta entonces no llega a Recursos Humanos.' };
 }
 
 // ══ VISTO BUENO DEL EQUIPO ══════════════════════════════════
@@ -19916,8 +19932,39 @@ function renderVacPorAutorizar(d) {
       tiene que revisarla${d.propias_en_espera!=1?'s':''} alguien más.
     </div>` : '';
 
+  // Lo que no sale aquí porque sigue esperando la firma de un jefe. Sin esto la
+  // bandeja vacía parece una falla del sistema, cuando lo que pasa es que nadie
+  // ha firmado. Las que están en 'vo_bo' sin firma son las que más confunden:
+  // en la pantalla del colaborador se veían como ya autorizadas.
+  const esp = d.esperan_jefe || [];
+  const porJefe = {};
+  esp.forEach(x => { (porJefe[x.jefe] = porJefe[x.jefe] || []).push(x); });
+  const avisoJefes = esp.length ? `
+    <div class="card" style="margin-bottom:12px;background:#fffbeb;border-color:#fde68a;
+         font-size:12.5px;color:#78350f;line-height:1.55">
+      <div style="font-weight:900;margin-bottom:5px">
+        ⏳ ${esp.length} solicitud${esp.length!=1?'es':''} no aparece${esp.length!=1?'n':''} aquí:
+        sigue${esp.length!=1?'n':''} esperando el visto bueno del jefe</div>
+      <div style="margin-bottom:7px">
+        No se muestran para no autorizarlas por encima de quien tiene que firmarlas primero.
+        ${esp.some(x => x.parece_firmada) ? `<strong>Ojo:</strong> ${
+          esp.filter(x => x.parece_firmada).length} de ellas se ven como "con visto bueno"
+          en la pantalla del colaborador aunque nadie las ha firmado — se capturaron
+          cuando todavía no tenía jefe asignado.` : ''}
+      </div>
+      ${Object.entries(porJefe).map(([jefe, xs]) => `
+        <div style="padding:3px 0">
+          <strong>${jefe}</strong> debe firmar ${xs.length}:
+          <span style="color:#92400e">${xs.map(x =>
+            `${x.nombre} (${fmtDate(x.fecha_inicio)})`).join(' · ')}</span>
+        </div>`).join('')}
+      <div style="margin-top:7px;font-size:11.5px">
+        Si alguien ya no puede firmarlas, con nivel Administrar en Vacaciones puedes
+        darles el visto bueno tú desde el expediente del colaborador.</div>
+    </div>` : '';
+
   if (!d.solicitudes.length) {
-    cont.innerHTML = nota + `
+    cont.innerHTML = nota + avisoJefes + `
       <div style="background:linear-gradient(160deg,#ecfdf5,#d1fae5);border:2px dashed #6ee7b7;
                   border-radius:18px;padding:44px 30px;text-align:center">
         <div style="font-size:54px;margin-bottom:10px">✅</div>
@@ -19931,7 +19978,7 @@ function renderVacPorAutorizar(d) {
   }
 
   const hoy = new Date().toISOString().slice(0,10);
-  cont.innerHTML = nota + `
+  cont.innerHTML = nota + avisoJefes + `
     <div class="card" style="margin-bottom:14px;background:linear-gradient(135deg,#0f766e,#14b8a6);color:#fff">
       <div style="font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.4px;opacity:.9">Esperando tu decisión</div>
       <div style="font-size:26px;font-weight:900;line-height:1.15">
