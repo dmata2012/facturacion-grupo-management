@@ -19574,6 +19574,45 @@ async function darVoBo(id) {
   } catch(e) { toast(e.message, 'err'); }
 }
 
+// ¿Esta solicitud sigue esperando la firma del jefe? Es la misma condición que
+// usa el backend: estatus pendiente, o vo_bo sin que nadie firmara. Lo segundo
+// pasa con las que se capturaron cuando el colaborador no tenía jefe asignado,
+// y es lo que hace que se vean autorizadas sin estarlo.
+function vacEsperaFirma(s) {
+  if (!s) return false;
+  if (!['pendiente', 'vo_bo'].includes(s.estatus)) return false;
+  return s.tiene_vobo === false;
+}
+
+// El estatus crudo no sirve para entender dónde está parada. Esto dice el paso.
+function badgeSolicitudVac(s) {
+  const e = String(s.estatus || '');
+  if (/aprob/i.test(e))
+    return `<span class="gt-pill vig">autorizada</span>`;
+  if (/rechaz/i.test(e))
+    return `<span class="gt-pill can" title="${(s.nota_autorizacion || '').replace(/"/g, '&quot;')}">rechazada</span>`;
+  if (vacEsperaFirma(s))
+    return `<span class="gt-pill sin" title="Nadie la ha firmado todavía. Hasta que se firme no llega a Recursos Humanos.">esperando visto bueno</span>
+      <div style="font-size:10px;color:#92400e;margin-top:2px">le toca a ${s.jefe_nombre || 'su jefe directo'}</div>`;
+  return `<span class="gt-pill sin" title="Ya tiene el visto bueno. Está en la bandeja de Recursos Humanos.">por autorizar</span>
+    <div style="font-size:10px;color:#166534;margin-top:2px">firmó ${s.vobo_nombre || 'su jefe'}</div>`;
+}
+
+// Desatorar desde el expediente. El backend decide si quien lo pide puede:
+// el jefe directo siempre, y Recursos Humanos con nivel Administrar.
+async function firmarDesdeExpediente(id, empId) {
+  if (!await confirm2(
+      '¿Dar el visto bueno a esta solicitud?' + String.fromCharCode(10) + String.fromCharCode(10)
+      + 'Pasa a la bandeja de autorización y tu nombre queda en el formato como'
+      + ' quien dio el visto bueno.')) return;
+  try {
+    await api(`/vacaciones/solicitudes/${id}/visto-bueno`, { method: 'PATCH', body: JSON.stringify({}) });
+    toast('Visto bueno registrado. Ya está en la bandeja de autorización.');
+    openVacEmpleado(empId);
+    if (typeof vacActualizarBadge === 'function') loadVacPorAutorizar?.();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
 function openMiSolicitud() {
   const d = window._mvInfo;
   const hoy = new Date().toISOString().slice(0,10);
@@ -20390,8 +20429,11 @@ function renderVacEmpleado() {
         <td style="text-align:right;font-weight:700">${parseFloat(s.dias_solicitados).toFixed(1)}</td>
         <td>${s.fecha_regreso?fmtDate(s.fecha_regreso):'—'}</td>
         <td style="font-size:11px">${s.periodos_aplicados||'—'}</td>
-        <td>${badgeEstatus(s.estatus)}</td>
+        <td>${badgeSolicitudVac(s)}</td>
         <td style="white-space:nowrap">
+          ${vacEsperaFirma(s) ? `<button class="btn bs bsm" style="font-size:10.5px"
+             onclick="firmarDesdeExpediente(${s.id},${e.id})"
+             title="Dar el visto bueno para que pase a autorización">✓ Visto bueno</button>` : ''}
           <button class="btn bg bsm" onclick="imprimirSolicitudVac(${s.id})" title="Imprimir">🖨</button>
           ${canAdmin()?`<button class="btn bd bsm" onclick="eliminarSolicitudVac(${s.id},${e.id})" title="Eliminar">🗑</button>`:''}
         </td>

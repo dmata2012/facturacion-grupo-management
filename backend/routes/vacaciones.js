@@ -333,8 +333,16 @@ router.get('/empleados/:id', verPlantilla, async (req, res) => {
       SELECT * FROM fac_vacaciones_periodos WHERE empleado_id=$1 ORDER BY num_periodo
     `, [req.params.id]);
 
+    // Con el estatus a secas no se distingue la solicitud que alguien firmo de
+    // la que nadie firmo, y de eso depende que llegue a Recursos Humanos.
     const solicitudes = await query(`
-      SELECT * FROM fac_vacaciones_solicitudes WHERE empleado_id=$1 ORDER BY fecha_solicitud DESC, id DESC
+      SELECT s.*, vb.nombre AS vobo_nombre, j.nombre AS jefe_nombre,
+             (s.vobo_por IS NOT NULL) AS tiene_vobo
+        FROM fac_vacaciones_solicitudes s
+        JOIN fac_empleados e ON e.id = s.empleado_id
+        LEFT JOIN fac_usuarios  vb ON vb.id = s.vobo_por
+        LEFT JOIN fac_empleados j  ON j.id = e.jefe_id
+       WHERE s.empleado_id=$1 ORDER BY s.fecha_solicitud DESC, s.id DESC
     `, [req.params.id]);
 
     const e = emp.rows[0];
