@@ -19411,7 +19411,11 @@ async function misVacaciones() {
             ? `<div style="font-size:11.5px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;
                  padding:6px 9px;color:#991b1b;line-height:1.45">${x.nota_autorizacion}</div>` : ''}
           <div class="mv-s-a">
-            ${ap ? `<button class="btn bs bsm" onclick="imprimirSolicitudVac(${x.id})">🖨 Imprimir</button>` : ''}
+            <button class="btn ${ap ? 'bs' : 'bo'} bsm" onclick="imprimirSolicitudVac(${x.id})"
+              title="${ap ? 'Formato autorizado, listo para archivar'
+                : /rechaz/i.test(x.estatus || '') ? 'La hoja sale marcada como RECHAZADA'
+                : 'Sale marcada como PENDIENTE DE AUTORIZAR, con el nombre de quien tiene que firmarla'}"
+              >🖨 Imprimir</button>
             ${futura ? `<button class="btn bd bsm" onclick="cancelarMiSolicitud(${x.id})">✕ Cancelar</button>` : ''}
           </div>
         </div>`;
