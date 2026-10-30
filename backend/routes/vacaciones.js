@@ -962,9 +962,23 @@ router.get('/solicitudes-pendientes/conteo', async (req, res) => {
 // que una solicitud no se quede atorada cuando el jefe esta de vacaciones el
 // mismo. Quede quien quede, el nombre que se guarda es el de quien lo dio, y
 // ese es el que sale impreso.
+// Una solicitud espera la firma del jefe de dos formas distintas: la que nacio
+// en 'pendiente', y la que esta en 'vo_bo' pero sin que nadie firmara —asi nacen
+// las que se capturan cuando el colaborador todavia no tiene jefe, y asi las
+// dejo la migracion que rescato las pendientes viejas.
+//
+// Esta condicion tiene que ser LA MISMA en los tres lugares: lo que la bandeja
+// del jefe lista, lo que el puede firmar y lo que puede rechazar. Cuando solo
+// la lista la conocia, el jefe veia solicitudes que al firmarlas respondian
+// "ya no esta esperando visto bueno" y se quedaban atoradas: nadie las firmaba,
+// y la bandeja de Recursos Humanos --que exige firma-- no las veia jamas.
+const ESPERA_VOBO = `(estatus = 'pendiente' OR (estatus = 'vo_bo' AND vobo_por IS NULL))`;
+const esperaVoBo = (sol) =>
+  !!sol && !sol.vobo_por && ['pendiente', 'vo_bo'].includes(sol.estatus);
+
 async function puedeDarVoBo(req, solicitudId) {
   const r = await query(
-    `SELECT s.empleado_id, s.estatus, e.jefe_id, e.nombre
+    `SELECT s.empleado_id, s.estatus, s.vobo_por, e.jefe_id, e.nombre
        FROM fac_vacaciones_solicitudes s
        JOIN fac_empleados e ON e.id = s.empleado_id
       WHERE s.id = $1`, [solicitudId]);
@@ -1039,10 +1053,26 @@ router.patch('/solicitudes/:id/visto-bueno', async (req, res) => {
     const r = await query(
       `UPDATE fac_vacaciones_solicitudes
           SET estatus='vo_bo', vobo_por=$1, vobo_en=NOW(), vobo_nota=$2
-        WHERE id=$3 AND estatus='pendiente' RETURNING *`,
+        WHERE id=$3 AND ${ESPERA_VOBO} RETURNING *`,
       [req.usuario.id, (req.body.nota || '').trim() || null, req.params.id]);
-    if (!r.rows.length)
-      return res.status(400).json({ error: 'Esa solicitud ya no está esperando visto bueno.' });
+    if (!r.rows.length) {
+      // Se dice QUE paso, no solo que no se pudo: casi siempre es que alguien
+      // mas ya la firmo o ya se resolvio mientras tenia la pantalla abierta.
+      const q = await query(
+        `SELECT s.estatus, u.nombre AS quien,
+                TO_CHAR(s.vobo_en,'YYYY-MM-DD') AS cuando
+           FROM fac_vacaciones_solicitudes s
+           LEFT JOIN fac_usuarios u ON u.id = s.vobo_por
+          WHERE s.id = $1`, [req.params.id]);
+      const x = q.rows[0];
+      if (!x) return res.status(404).json({ error: 'Solicitud no encontrada.' });
+      if (x.estatus === 'vo_bo')
+        return res.status(400).json({ error:
+          `${x.quien || 'Alguien'} ya le dio el visto bueno${x.cuando ? ' el ' + x.cuando : ''}.` });
+      return res.status(400).json({ error:
+        `Esa solicitud ya está ${x.estatus === 'aprobada' ? 'autorizada' :
+          x.estatus === 'rechazada' ? 'rechazada' : x.estatus}.` });
+    }
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1093,7 +1123,9 @@ const MIN_MOTIVO = 5;
 // tiene que poder negarlo, si no el unico camino que se le deja es decir que si.
 async function puedeRechazar(req, res, next) {
   const vb = await puedeDarVoBo(req, req.params.id).catch(() => ({ ok: false }));
-  if (vb.ok && vb.sol && vb.sol.estatus === 'pendiente') return next();
+  // Mismo conjunto que puede firmar. Antes solo se miraba 'pendiente', asi que
+  // al jefe se le mostraba una solicitud que no podia ni aprobar ni rechazar.
+  if (vb.ok && esperaVoBo(vb.sol)) return next();
   return autorizaVacaciones(req, res, next);
 }
 
